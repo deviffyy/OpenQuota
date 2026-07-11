@@ -1,0 +1,2 @@
+{"timestamp":"2026-07-11T10:00:00Z","requestId":"request-placeholder","message":{"id":"message-placeholder","model":"claude-sonnet-4-6","usage":{"input_tokens":100,"output_tokens":20,"cache_read_input_tokens":50}}}
+{"timestamp":"2026-07-11T10:00:00Z","requestId":"request-placeholder","message":{"id":"message-placeholder","model":"claude-sonnet-4-6","usage":{"input_tokens":100,"output_tokens":20,"cache_read_input_tokens":50}}}

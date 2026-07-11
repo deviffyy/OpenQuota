@@ -1,0 +1,42 @@
+{
+  "name": "openquota",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.11.0",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 1420",
+    "build": "vite build",
+    "build:installer": "tauri build --bundles nsis",
+    "build:linux": "tauri build --bundles deb,appimage",
+    "check": "svelte-check --tsconfig ./tsconfig.app.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint eslint.config.js vite.config.ts src && prettier --check '.github/**/*.{yml,yaml}' '*.{json,md,js,ts}' 'src/**/*.{ts,svelte,css}' src-tauri/tauri.conf.json src-tauri/capabilities/default.json",
+    "format": "prettier --write '.github/**/*.{yml,yaml}' '*.{json,md,js,ts}' 'src/**/*.{ts,svelte,css}' src-tauri/tauri.conf.json src-tauri/capabilities/default.json",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.0",
+    "svelte": "^5.56.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "@sveltejs/vite-plugin-svelte": "^7.2.0",
+    "@tauri-apps/cli": "^2.11.4",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/svelte": "^5.4.2",
+    "@types/node": "^26.0.0",
+    "eslint": "^10.0.0",
+    "eslint-plugin-svelte": "^3.20.0",
+    "globals": "^17.0.0",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.9.0",
+    "prettier-plugin-svelte": "^3.4.0",
+    "svelte-check": "^4.3.0",
+    "typescript": "^6.0.0",
+    "typescript-eslint": "^8.63.0",
+    "vite": "^8.1.4",
+    "vitest": "^4.1.0"
+  }
+}

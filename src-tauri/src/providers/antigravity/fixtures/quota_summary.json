@@ -1,0 +1,17 @@
+{
+  "response": {
+    "groups": [
+      {
+        "buckets": [
+          { "bucketId": "3p-weekly", "remainingFraction": 0.5 },
+          {
+            "bucketId": "gemini-5h",
+            "remainingFraction": 0.8,
+            "resetTime": "2026-07-12T10:00:00Z"
+          },
+          { "bucketId": "unknown", "remainingFraction": 1.0 }
+        ]
+      }
+    ]
+  }
+}

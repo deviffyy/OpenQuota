@@ -1,0 +1,194 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-22.04]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            dbus-x11 \
+            gnome-keyring \
+            libayatana-appindicator3-dev \
+            libsecret-tools \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            patchelf \
+            weston \
+            xdotool \
+            xvfb
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.11.0
+          run_install: false
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Type check
+        run: pnpm check
+
+      - name: Test frontend
+        run: pnpm test
+
+      - name: Test Rust
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Test Linux Secret Service integration
+        if: runner.os == 'Linux'
+        run: |
+          dbus-run-session -- xvfb-run -a bash -euo pipefail -c '
+            original_home="${HOME}"
+            export RUSTUP_HOME="${RUSTUP_HOME:-${original_home}/.rustup}"
+            export HOME="${RUNNER_TEMP}/openquota-secret-service-home"
+            mkdir -p "${HOME}/.local/share/keyrings"
+            eval "$(printf "\n" | gnome-keyring-daemon --unlock --components=secrets)"
+            export OPENQUOTA_TEST_SECRET_SERVICE=1
+            cargo test --manifest-path src-tauri/Cargo.toml \
+              providers::credential_store::tests::linux_secret_service_round_trip_when_requested \
+              -- --exact --nocapture
+          '
+
+      - name: Build Linux packages
+        if: runner.os == 'Linux'
+        run: pnpm build:linux
+
+      - name: Smoke test Linux X11 fallback window
+        if: runner.os == 'Linux'
+        run: |
+          dbus-run-session -- xvfb-run -a bash -euo pipefail -c '
+            export HOME="${RUNNER_TEMP}/openquota-x11-home"
+            export XDG_CONFIG_HOME="${HOME}/xdg"
+            export XDG_CURRENT_DESKTOP="ubuntu:GNOME"
+            export XDG_SESSION_TYPE="x11"
+            export OPENQUOTA_LINUX_TRAY_HOST="unavailable"
+            mkdir -p "${HOME}"
+            src-tauri/target/release/openquota &
+            app_pid=$!
+            trap "kill ${app_pid} 2>/dev/null || true" EXIT
+            found=0
+            for _ in $(seq 1 30); do
+              if xdotool search --name "^OpenQuota$" >/dev/null 2>&1; then
+                found=1
+                break
+              fi
+              kill -0 "${app_pid}"
+              sleep 1
+            done
+            test "${found}" -eq 1
+          '
+
+      - name: Smoke test Linux Wayland startup
+        if: runner.os == 'Linux'
+        run: |
+          dbus-run-session -- bash -euo pipefail -c '
+            export HOME="${RUNNER_TEMP}/openquota-wayland-home"
+            export XDG_CONFIG_HOME="${HOME}/xdg"
+            export XDG_CURRENT_DESKTOP="KDE"
+            export XDG_RUNTIME_DIR="${RUNNER_TEMP}/openquota-wayland-runtime"
+            export XDG_SESSION_TYPE="wayland"
+            export OPENQUOTA_LINUX_TRAY_HOST="unavailable"
+            export GDK_BACKEND="wayland"
+            export WAYLAND_DISPLAY="openquota-wayland"
+            mkdir -p "${HOME}" "${XDG_RUNTIME_DIR}"
+            chmod 700 "${XDG_RUNTIME_DIR}"
+            weston --backend=headless-backend.so --socket="${WAYLAND_DISPLAY}" --idle-time=0 \
+              --log="${RUNNER_TEMP}/openquota-weston.log" &
+            weston_pid=$!
+            trap "kill ${app_pid:-} ${weston_pid} 2>/dev/null || true" EXIT
+            for _ in $(seq 1 20); do
+              test -S "${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}" && break
+              kill -0 "${weston_pid}"
+              sleep 1
+            done
+            test -S "${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}"
+            src-tauri/target/release/openquota &
+            app_pid=$!
+            sleep 8
+            kill -0 "${app_pid}"
+          '
+
+      - name: Build macOS DMG
+        if: runner.os == 'macOS'
+        run: pnpm tauri build --bundles dmg
+        env:
+          APPLE_SIGNING_IDENTITY: '-'
+
+      - name: Build Windows installer
+        if: runner.os == 'Windows'
+        run: pnpm build:installer
+
+      - name: Verify Windows GUI subsystem
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $binary = Resolve-Path 'src-tauri/target/release/openquota.exe'
+          $bytes = [System.IO.File]::ReadAllBytes($binary)
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+          $optionalHeader = $peOffset + 24
+          $subsystem = [BitConverter]::ToUInt16($bytes, $optionalHeader + 68)
+          if ($subsystem -ne 2) {
+            throw "Expected Windows GUI subsystem (2), found $subsystem."
+          }
+
+      - name: Upload Windows installer
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenQuota-Windows-installer
+          path: src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+
+      - name: Upload macOS DMG
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenQuota-macOS-DMG
+          path: src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+      - name: Upload Linux AppImage
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenQuota-Linux-AppImage
+          path: src-tauri/target/release/bundle/appimage/*.AppImage
+          if-no-files-found: error
+
+      - name: Upload Linux Debian package
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenQuota-Linux-deb
+          path: src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: error

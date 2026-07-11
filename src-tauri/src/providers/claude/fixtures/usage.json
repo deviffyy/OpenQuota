@@ -1,0 +1,13 @@
+{
+  "five_hour": { "utilization": 42.5, "resets_at": "2026-07-12T10:00:00Z" },
+  "seven_day": { "utilization": 10 },
+  "seven_day_sonnet": { "utilization": 25 },
+  "limits": [
+    {
+      "kind": "weekly_scoped",
+      "scope": { "model": { "display_name": "Fable" } },
+      "percent": 33
+    }
+  ],
+  "extra_usage": { "is_enabled": true, "used_credits": 1250, "monthly_limit": 5000 }
+}

@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+.svelte-kit/
+src-tauri/target/
+src-tauri/gen/
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local-only project material
+README.md
+docs/
+Example/

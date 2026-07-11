@@ -1,0 +1,42 @@
+[package]
+name = "openquota"
+version = "0.1.0"
+description = "Cross-platform AI quota tracker"
+authors = ["OpenQuota contributors"]
+edition = "2021"
+
+[lib]
+name = "openquota_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "form", "json", "rustls"] }
+rusqlite = { version = "0.40", default-features = false, features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2.5.1"
+tauri-plugin-global-shortcut = "2.3.2"
+tauri-plugin-notification = "2.3.3"
+tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
+tauri-plugin-updater = "2.10.1"
+tempfile = "3"
+thiserror = "2"
+tokio = { version = "1", features = ["sync", "time"] }
+walkdir = "2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3.7"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Security_Credentials"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+secret-service = { version = "5.1", default-features = false, features = ["rt-async-io-crypto-rust"] }
+zbus = "5.13"
