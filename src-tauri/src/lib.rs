@@ -21,6 +21,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, State, WebviewWindow, Window, WindowEvent,
 };
+#[cfg(not(target_os = "linux"))]
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_notification::{NotificationExt, PermissionState};
@@ -282,8 +283,8 @@ fn set_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
         let _ = app;
-        return xdg_autostart::set_enabled(enabled)
-            .map_err(|_| "Launch at login could not be updated.".to_owned());
+        xdg_autostart::set_enabled(enabled)
+            .map_err(|_| "Launch at login could not be updated.".to_owned())
     }
     #[cfg(not(target_os = "linux"))]
     {
