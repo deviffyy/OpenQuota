@@ -33,7 +33,7 @@ impl CodexClient {
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(8))
             .timeout(Duration::from_secs(15))
-            .user_agent("OpenQuota/0.1.0")
+            .user_agent(concat!("OpenQuota/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|_| CodexError::ConnectionFailed)?;
         Ok(Self { client })

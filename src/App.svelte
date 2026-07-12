@@ -26,6 +26,7 @@
   import { automaticUpdateDelay, UPDATE_CHECK_INTERVAL_MS } from './lib/updateSchedule';
 
   type Screen = 'dashboard' | 'customize' | 'settings' | `provider:${string}`;
+  const appVersion = import.meta.env.APP_VERSION;
   type ShareRow =
     | { kind: 'quota'; label: string; quota: QuotaWindow }
     | { kind: 'text'; label: string; value: string };
@@ -925,7 +926,7 @@
         disabled={anyRefreshing}
         aria-label="Refresh provider usage"
       >
-        <span>OpenQuota 0.1.0</span><small
+        <span>OpenQuota {appVersion}</span><small
           >{anyRefreshing ? 'Updating…' : nextUpdateLabel(latestRefresh)}</small
         >
       </button>
@@ -1024,7 +1025,7 @@
         >
         <OpenQuotaMark size={44} />
         <h1>OpenQuota</h1>
-        <p>Version 0.1.0</p>
+        <p>Version {appVersion}</p>
         <small>Private, local usage monitoring for your AI coding tools.</small>
       </div>
     </div>

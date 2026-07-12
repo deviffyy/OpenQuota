@@ -237,6 +237,7 @@ describe('OpenQuota dashboard', () => {
     expect(screen.getByRole('progressbar', { name: 'Weekly used' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Total Spend' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Usage Trend' })).toBeInTheDocument();
+    expect(screen.getByText('OpenQuota 0.1.1')).toBeInTheDocument();
   });
 
   it('renders Claude and Antigravity independently with provider-specific quota formats', async () => {
