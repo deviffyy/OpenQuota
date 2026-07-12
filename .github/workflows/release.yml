@@ -9,6 +9,11 @@ on:
         description: Existing release tag (for example v0.1.0)
         required: true
         type: string
+      verify_only:
+        description: Verify and publish an existing draft without rebuilding
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -23,6 +28,7 @@ env:
 jobs:
   validate:
     name: Validate release
+    if: ${{ !inputs.verify_only }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6
@@ -94,6 +100,7 @@ jobs:
   publish-artifacts:
     name: Build ${{ matrix.name }}
     needs: validate
+    if: ${{ always() && !inputs.verify_only && needs.validate.result == 'success' }}
     runs-on: ${{ matrix.platform }}
     strategy:
       fail-fast: false
@@ -173,7 +180,8 @@ jobs:
 
   publish-release:
     name: Verify and publish release
-    needs: publish-artifacts
+    needs: [validate, publish-artifacts]
+    if: ${{ always() && (inputs.verify_only || needs.publish-artifacts.result == 'success') }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v6
@@ -242,8 +250,15 @@ jobs:
 
       - name: Verify updater signatures with the bundled public key
         run: |
-          sudo apt-get update
-          sudo apt-get install -y minisign
+          curl --fail --location --silent --show-error \
+            --output /tmp/minisign.tar.gz \
+            https://github.com/jedisct1/minisign/releases/download/0.12/minisign-0.12-linux.tar.gz
+          echo '9a599b48ba6eb7b1e80f12f36b94ceca7c00b7a5173c95c3efc88d9822957e73  /tmp/minisign.tar.gz' \
+            | sha256sum --check --strict
+          tar --extract --gzip --file /tmp/minisign.tar.gz --directory /tmp \
+            minisign-linux/x86_64/minisign
+          sudo install -m 0755 /tmp/minisign-linux/x86_64/minisign \
+            /usr/local/bin/minisign
           node <<'NODE'
           const fs = require('node:fs');
           const config = require('./src-tauri/tauri.conf.json');
