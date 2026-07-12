@@ -323,9 +323,8 @@ describe('OpenQuota dashboard', () => {
   it('persists Total Spend metric and period choices', async () => {
     render(App);
     await screen.findByText('Plus');
-    await fireEvent.change(screen.getByLabelText('Total Spend Metric'), {
-      target: { value: 'tokens' },
-    });
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Total Spend Metric' }));
+    await fireEvent.click(screen.getByRole('option', { name: 'Tokens' }));
     await fireEvent.click(screen.getByRole('button', { name: '30 Days' }));
     await waitFor(() =>
       expect(mocks.invoke).toHaveBeenCalledWith(
@@ -371,9 +370,8 @@ describe('OpenQuota dashboard', () => {
     render(App);
     const totalSpend = await screen.findByRole('region', { name: 'Total Spend' });
     expect(within(totalSpend).getByText('No cost data for this period')).toBeInTheDocument();
-    await fireEvent.change(within(totalSpend).getByLabelText('Total Spend Metric'), {
-      target: { value: 'tokens' },
-    });
+    await fireEvent.click(within(totalSpend).getByRole('combobox', { name: 'Total Spend Metric' }));
+    await fireEvent.click(within(totalSpend).getByRole('option', { name: 'Tokens' }));
     expect(within(totalSpend).getByText('Codex')).toBeInTheDocument();
     expect(within(totalSpend).getByText('2.1')).toBeInTheDocument();
     expect(within(totalSpend).getByText('million')).toBeInTheDocument();
@@ -454,10 +452,10 @@ describe('OpenQuota dashboard', () => {
     await screen.findByText('Plus');
     await fireEvent.click(screen.getByLabelText('Open options'));
     await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    await fireEvent.change(screen.getByLabelText('Density'), { target: { value: 'compact' } });
-    await fireEvent.change(screen.getByLabelText('Time Format'), {
-      target: { value: 'twentyFourHour' },
-    });
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Density' }));
+    await fireEvent.click(screen.getByRole('option', { name: 'Compact' }));
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Time Format' }));
+    await fireEvent.click(screen.getByRole('option', { name: '24-hour' }));
     await waitFor(() =>
       expect(mocks.invoke).toHaveBeenCalledWith(
         'save_app_settings',
@@ -531,9 +529,8 @@ describe('OpenQuota dashboard', () => {
         settings: expect.objectContaining({ lastUpdateCheckAt: expect.any(String) }),
       }),
     );
-    await fireEvent.change(screen.getByRole('combobox', { name: /Icon Style/ }), {
-      target: { value: 'bars' },
-    });
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Icon Style' }));
+    await fireEvent.click(screen.getByRole('option', { name: 'Bars' }));
     await waitFor(() =>
       expect(mocks.invoke).toHaveBeenCalledWith(
         'save_app_settings',
@@ -777,6 +774,63 @@ describe('OpenQuota dashboard', () => {
     expect(statusSlot).not.toHaveClass('active');
   });
 
+  it('keeps provider chrome and card alignment while initial Claude usage is loading', async () => {
+    const pendingClaude: ProviderViewState = {
+      source: 'none',
+      refreshing: true,
+      stale: false,
+      error: null,
+      lastAttemptAt: null,
+      snapshot: null,
+    };
+    const claudeSettings: SettingsViewState = {
+      ...settingsState,
+      settings: {
+        ...settingsState.settings,
+        showTotalSpend: false,
+        providers: [
+          {
+            id: 'claude',
+            enabled: true,
+            detected: true,
+            expanded: false,
+            metrics: [
+              {
+                id: 'claude.session',
+                enabled: true,
+                section: 'alwaysVisible',
+                pinned: true,
+              },
+              {
+                id: 'claude.weekly',
+                enabled: true,
+                section: 'alwaysVisible',
+                pinned: true,
+              },
+            ],
+          },
+        ],
+      },
+    };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === 'get_usage_state')
+        return Promise.resolve({ providers: { claude: pendingClaude } });
+      if (command === 'get_app_settings') return Promise.resolve(claudeSettings);
+      if (command === 'resize_main_window') return Promise.resolve();
+      return new Promise(() => undefined);
+    });
+
+    render(App);
+    const provider = await screen.findByRole('group', { name: 'Claude provider' });
+    const card = within(provider).getByRole('region', { name: 'Claude usage' });
+
+    expect(within(provider).getByRole('heading', { name: 'Claude' })).toBeInTheDocument();
+    expect(within(provider).getByLabelText('Refreshing')).toBeInTheDocument();
+    expect(within(card).getByText('Reading Claude usage…')).toBeInTheDocument();
+    expect(card).toHaveClass('provider-card');
+    expect(within(card).getByText('Reading Claude usage…')).toHaveClass('empty-row');
+  });
+
   it('restores stable provider chrome when a refresh request fails to start', async () => {
     mocks.invoke.mockImplementation((command: string) => {
       if (command === 'get_usage_state') return Promise.resolve(liveState);
@@ -865,7 +919,10 @@ describe('OpenQuota dashboard', () => {
     await fireEvent.click(screen.getByLabelText('Open options'));
     await fireEvent.click(screen.getByRole('button', { name: 'About OpenQuota' }));
     expect(screen.getByRole('dialog', { name: 'About OpenQuota' })).toBeInTheDocument();
-    await fireEvent.keyDown(document, { key: 'Escape' });
+    const close = screen.getByRole('button', { name: 'Close About' });
+    expect(close.querySelector('svg')).not.toBeNull();
+    expect(close).not.toHaveTextContent('×');
+    await fireEvent.click(close);
     expect(screen.queryByRole('dialog', { name: 'About OpenQuota' })).not.toBeInTheDocument();
   });
 

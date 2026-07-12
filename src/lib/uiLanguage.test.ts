@@ -55,13 +55,14 @@ describe('native UI language contract', () => {
     ]) {
       expect(settings).toContain(label);
     }
-    expect(settings).toContain('<option value="system">Auto</option>');
-    expect(settings).toContain('<option value="twelveHour">12-hour</option>');
-    expect(settings).toMatch(/<option\s+value="twentyFourHour">24-hour<\/option/s);
+    expect(settings).toContain("{ value: 'system', label: 'Auto' }");
+    expect(settings).toContain("{ value: 'twelveHour', label: '12-hour' }");
+    expect(settings).toContain("{ value: 'twentyFourHour', label: '24-hour' }");
     expect(settings).not.toContain('<h2>Startup</h2>');
     expect(settings).not.toContain('Automatic Checks');
     expect(settings).not.toContain('Combined cost and token summary.');
     expect(settings).not.toContain('Show projections even when usage is healthy.');
+    expect(settings).not.toContain('>×</button');
   });
 
   it('keeps dashboard onboarding, empty state, and menus on the shared wording', () => {
@@ -73,5 +74,6 @@ describe('native UI language contract', () => {
     expect(dashboard).not.toContain('Providers Detected');
     expect(dashboard).not.toContain('Starter Provider');
     expect(dashboard).not.toContain("Expand'} On Demand");
+    expect(dashboard).not.toContain('>×</button');
   });
 });

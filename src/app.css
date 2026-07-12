@@ -135,8 +135,13 @@ select {
   min-height: 0;
   padding: 14px 14px 12px;
   overflow-y: auto;
-  scrollbar-width: thin;
+  scrollbar-width: none;
   overflow-x: hidden;
+}
+
+.content::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .provider-header {
@@ -555,8 +560,7 @@ select {
   background: var(--separator);
 }
 
-.empty-row,
-.loading-card {
+.empty-row {
   margin: 0;
   color: var(--secondary);
   font-size: 12px;
@@ -565,12 +569,6 @@ select {
 
 .empty-row {
   padding: 14px 0;
-}
-
-.loading-card {
-  padding: 32px 16px;
-  border-radius: 12px;
-  background: var(--card);
 }
 
 .notice,
@@ -665,10 +663,25 @@ select {
   position: absolute;
   top: 5px;
   right: 6px;
+  display: grid;
+  width: 20px;
+  height: 20px;
+  padding: 0;
   border: 0;
+  border-radius: 5px;
   color: var(--secondary);
   background: transparent;
-  font-size: 15px;
+  cursor: pointer;
+  place-items: center;
+}
+
+.hint-card__dismiss:hover,
+.hint-card__dismiss:focus-visible,
+.detection-card .dismiss:hover,
+.detection-card .dismiss:focus-visible {
+  outline: none;
+  color: var(--text);
+  background: var(--button-hover);
 }
 
 .update-notes {
@@ -731,10 +744,16 @@ select {
   position: absolute;
   top: 4px;
   right: 4px;
-  padding: 1px 5px;
+  display: grid;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
   color: var(--secondary);
   background: transparent;
-  font-size: 15px;
+  cursor: pointer;
+  place-items: center;
 }
 
 .total-card {
@@ -753,14 +772,102 @@ select {
   gap: 8px;
 }
 
-.total-card__header select,
-.setting-row select {
-  padding: 3px 22px 3px 6px;
+.select-menu {
+  position: relative;
+  min-width: 112px;
+  flex: 0 0 auto;
+}
+
+.select-menu__trigger {
+  display: flex;
+  width: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px 4px 10px;
   border: 1px solid var(--separator);
+  border-radius: 7px;
+  color: var(--text);
+  background: var(--card);
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-switch),
+    background var(--motion-switch),
+    box-shadow var(--motion-switch);
+}
+
+.select-menu__trigger:hover,
+.select-menu__trigger[aria-expanded='true'] {
+  border-color: color-mix(in srgb, var(--text) 18%, transparent);
+  background: var(--card-hover);
+}
+
+.select-menu__trigger:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--meter-fill) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.select-menu__trigger[aria-expanded='true'] .symbol-icon {
+  transform: rotate(180deg);
+}
+
+.select-menu__list {
+  position: absolute;
+  z-index: 80;
+  top: calc(100% + 5px);
+  right: 0;
+  width: max-content;
+  min-width: max(100%, 132px);
+  padding: 5px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--tray) 90%, transparent);
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.2),
+    0 2px 8px rgba(0, 0, 0, 0.1);
+  backdrop-filter: blur(22px) saturate(1.35);
+  transform-origin: top right;
+  will-change: transform, opacity;
+}
+
+.select-menu__list button {
+  display: flex;
+  width: 100%;
+  min-height: 24px;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 5px;
+  padding: 3px 8px 3px 3px;
+  border: 0;
   border-radius: 6px;
   color: var(--text);
-  background: var(--tray);
-  font-size: 11px;
+  background: transparent;
+  font-size: 13px;
+  line-height: 17px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.select-menu__list button:hover,
+.select-menu__list button:focus-visible {
+  outline: none;
+  color: #ffffff;
+  background: var(--meter-fill);
+}
+
+.select-menu__list button.active {
+  font-weight: 400;
+}
+
+.select-menu__check {
+  display: grid;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  place-items: center;
 }
 
 .period-switcher {
@@ -1187,6 +1294,23 @@ input[type='checkbox'] {
   color: var(--text);
 }
 
+.shortcut-field button[aria-label='Clear global shortcut'] {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--secondary);
+  font-family: inherit;
+  place-items: center;
+}
+
+.shortcut-field button[aria-label='Clear global shortcut']:hover,
+.shortcut-field button[aria-label='Clear global shortcut']:focus-visible {
+  outline: none;
+  color: var(--text);
+  background: var(--button-hover);
+}
+
 .secondary-button {
   flex: 0 0 auto;
   padding: 4px 8px;
@@ -1481,8 +1605,7 @@ body,
 
 .content {
   padding: 14px 14px 12px;
-  scrollbar-color: var(--tertiary) transparent;
-  scrollbar-width: thin;
+  scrollbar-width: none;
 }
 
 .content--chrome {
@@ -1770,13 +1893,31 @@ body,
   gap: 4px;
 }
 
-.total-card__header select {
-  padding: 0 18px 0 0;
+.select-menu--title {
+  min-width: 0;
+}
+
+.select-menu--title .select-menu__trigger {
+  min-height: 24px;
+  gap: 4px;
+  padding: 0;
   border: 0;
-  color: var(--text);
   background: transparent;
   font-size: 14px;
   font-weight: 600;
+}
+
+.select-menu--title .select-menu__trigger:hover,
+.select-menu--title .select-menu__trigger[aria-expanded='true'] {
+  color: var(--meter-fill);
+  background: transparent;
+}
+
+.select-menu--title .select-menu__list {
+  right: auto;
+  left: -5px;
+  min-width: 138px;
+  transform-origin: top left;
 }
 
 .total-card__header .icon-button--plain {
@@ -1989,7 +2130,7 @@ body,
   left: 50%;
   z-index: 50;
   width: max-content;
-  max-width: 190px;
+  max-width: min(190px, calc(100vw - 24px));
   padding: 5px 7px;
   border: 1px solid var(--separator);
   border-radius: 6px;
@@ -2001,6 +2142,7 @@ body,
   font-weight: 400;
   line-height: 13px;
   white-space: pre-line;
+  overflow-wrap: anywhere;
   opacity: 0;
   pointer-events: none;
   transform: translate(-50%, -2px) scale(0.97);
@@ -2014,6 +2156,42 @@ body,
   opacity: 1;
   transform: translate(-50%, 0) scale(1);
   transition-delay: 400ms;
+}
+
+.provider-warning::after,
+.total-card__share::after,
+.screen-header > :last-child[data-tooltip]::after {
+  right: 0;
+  left: auto;
+  transform: translate(0, -2px) scale(0.97);
+  transform-origin: top right;
+}
+
+.provider-warning:hover::after,
+.provider-warning:focus-visible::after,
+.total-card__share:hover::after,
+.total-card__share:focus-visible::after,
+.screen-header > :last-child[data-tooltip]:hover::after,
+.screen-header > :last-child[data-tooltip]:focus-visible::after {
+  transform: translate(0, 0) scale(1);
+}
+
+.total-card__info::after,
+.usage-label-warning::after,
+.screen-header > :first-child[data-tooltip]::after {
+  right: auto;
+  left: 0;
+  transform: translate(0, -2px) scale(0.97);
+  transform-origin: top left;
+}
+
+.total-card__info:hover::after,
+.total-card__info:focus-visible::after,
+.usage-label-warning:hover::after,
+.usage-label-warning:focus-visible::after,
+.screen-header > :first-child[data-tooltip]:hover::after,
+.screen-header > :first-child[data-tooltip]:focus-visible::after {
+  transform: translate(0, 0) scale(1);
 }
 
 .settings-section,
@@ -2066,7 +2244,7 @@ body,
   font-weight: 400;
 }
 
-.setting-row select {
+.setting-row .select-menu__trigger {
   font-size: 13px;
 }
 
@@ -2521,14 +2699,33 @@ input[type='checkbox']:checked::after {
   top: 8px;
   right: 8px;
   display: grid;
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: 0;
   border-radius: 50%;
   color: var(--secondary);
   background: var(--button-hover);
+  cursor: pointer;
   place-items: center;
+  transition:
+    color var(--motion-switch),
+    background var(--motion-switch),
+    transform var(--motion-switch);
+}
+
+.about-card__close:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+}
+
+.about-card__close:active {
+  transform: scale(0.92);
+}
+
+.about-card__close:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--meter-fill) 55%, transparent);
+  outline-offset: 1px;
 }
 
 :root[data-density='compact'] .content {

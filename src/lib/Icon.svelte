@@ -3,6 +3,7 @@
     | 'about'
     | 'back'
     | 'check'
+    | 'close'
     | 'chevron-down'
     | 'chevron-up'
     | 'chevron-right'
@@ -72,6 +73,8 @@
     <path d="M12 2v10" /><path d="M7.1 5.4a8 8 0 1 0 9.8 0" />
   {:else if name === 'check'}
     <path d="m5 12 4 4L19 6" />
+  {:else if name === 'close'}
+    <path d="M6.5 6.5 17.5 17.5M17.5 6.5 6.5 17.5" />
   {:else if name === 'warning'}
     <path d="M12 3 2.8 20h18.4Z" /><path d="M12 9v4" /><path d="M12 17h.01" />
   {:else if name === 'flame-filled'}

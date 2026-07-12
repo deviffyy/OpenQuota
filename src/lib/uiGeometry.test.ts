@@ -16,7 +16,17 @@ describe('popover geometry contract', () => {
 
   it('keeps the reference regular-density spacing and chrome dimensions', () => {
     expect(css).toMatch(/\.content\s*{[^}]*padding: 14px 14px 12px;/s);
+    expect(css).toMatch(/\.content\s*{[^}]*overflow-y: auto;[^}]*scrollbar-width: none;/s);
+    expect(css).toMatch(/\.content::-webkit-scrollbar\s*{[^}]*width: 0;[^}]*height: 0;/s);
     expect(css).toMatch(/\.provider-card\s*{[^}]*border-radius: 12px;/s);
+    expect(css).not.toContain('.provider-card--pending');
+    expect(css).toMatch(
+      /\.provider-warning::after,[\s\S]*right: 0;[\s\S]*left: auto;[\s\S]*transform-origin: top right;/,
+    );
+    expect(css).toMatch(
+      /\.total-card__info::after,[\s\S]*right: auto;[\s\S]*left: 0;[\s\S]*transform-origin: top left;/,
+    );
+    expect(css).toContain('max-width: min(190px, calc(100vw - 24px))');
     expect(css).toMatch(/\.metric\s*{[^}]*padding: 10px 14px;/s);
     expect(css).toMatch(/\.meter\s*{[^}]*height: 5px;/s);
     expect(css).toMatch(/\.app-top-bar\s*{[^}]*min-height: 44px;/s);

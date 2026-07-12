@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
+  import SelectMenu from './SelectMenu.svelte';
   import type {
     AppSettings,
     NotificationPreferences,
@@ -124,7 +125,8 @@
         >{#if settings.globalShortcut}<button
             type="button"
             aria-label="Clear global shortcut"
-            onclick={() => patch({ globalShortcut: null })}>×</button
+            onclick={() => patch({ globalShortcut: null })}
+            ><Icon name="close" size={10} strokeWidth={2.2} /></button
           >{/if}
       </div>
     </div>
@@ -132,63 +134,78 @@
 
   <div class="settings-section">
     <h2>Appearance</h2>
-    <label class="setting-row"
-      ><span><b>Icon Style</b></span><select
+    <div class="setting-row">
+      <span><b>Icon Style</b></span><SelectMenu
+        label="Icon Style"
         value={settings.menuBarStyle}
-        onchange={(event) =>
-          patch({ menuBarStyle: event.currentTarget.value as AppSettings['menuBarStyle'] })}
-        ><option value="text">Text</option><option value="bars">Bars</option></select
-      ></label
-    >
-    <label class="setting-row"
-      ><span><b>Theme</b></span><select
+        options={[
+          { value: 'text', label: 'Text' },
+          { value: 'bars', label: 'Bars' },
+        ]}
+        onChange={(value) => patch({ menuBarStyle: value as AppSettings['menuBarStyle'] })}
+      />
+    </div>
+    <div class="setting-row">
+      <span><b>Theme</b></span><SelectMenu
+        label="Theme"
         value={settings.theme}
-        onchange={(event) => patch({ theme: event.currentTarget.value as AppSettings['theme'] })}
-        ><option value="system">System</option><option value="light">Light</option><option
-          value="dark">Dark</option
-        ></select
-      ></label
-    >
-    <label class="setting-row"
-      ><span><b>Density</b></span><select
+        options={[
+          { value: 'system', label: 'System' },
+          { value: 'light', label: 'Light' },
+          { value: 'dark', label: 'Dark' },
+        ]}
+        onChange={(value) => patch({ theme: value as AppSettings['theme'] })}
+      />
+    </div>
+    <div class="setting-row">
+      <span><b>Density</b></span><SelectMenu
+        label="Density"
         value={settings.density}
-        onchange={(event) =>
-          patch({ density: event.currentTarget.value as AppSettings['density'] })}
-        ><option value="default">Default</option><option value="compact">Compact</option></select
-      ></label
-    >
-    <label class="setting-row"
-      ><span><b>Time Format</b></span><select
-        aria-label="Time Format"
+        options={[
+          { value: 'default', label: 'Default' },
+          { value: 'compact', label: 'Compact' },
+        ]}
+        onChange={(value) => patch({ density: value as AppSettings['density'] })}
+      />
+    </div>
+    <div class="setting-row">
+      <span><b>Time Format</b></span><SelectMenu
+        label="Time Format"
         value={settings.timeFormat}
-        onchange={(event) =>
-          patch({ timeFormat: event.currentTarget.value as AppSettings['timeFormat'] })}
-        ><option value="system">Auto</option><option value="twelveHour">12-hour</option><option
-          value="twentyFourHour">24-hour</option
-        ></select
-      ></label
-    >
+        options={[
+          { value: 'system', label: 'Auto' },
+          { value: 'twelveHour', label: '12-hour' },
+          { value: 'twentyFourHour', label: '24-hour' },
+        ]}
+        onChange={(value) => patch({ timeFormat: value as AppSettings['timeFormat'] })}
+      />
+    </div>
   </div>
 
   <div class="settings-section">
     <h2>Usage Display</h2>
-    <label class="setting-row"
-      ><span><b>Show Usage As</b></span><select
+    <div class="setting-row">
+      <span><b>Show Usage As</b></span><SelectMenu
+        label="Show Usage As"
         value={settings.usageDisplay}
-        onchange={(event) =>
-          patch({ usageDisplay: event.currentTarget.value as AppSettings['usageDisplay'] })}
-        ><option value="left">Left</option><option value="used">Used</option></select
-      ></label
-    >
-    <label class="setting-row"
-      ><span><b>Reset Times</b></span><select
+        options={[
+          { value: 'left', label: 'Left' },
+          { value: 'used', label: 'Used' },
+        ]}
+        onChange={(value) => patch({ usageDisplay: value as AppSettings['usageDisplay'] })}
+      />
+    </div>
+    <div class="setting-row">
+      <span><b>Reset Times</b></span><SelectMenu
+        label="Reset Times"
         value={settings.resetDisplay}
-        onchange={(event) =>
-          patch({ resetDisplay: event.currentTarget.value as AppSettings['resetDisplay'] })}
-        ><option value="countdown">Countdown</option><option value="exact">Exact Time</option
-        ></select
-      ></label
-    >
+        options={[
+          { value: 'countdown', label: 'Countdown' },
+          { value: 'exact', label: 'Exact Time' },
+        ]}
+        onChange={(value) => patch({ resetDisplay: value as AppSettings['resetDisplay'] })}
+      />
+    </div>
     <label class="setting-row"
       ><span
         ><b>Always Show Pacing</b><i

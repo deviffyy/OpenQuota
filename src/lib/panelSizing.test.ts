@@ -4,9 +4,15 @@ import {
   panelMaximumHeight,
   panelTargetHeight,
   screenPanelHeight,
+  shouldDeferPanelFit,
 } from './panelSizing';
 
 describe('panel sizing', () => {
+  it('keeps dashboard geometry fixed while provider data is refreshing', () => {
+    expect(shouldDeferPanelFit('dashboard', true)).toBe(true);
+    expect(shouldDeferPanelFit('dashboard', false)).toBe(false);
+    expect(shouldDeferPanelFit('settings', true)).toBe(false);
+  });
   it('uses the reference 200px floor for short content', () => {
     expect(panelTargetHeight(120, 900)).toBe(PANEL_MIN_HEIGHT);
   });

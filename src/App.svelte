@@ -10,7 +10,7 @@
   import { defaultMetricLayout, metricDefinition, providerDisplayName } from './lib/metrics';
   import OpenQuotaMark from './lib/OpenQuotaMark.svelte';
   import { horizontalPageTransition, shouldSlideBetweenScreens } from './lib/pageTransition';
-  import { panelTargetHeight, screenPanelHeight } from './lib/panelSizing';
+  import { panelTargetHeight, screenPanelHeight, shouldDeferPanelFit } from './lib/panelSizing';
   import { desktopPlatform, shortcutLabels } from './lib/platform';
   import { providerIconPath } from './lib/providerIconPaths';
   import SettingsScreen from './lib/SettingsScreen.svelte';
@@ -128,11 +128,18 @@
       !windowResizeAvailable
     )
       return;
+    if (shouldDeferPanelFit(screen, anyRefreshing)) {
+      window.cancelAnimationFrame(measureFrame);
+      window.cancelAnimationFrame(resizeFrame);
+      resizeGeneration += 1;
+      return;
+    }
     window.cancelAnimationFrame(measureFrame);
     measureFrame = window.requestAnimationFrame(() => void fitWindowToScreen());
   }
 
   async function fitWindowToScreen() {
+    if (shouldDeferPanelFit(screen, anyRefreshing)) return;
     const page = document.querySelector<HTMLElement>(`.screen-page[data-screen="${screen}"]`);
     const content = document.querySelector<HTMLElement>('.content');
     const stage = document.querySelector<HTMLElement>('.screen-stage');
@@ -1035,7 +1042,8 @@
           class="about-card__close"
           type="button"
           aria-label="Close About"
-          onclick={() => (showAbout = false)}>×</button
+          onclick={() => (showAbout = false)}
+          ><Icon name="close" size={11} strokeWidth={2.3} /></button
         >
         <OpenQuotaMark size={44} />
         <h1>OpenQuota</h1>

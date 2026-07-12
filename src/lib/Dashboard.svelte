@@ -253,7 +253,7 @@
         onSettingsChange({
           ...settings,
           dismissedUpdateVersion: updateStatus?.version ?? null,
-        })}>×</button
+        })}><Icon name="close" size={10} strokeWidth={2.2} /></button
     >
   </section>
 {/if}
@@ -269,7 +269,9 @@
       >
     </div>
     <button type="button" onclick={onCustomize}>Open Customize</button>
-    <button class="dismiss" type="button" aria-label="Dismiss" onclick={dismissDetection}>×</button>
+    <button class="dismiss" type="button" aria-label="Dismiss" onclick={dismissDetection}
+      ><Icon name="close" size={10} strokeWidth={2.2} /></button
+    >
   </section>
 {/if}
 
@@ -461,11 +463,50 @@
       <section class="provider-card"><p class="empty-row">No usage data</p></section>
     </section>
   {:else if state?.refreshing}
-    <section class="loading-card" aria-busy="true">
-      Reading {providerDisplayName(provider.id)} usage…
+    <section
+      class="provider-section provider-section--pending"
+      data-provider-id={provider.id}
+      role="group"
+      aria-label={`${providerDisplayName(provider.id)} provider`}
+    >
+      <header class="provider-header">
+        <span class="drag-grip" aria-hidden="true"><Icon name="grip-dots" size={13} /></span>
+        <h1>{providerDisplayName(provider.id)}</h1>
+        <span class="provider-status-slot active">
+          <span class="provider-refreshing" aria-label="Refreshing"
+            ><Icon name="refresh" size={12} strokeWidth={2} /></span
+          >
+        </span>
+        <span class="provider-mark"><ProviderIcon providerId={provider.id} size={17} /></span>
+      </header>
+      <section
+        class="provider-card"
+        aria-label={`${providerDisplayName(provider.id)} usage`}
+        aria-busy="true"
+      >
+        <p class="empty-row">Reading {providerDisplayName(provider.id)} usage…</p>
+      </section>
     </section>
   {:else if !state?.error}
-    <section class="loading-card">No {providerDisplayName(provider.id)} data yet.</section>
+    <section
+      class="provider-section provider-section--pending"
+      data-provider-id={provider.id}
+      role="group"
+      aria-label={`${providerDisplayName(provider.id)} provider`}
+    >
+      <header class="provider-header">
+        <span class="drag-grip" aria-hidden="true"><Icon name="grip-dots" size={13} /></span>
+        <h1>{providerDisplayName(provider.id)}</h1>
+        <span class="provider-status-slot"></span>
+        <span class="provider-mark"><ProviderIcon providerId={provider.id} size={17} /></span>
+      </header>
+      <section
+        class="provider-card provider-card--pending"
+        aria-label={`${providerDisplayName(provider.id)} usage`}
+      >
+        <p class="provider-pending-copy">No {providerDisplayName(provider.id)} data yet.</p>
+      </section>
+    </section>
   {/if}
 {/each}
 

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import Icon from './Icon.svelte';
+  import SelectMenu from './SelectMenu.svelte';
   import { providerDisplayName } from './metrics';
   import { emptySpendMessage, projectSpend, type SpendProjection } from './totalSpend';
   import type { AppSettings, UsageHistory } from './types';
@@ -96,16 +97,17 @@
 <section class="total-spend-section" aria-label="Total Spend" data-total-spend>
   <div class="total-card__header">
     <div class="total-card__title">
-      <select
-        aria-label="Total Spend Metric"
+      <SelectMenu
+        label="Total Spend Metric"
         value={settings.totalSpendMetric}
-        onchange={(event) =>
-          patch({ totalSpendMetric: event.currentTarget.value as AppSettings['totalSpendMetric'] })}
-      >
-        <option value="cost">Cost</option>
-        <option value="costPerMillion">Cost/MTok</option>
-        <option value="tokens">Tokens</option>
-      </select>
+        variant="title"
+        options={[
+          { value: 'cost', label: 'Cost' },
+          { value: 'costPerMillion', label: 'Cost/MTok' },
+          { value: 'tokens', label: 'Tokens' },
+        ]}
+        onChange={(value) => patch({ totalSpendMetric: value as AppSettings['totalSpendMetric'] })}
+      />
       <span
         class="icon-button icon-button--plain total-card__info"
         data-tooltip={`Only includes ${providerNames.join(' and ')}.`}
