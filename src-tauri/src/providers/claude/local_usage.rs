@@ -250,6 +250,8 @@ fn aggregate(events: Vec<ClaudeTokenEvent>, now: DateTime<Utc>) -> UsageHistory 
             tokens: day.tokens,
             estimated_cost_usd: (day.complete || day.cost > 0.0).then_some(day.cost),
             estimate_complete: day.complete,
+            model_breakdown: None,
+            unknown_models: Vec::new(),
         })
     };
     let mut unknown_models = days
@@ -269,6 +271,8 @@ fn aggregate(events: Vec<ClaudeTokenEvent>, now: DateTime<Utc>) -> UsageHistory 
                 .all(|day| day.complete)
                 .then(|| days.values().map(|day| day.cost).sum()),
             estimate_complete: days.values().all(|day| day.complete),
+            model_breakdown: None,
+            unknown_models: Vec::new(),
         }),
         daily,
         unknown_models,

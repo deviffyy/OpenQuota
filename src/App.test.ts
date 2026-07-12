@@ -1,11 +1,27 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import type { ProviderViewState, SettingsViewState, UsageViewState } from './lib/types';
+import type {
+  ProviderViewState,
+  SettingsViewState,
+  UpdateProgress,
+  UsageViewState,
+} from './lib/types';
 
-const mocks = vi.hoisted(() => ({ invoke: vi.fn(), listen: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  invoke: vi.fn(),
+  listen: vi.fn(),
+  currentMonitor: vi.fn(),
+}));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: mocks.listen }));
+vi.mock('@tauri-apps/api/window', () => ({
+  currentMonitor: mocks.currentMonitor,
+  getCurrentWindow: () => ({
+    scaleFactor: () => Promise.resolve(1),
+    innerSize: () => Promise.resolve({ width: 320, height: 600 }),
+  }),
+}));
 
 const codexState: ProviderViewState = {
   source: 'live',
@@ -133,7 +149,7 @@ const settingsState: SettingsViewState = {
   standaloneWindow: false,
   platformSummary: null,
   settings: {
-    schemaVersion: 3,
+    schemaVersion: 4,
     knownProviderIds: ['claude', 'codex', 'antigravity'],
     showTotalSpend: true,
     theme: 'system',
@@ -145,6 +161,8 @@ const settingsState: SettingsViewState = {
     alwaysShowPacing: false,
     launchAtLogin: false,
     autoCheckUpdates: true,
+    dismissedUpdateVersion: null,
+    lastUpdateCheckAt: null,
     globalShortcut: null,
     notifications: { almostOut: false, cuttingItClose: false, willRunOut: false },
     totalSpendMetric: 'cost',
@@ -171,6 +189,10 @@ const settingsState: SettingsViewState = {
 
 describe('OpenQuota dashboard', () => {
   beforeEach(() => {
+    mocks.currentMonitor.mockResolvedValue({
+      scaleFactor: 1,
+      workArea: { size: { width: 1280, height: 700 } },
+    });
     mocks.listen.mockReset().mockResolvedValue(vi.fn());
     mocks.invoke
       .mockReset()
@@ -187,6 +209,7 @@ describe('OpenQuota dashboard', () => {
           if (command === 'request_notification_permission')
             return Promise.resolve({ ...settingsState, notificationPermission: 'granted' });
           if (command === 'reset_customization') return Promise.resolve(settingsState);
+          if (command === 'resize_main_window') return Promise.resolve();
           if (command === 'get_app_data_path') return Promise.resolve('C:\\OpenQuota\\Data');
           if (command === 'dismiss_main_window') return Promise.resolve();
           if (command === 'check_for_updates')
@@ -195,6 +218,8 @@ describe('OpenQuota dashboard', () => {
               currentVersion: '0.1.0',
               version: null,
               body: null,
+              installable: true,
+              releaseUrl: 'https://github.com/deviffyy/OpenQuota/releases/latest',
             });
           return Promise.reject(new Error(`unexpected command ${command}`));
         },
@@ -276,6 +301,8 @@ describe('OpenQuota dashboard', () => {
           currentVersion: '0.1.0',
           version: null,
           body: null,
+          installable: true,
+          releaseUrl: 'https://github.com/deviffyy/OpenQuota/releases/latest',
         });
       return Promise.resolve(multiProviderSettings);
     });
@@ -295,7 +322,7 @@ describe('OpenQuota dashboard', () => {
   it('persists Total Spend metric and period choices', async () => {
     render(App);
     await screen.findByText('Plus');
-    await fireEvent.change(screen.getByLabelText('Total Spend metric'), {
+    await fireEvent.change(screen.getByLabelText('Total Spend Metric'), {
       target: { value: 'tokens' },
     });
     await fireEvent.click(screen.getByRole('button', { name: '30 Days' }));
@@ -343,11 +370,13 @@ describe('OpenQuota dashboard', () => {
     render(App);
     const totalSpend = await screen.findByRole('region', { name: 'Total Spend' });
     expect(within(totalSpend).getByText('No cost data for this period')).toBeInTheDocument();
-    await fireEvent.click(
-      await within(totalSpend).findByRole('button', { name: 'View available tokens' }),
-    );
+    await fireEvent.change(within(totalSpend).getByLabelText('Total Spend Metric'), {
+      target: { value: 'tokens' },
+    });
     expect(within(totalSpend).getByText('Codex')).toBeInTheDocument();
-    expect(within(totalSpend).getAllByText('2.1M')).toHaveLength(2);
+    expect(within(totalSpend).getByText('2.1')).toBeInTheDocument();
+    expect(within(totalSpend).getByText('million')).toBeInTheDocument();
+    expect(within(totalSpend).getByText('2.1M')).toBeInTheDocument();
     expect(within(totalSpend).queryByText('No data')).not.toBeInTheDocument();
   });
 
@@ -355,11 +384,35 @@ describe('OpenQuota dashboard', () => {
     render(App);
     await screen.findByText('Plus');
     expect(screen.queryByText('$3.84 · 2.1M tokens')).not.toBeInTheDocument();
-    await fireEvent.click(screen.getByRole('button', { name: /On Demand/ }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
     expect(screen.getByText('$3.84 · 2.1M tokens')).toBeInTheDocument();
     await waitFor(() =>
       expect(mocks.invoke).toHaveBeenCalledWith('save_app_settings', expect.any(Object)),
     );
+  });
+
+  it('uses the compact reference caret instead of a labeled On Demand divider', async () => {
+    render(App);
+    const toggle = await screen.findByRole('button', { name: 'Show more' });
+    expect(screen.getByRole('group', { name: 'Drag Codex to reorder' })).toHaveAttribute(
+      'draggable',
+      'true',
+    );
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle).not.toHaveTextContent('On Demand');
+    await fireEvent.click(toggle);
+    expect(screen.getByRole('button', { name: 'Show less' })).toHaveAttribute(
+      'aria-expanded',
+      'true',
+    );
+  });
+
+  it('renders the Total Spend ring as rounded SVG sectors', async () => {
+    render(App);
+    expect(await screen.findByRole('region', { name: 'Total Spend' })).toBeInTheDocument();
+    await waitFor(() => expect(document.querySelector('.spend-ring svg')).not.toBeNull());
+    expect(document.querySelector('.spend-ring__segment')).not.toBeNull();
+    expect(document.querySelector('.period-switcher__selection')).not.toBeNull();
   });
 
   it('opens Customize and exposes the two-section metric layout', async () => {
@@ -380,7 +433,7 @@ describe('OpenQuota dashboard', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Customize codex' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Pin Today' }));
-    expect(screen.getByText('Up to 2 pinned metrics per provider')).toBeInTheDocument();
+    expect(screen.getByText('Up to 2 stars per provider')).toBeInTheDocument();
   });
 
   it('persists Used/Left changes made directly from a quota row', async () => {
@@ -430,7 +483,7 @@ describe('OpenQuota dashboard', () => {
     await screen.findByText('Plus');
     await fireEvent.click(screen.getByLabelText('Open options'));
     await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    expect(screen.getByText('Anonymous Usage')).toBeInTheDocument();
+    expect(screen.getByText('Share Anonymous Usage')).toBeInTheDocument();
     await fireEvent.click(screen.getByRole('button', { name: 'Copy Path' }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('C:\\OpenQuota\\Data'));
     expect(screen.getByRole('status')).toHaveTextContent('Data path copied');
@@ -451,6 +504,8 @@ describe('OpenQuota dashboard', () => {
           currentVersion: '0.1.0',
           version: null,
           body: null,
+          installable: true,
+          releaseUrl: 'https://github.com/deviffyy/OpenQuota/releases/latest',
         });
       return Promise.resolve();
     });
@@ -461,13 +516,21 @@ describe('OpenQuota dashboard', () => {
     expect(screen.getByText('GNOME · Wayland · standalone window')).toBeInTheDocument();
   });
 
-  it('checks for updates on startup and persists the macOS menu bar style', async () => {
+  it('checks for updates manually and persists the macOS menu bar style', async () => {
     render(App);
     await screen.findByText('Plus');
-    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith('check_for_updates'));
     await fireEvent.click(screen.getByLabelText('Open options'));
     await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    await fireEvent.change(screen.getByRole('combobox', { name: /Menu Bar/ }), {
+    await fireEvent.click(screen.getByRole('button', { name: 'Check for Updates…' }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith('check_for_updates'));
+    expect(await screen.findByText('OpenQuota 0.1.0 is up to date.')).toBeInTheDocument();
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      'save_app_settings',
+      expect.objectContaining({
+        settings: expect.objectContaining({ lastUpdateCheckAt: expect.any(String) }),
+      }),
+    );
+    await fireEvent.change(screen.getByRole('combobox', { name: /Icon Style/ }), {
       target: { value: 'bars' },
     });
     await waitFor(() =>
@@ -476,6 +539,118 @@ describe('OpenQuota dashboard', () => {
         expect.objectContaining({ settings: expect.objectContaining({ menuBarStyle: 'bars' }) }),
       ),
     );
+  });
+
+  it('surfaces an available update on the dashboard and allows it to be dismissed', async () => {
+    mocks.invoke.mockImplementation(
+      (command: string, args?: { settings?: SettingsViewState['settings'] }) => {
+        if (command === 'get_usage_state') return Promise.resolve(liveState);
+        if (command === 'get_app_settings') return Promise.resolve(settingsState);
+        if (command === 'save_app_settings')
+          return Promise.resolve({
+            ...settingsState,
+            settings: args?.settings ?? settingsState.settings,
+          });
+        if (command === 'check_for_updates')
+          return Promise.resolve({
+            available: true,
+            currentVersion: '0.1.0',
+            version: '0.2.0',
+            body: 'New release',
+            installable: true,
+            releaseUrl: 'https://github.com/deviffyy/OpenQuota/releases/latest',
+          });
+        return Promise.resolve();
+      },
+    );
+    render(App);
+    await screen.findByText('Plus');
+    await fireEvent.click(screen.getByLabelText('Open options'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Check for Updates…' }));
+    expect(await screen.findByRole('region', { name: 'Update Available' })).toHaveTextContent(
+      'OpenQuota 0.2.0 is ready to download.',
+    );
+    expect(screen.getByText('New release')).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByRole('region', { name: 'Update Available' })).not.toBeInTheDocument();
+    expect(mocks.invoke).toHaveBeenCalledWith(
+      'save_app_settings',
+      expect.objectContaining({
+        settings: expect.objectContaining({ dismissedUpdateVersion: '0.2.0' }),
+      }),
+    );
+  });
+
+  it('opens the package download page when in-app installation is unavailable', async () => {
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === 'get_usage_state') return Promise.resolve(liveState);
+      if (command === 'get_app_settings') return Promise.resolve(settingsState);
+      if (command === 'save_app_settings') return Promise.resolve(settingsState);
+      if (command === 'check_for_updates')
+        return Promise.resolve({
+          available: true,
+          currentVersion: '0.1.0',
+          version: '0.2.0',
+          body: null,
+          installable: false,
+          releaseUrl: 'https://github.com/deviffyy/OpenQuota/releases/latest',
+        });
+      if (command === 'open_update_page') return Promise.resolve();
+      return Promise.resolve();
+    });
+    render(App);
+    await screen.findByText('Plus');
+    await fireEvent.click(screen.getByLabelText('Open options'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Check for Updates…' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Download Update' }));
+    expect(mocks.invoke).toHaveBeenCalledWith('open_update_page');
+  });
+
+  it('installs supported updates and renders native download progress', async () => {
+    let progressListener: ((event: { payload: UpdateProgress }) => void) | undefined;
+    mocks.listen.mockImplementation(
+      (event: string, callback: (event: { payload: UpdateProgress }) => void) => {
+        if (event === 'update-progress') progressListener = callback;
+        return Promise.resolve(vi.fn());
+      },
+    );
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === 'get_usage_state') return Promise.resolve(liveState);
+      if (command === 'get_app_settings') return Promise.resolve(settingsState);
+      if (command === 'save_app_settings') return Promise.resolve(settingsState);
+      if (command === 'check_for_updates')
+        return Promise.resolve({
+          available: true,
+          currentVersion: '0.1.0',
+          version: '0.2.0',
+          body: 'Safer updates',
+          installable: true,
+          releaseUrl: 'https://github.com/deviffyy/OpenQuota/releases/latest',
+        });
+      if (command === 'install_update') return Promise.resolve();
+      return Promise.resolve();
+    });
+
+    render(App);
+    await screen.findByText('Plus');
+    await fireEvent.click(screen.getByLabelText('Open options'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Check for Updates…' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Install Update' }));
+    expect(mocks.invoke).toHaveBeenCalledWith('install_update');
+
+    progressListener?.({
+      payload: { phase: 'downloading', downloaded: 42, total: 100, percent: 42 },
+    });
+    expect(await screen.findByText('Downloading update… 42%')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Update download' })).toHaveAttribute(
+      'aria-valuenow',
+      '42',
+    );
+
+    progressListener?.({
+      payload: { phase: 'installing', downloaded: 100, total: 100, percent: 100 },
+    });
+    expect(await screen.findByText('Installing update…')).toBeInTheDocument();
   });
 
   it('records a global shortcut and requests notification permission', async () => {
@@ -516,7 +691,10 @@ describe('OpenQuota dashboard', () => {
     });
     render(App);
     expect(await screen.findByRole('alert')).toHaveTextContent('Could not connect to Codex.');
-    expect(screen.getByText('Stale')).toBeInTheDocument();
+    expect(screen.getByText('Outdated')).toHaveAttribute(
+      'data-tooltip',
+      expect.stringMatching(/^Last updated/),
+    );
   });
 
   it('supports manual refresh and popup close shortcuts', async () => {
@@ -526,6 +704,61 @@ describe('OpenQuota dashboard', () => {
     await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith('refresh_usage'));
     await fireEvent.keyDown(document, { key: 'Escape' });
     expect(mocks.invoke).toHaveBeenCalledWith('dismiss_main_window');
+  });
+
+  it('shows platform-correct Ctrl shortcuts and handles Ctrl+Q', async () => {
+    render(App);
+    await screen.findByText('Plus');
+    await fireEvent.click(screen.getByText('Options').closest('summary')!);
+    expect(screen.getByText('Ctrl+,')).toBeInTheDocument();
+    expect(screen.getByText('Ctrl+Q')).toBeInTheDocument();
+
+    await fireEvent.keyDown(document, { key: 'q', ctrlKey: true });
+    expect(mocks.invoke).toHaveBeenCalledWith('quit_app');
+  });
+
+  it('closes the custom Options surface after a command like a native menu', async () => {
+    render(App);
+    await screen.findByText('Plus');
+    const summary = screen.getByText('Options').closest('summary')!;
+    const menu = summary.closest('details')!;
+    await fireEvent.click(summary);
+    expect(menu).toHaveAttribute('open');
+    await fireEvent.click(screen.getByRole('button', { name: 'Check for Updates…' }));
+    expect(menu).not.toHaveAttribute('open');
+  });
+
+  it('honors Reduce Motion and refits the panel when On Demand changes content height', async () => {
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = vi.fn().mockReturnValue({
+      matches: true,
+      media: '(prefers-reduced-motion: reduce)',
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    });
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    });
+    try {
+      render(App);
+      await waitFor(() => expect(document.documentElement).toHaveAttribute('data-reduced-motion'));
+      const resizeCalls = () =>
+        mocks.invoke.mock.calls.filter(([command]) => command === 'resize_main_window');
+      await waitFor(() =>
+        expect(mocks.invoke).toHaveBeenCalledWith('resize_main_window', { height: 200 }),
+      );
+      const callsBeforeExpand = resizeCalls().length;
+      await fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
+      await waitFor(() => expect(resizeCalls().length).toBeGreaterThan(callsBeforeExpand));
+    } finally {
+      delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+      window.matchMedia = originalMatchMedia;
+    }
   });
 
   it('suppresses the WebView context menu outside custom menu targets', async () => {
@@ -554,7 +787,7 @@ describe('OpenQuota dashboard', () => {
       clientY: 180,
     });
     expect(screen.getByRole('menuitem', { name: 'Share Screenshot' })).toBeInTheDocument();
-    await fireEvent.click(screen.getByRole('menuitem', { name: 'Customize' }));
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Customize…' }));
     expect(screen.getByRole('heading', { name: 'Codex' })).toBeInTheDocument();
     await fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
@@ -570,10 +803,10 @@ describe('OpenQuota dashboard', () => {
       clientX: 120,
       clientY: 180,
     });
-    const customize = screen.getByRole('menuitem', { name: 'Customize' });
-    await waitFor(() => expect(customize).toHaveFocus());
-    await fireEvent.keyDown(customize, { key: 'ArrowDown' });
-    expect(screen.getByRole('menuitem', { name: 'Share Screenshot' })).toHaveFocus();
+    const hide = screen.getByRole('menuitem', { name: 'Hide Codex' });
+    await waitFor(() => expect(hide).toHaveFocus());
+    await fireEvent.keyDown(hide, { key: 'ArrowDown' });
+    expect(screen.getByRole('menuitem', { name: 'Refresh Codex' })).toHaveFocus();
     await fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     expect(document.querySelector('.context-menu')).toBeNull();
   });

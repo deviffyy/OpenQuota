@@ -1,3 +1,4 @@
+mod child_process;
 mod desktop_integration;
 mod models;
 mod pacing;
@@ -19,7 +20,7 @@ use settings::{default_settings, SettingsService};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, State, WebviewWindow, Window, WindowEvent,
+    AppHandle, Emitter, LogicalSize, Manager, State, WebviewWindow, Window, WindowEvent,
 };
 #[cfg(not(target_os = "linux"))]
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
@@ -232,6 +233,193 @@ fn dismiss_main_window(app: AppHandle) {
     } else if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         hide_popup(&window);
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct VerticalFrame {
+    top: i32,
+    height: u32,
+}
+
+fn anchored_vertical_frame(
+    current: VerticalFrame,
+    work_area: VerticalFrame,
+    new_height: u32,
+) -> VerticalFrame {
+    let current_bottom = i64::from(current.top) + i64::from(current.height);
+    let work_bottom = i64::from(work_area.top) + i64::from(work_area.height);
+    let top_gap = (i64::from(current.top) - i64::from(work_area.top)).abs();
+    let bottom_gap = (work_bottom - current_bottom).abs();
+    let top = if bottom_gap <= top_gap {
+        current_bottom.saturating_sub(i64::from(new_height))
+    } else {
+        i64::from(current.top)
+    };
+    VerticalFrame {
+        top: top.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32,
+        height: new_height,
+    }
+}
+
+#[cfg(test)]
+mod window_geometry_tests {
+    use super::{anchored_vertical_frame, VerticalFrame};
+
+    #[test]
+    fn shrinking_bottom_anchored_popup_preserves_its_bottom_edge() {
+        let resized = anchored_vertical_frame(
+            VerticalFrame {
+                top: 496,
+                height: 300,
+            },
+            VerticalFrame {
+                top: 100,
+                height: 700,
+            },
+            200,
+        );
+        assert_eq!(
+            resized,
+            VerticalFrame {
+                top: 596,
+                height: 200
+            }
+        );
+    }
+
+    #[test]
+    fn shrinking_top_anchored_popup_preserves_its_top_edge() {
+        let resized = anchored_vertical_frame(
+            VerticalFrame {
+                top: 104,
+                height: 300,
+            },
+            VerticalFrame {
+                top: 100,
+                height: 700,
+            },
+            200,
+        );
+        assert_eq!(
+            resized,
+            VerticalFrame {
+                top: 104,
+                height: 200
+            }
+        );
+    }
+}
+
+#[tauri::command]
+fn resize_main_window(app: AppHandle, height: u32) -> Result<(), String> {
+    let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+        return Err("OpenQuota window is unavailable.".into());
+    };
+    let height = height.max(1);
+    if app.state::<DesktopIntegration>().standalone_window {
+        return window
+            .set_size(LogicalSize::new(320.0, f64::from(height)))
+            .map_err(|_| "OpenQuota window could not be resized.".into());
+    }
+
+    resize_popup_anchored(&window, height)
+}
+
+#[cfg(target_os = "windows")]
+fn resize_popup_anchored(window: &WebviewWindow, height: u32) -> Result<(), String> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        SetWindowPos, SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER,
+    };
+
+    let outer_position = window
+        .outer_position()
+        .map_err(|_| "OpenQuota window position is unavailable.")?;
+    let outer_size = window
+        .outer_size()
+        .map_err(|_| "OpenQuota window size is unavailable.")?;
+    let inner_size = window
+        .inner_size()
+        .map_err(|_| "OpenQuota content size is unavailable.")?;
+    let scale = window
+        .scale_factor()
+        .map_err(|_| "OpenQuota display scale is unavailable.")?;
+    let monitor = window
+        .current_monitor()
+        .map_err(|_| "OpenQuota display is unavailable.")?
+        .ok_or("OpenQuota display is unavailable.")?;
+    let work_area = monitor.work_area();
+    let frame_overhead = outer_size.height.saturating_sub(inner_size.height);
+    let target_inner_height = (f64::from(height) * scale)
+        .round()
+        .clamp(1.0, f64::from(u32::MAX));
+    let target_outer_height = (target_inner_height as u32).saturating_add(frame_overhead);
+    let anchored = anchored_vertical_frame(
+        VerticalFrame {
+            top: outer_position.y,
+            height: outer_size.height,
+        },
+        VerticalFrame {
+            top: work_area.position.y,
+            height: work_area.size.height,
+        },
+        target_outer_height,
+    );
+    let result = unsafe {
+        SetWindowPos(
+            window
+                .hwnd()
+                .map_err(|_| "OpenQuota native window is unavailable.")?
+                .0 as _,
+            std::ptr::null_mut(),
+            outer_position.x,
+            anchored.top,
+            i32::try_from(outer_size.width).unwrap_or(i32::MAX),
+            i32::try_from(anchored.height).unwrap_or(i32::MAX),
+            SWP_NOACTIVATE | SWP_NOOWNERZORDER | SWP_NOZORDER,
+        )
+    };
+    if result == 0 {
+        return Err("OpenQuota window could not be resized.".into());
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn resize_popup_anchored(window: &WebviewWindow, height: u32) -> Result<(), String> {
+    let outer_position = window
+        .outer_position()
+        .map_err(|_| "OpenQuota window position is unavailable.")?;
+    let outer_size = window
+        .outer_size()
+        .map_err(|_| "OpenQuota window size is unavailable.")?;
+    let monitor = window
+        .current_monitor()
+        .map_err(|_| "OpenQuota display is unavailable.")?
+        .ok_or("OpenQuota display is unavailable.")?;
+    let work_area = monitor.work_area();
+    let scale = window
+        .scale_factor()
+        .map_err(|_| "OpenQuota display scale is unavailable.")?;
+    let target_outer_height = (f64::from(height) * scale)
+        .round()
+        .clamp(1.0, f64::from(u32::MAX)) as u32;
+    let anchored = anchored_vertical_frame(
+        VerticalFrame {
+            top: outer_position.y,
+            height: outer_size.height,
+        },
+        VerticalFrame {
+            top: work_area.position.y,
+            height: work_area.size.height,
+        },
+        target_outer_height,
+    );
+    window
+        .set_size(LogicalSize::new(320.0, f64::from(height)))
+        .and_then(|_| {
+            window.set_position(tauri::PhysicalPosition::new(outer_position.x, anchored.top))
+        })
+        .map_err(|_| "OpenQuota window could not be resized.".into())
 }
 
 #[tauri::command]
@@ -476,6 +664,7 @@ pub fn run() {
             None,
         ))
         .manage(PopupDismissGuard::default())
+        .manage(updates::UpdateCoordinator::default())
         .setup(|app| {
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
@@ -592,9 +781,11 @@ pub fn run() {
             request_notification_permission,
             get_app_data_path,
             dismiss_main_window,
+            resize_main_window,
             quit_app,
             updates::check_for_updates,
-            updates::install_update
+            updates::install_update,
+            updates::open_update_page
         ])
         .on_window_event(handle_window_event)
         .run(tauri::generate_context!())

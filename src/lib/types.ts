@@ -13,6 +13,19 @@ export interface UsagePeriod {
   tokens: number;
   estimatedCostUsd: number | null;
   estimateComplete: boolean;
+  modelBreakdown?: ModelUsageBreakdown | null;
+  unknownModels?: string[];
+}
+
+export interface ModelUsageEntry {
+  model: string;
+  totalTokens: number;
+  costUsd: number | null;
+}
+
+export interface ModelUsageBreakdown {
+  models: ModelUsageEntry[];
+  sourceNote: string;
 }
 
 export interface DailyUsage extends UsagePeriod {
@@ -86,6 +99,8 @@ export interface AppSettings {
   alwaysShowPacing: boolean;
   launchAtLogin: boolean;
   autoCheckUpdates: boolean;
+  dismissedUpdateVersion: string | null;
+  lastUpdateCheckAt: string | null;
   globalShortcut: string | null;
   notifications: NotificationPreferences;
   totalSpendMetric: 'cost' | 'costPerMillion' | 'tokens';
@@ -98,6 +113,15 @@ export interface UpdateStatus {
   currentVersion: string;
   version: string | null;
   body: string | null;
+  installable: boolean;
+  releaseUrl: string;
+}
+
+export interface UpdateProgress {
+  phase: 'downloading' | 'installing';
+  downloaded: number;
+  total: number | null;
+  percent: number | null;
 }
 
 export interface SettingsViewState {

@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
@@ -11,7 +11,7 @@ use serde_json::Value;
 use walkdir::WalkDir;
 
 use crate::{
-    models::{DailyUsage, UsageHistory, UsagePeriod},
+    models::{DailyUsage, ModelUsageBreakdown, ModelUsageEntry, UsageHistory, UsagePeriod},
     storage::Storage,
 };
 
@@ -35,6 +35,14 @@ struct DayAccumulator {
     priced_events: usize,
     unpriced_events: usize,
     unknown_models: HashSet<String>,
+    models: HashMap<String, ModelAccumulator>,
+}
+
+#[derive(Default)]
+struct ModelAccumulator {
+    display_name: String,
+    tokens: u64,
+    cost: f64,
 }
 
 pub fn scan_local_usage(storage: &Storage, now: DateTime<Utc>) -> Result<UsageHistory, CodexError> {
@@ -426,10 +434,19 @@ fn aggregate(events: Vec<TokenEvent>, now: DateTime<Utc>, fast_tier: bool) -> Us
             continue;
         }
         let day = days.entry(date).or_default();
-        day.tokens += event.total;
         if let Some(cost) = estimate_cost(&event, fast_tier) {
+            day.tokens += event.total;
             day.cost += cost;
             day.priced_events += 1;
+            let name = event.model.trim();
+            if !name.is_empty() {
+                let model = day.models.entry(name.to_ascii_lowercase()).or_default();
+                if model.display_name.is_empty() {
+                    model.display_name = name.to_owned();
+                }
+                model.tokens += event.total;
+                model.cost += cost;
+            }
         } else if event.total > 0 {
             day.unpriced_events += 1;
             if !event.model.trim().is_empty() {
@@ -443,8 +460,13 @@ fn aggregate(events: Vec<TokenEvent>, now: DateTime<Utc>, fast_tier: bool) -> Us
         .rev()
         .map(|(date, day)| daily_usage(*date, day))
         .collect::<Vec<_>>();
-    let today_period = days.get(&today).map(usage_period);
-    let yesterday_period = days.get(&yesterday).map(usage_period);
+    let period_for = |date: &NaiveDate| {
+        days.get(date)
+            .filter(|day| day.tokens > 0 || day.cost > 0.0)
+            .map(usage_period)
+    };
+    let today_period = period_for(&today);
+    let yesterday_period = period_for(&yesterday);
     let total = days
         .values()
         .fold(DayAccumulator::default(), |mut total, day| {
@@ -453,6 +475,14 @@ fn aggregate(events: Vec<TokenEvent>, now: DateTime<Utc>, fast_tier: bool) -> Us
             total.priced_events += day.priced_events;
             total.unpriced_events += day.unpriced_events;
             total.unknown_models.extend(day.unknown_models.clone());
+            for (key, model) in &day.models {
+                let target = total.models.entry(key.clone()).or_default();
+                if target.display_name.is_empty() {
+                    target.display_name = model.display_name.clone();
+                }
+                target.tokens += model.tokens;
+                target.cost += model.cost;
+            }
             total
         });
     let mut unknown_models = total.unknown_models.iter().cloned().collect::<Vec<_>>();
@@ -477,11 +507,67 @@ fn daily_usage(date: NaiveDate, day: &DayAccumulator) -> DailyUsage {
 }
 
 fn usage_period(day: &DayAccumulator) -> UsagePeriod {
+    let mut unknown_models = day.unknown_models.iter().cloned().collect::<Vec<_>>();
+    unknown_models.sort();
     UsagePeriod {
         tokens: day.tokens,
         estimated_cost_usd: (day.priced_events > 0).then_some(day.cost),
         estimate_complete: day.unpriced_events == 0,
+        model_breakdown: model_breakdown(day),
+        unknown_models,
     }
+}
+
+fn model_breakdown(day: &DayAccumulator) -> Option<ModelUsageBreakdown> {
+    let mut models = day
+        .models
+        .values()
+        .filter(|model| model.tokens > 0 || model.cost > 0.0)
+        .map(|model| ModelUsageEntry {
+            model: model.display_name.clone(),
+            total_tokens: model.tokens,
+            cost_usd: Some(model.cost),
+        })
+        .collect::<Vec<_>>();
+    models.sort_by(|left, right| {
+        right
+            .cost_usd
+            .partial_cmp(&left.cost_usd)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| right.total_tokens.cmp(&left.total_tokens))
+            .then_with(|| left.model.cmp(&right.model))
+    });
+    if models.is_empty() {
+        return None;
+    }
+
+    let total_cost = models
+        .iter()
+        .filter_map(|model| model.cost_usd)
+        .sum::<f64>();
+    let mut visible = Vec::new();
+    let mut other_tokens = 0;
+    let mut other_cost = 0.0;
+    for model in models {
+        let share = model.cost_usd.unwrap_or_default() / total_cost.max(f64::EPSILON);
+        if share >= 0.05 && visible.len() < 5 {
+            visible.push(model);
+        } else {
+            other_tokens += model.total_tokens;
+            other_cost += model.cost_usd.unwrap_or_default();
+        }
+    }
+    if other_tokens > 0 || other_cost > 0.0 {
+        visible.push(ModelUsageEntry {
+            model: "Other".into(),
+            total_tokens: other_tokens,
+            cost_usd: Some(other_cost),
+        });
+    }
+    Some(ModelUsageBreakdown {
+        models: visible,
+        source_note: "From your Codex logs (estimated)".into(),
+    })
 }
 
 #[cfg(test)]
@@ -520,6 +606,29 @@ mod tests {
         assert!(history.today.as_ref().unwrap().estimated_cost_usd.is_some());
         assert!(history.today.as_ref().unwrap().estimate_complete);
         assert!(history.unknown_models.is_empty());
+    }
+
+    #[test]
+    fn period_breakdown_uses_model_names_and_excludes_unpriced_usage() {
+        let now = Utc.with_ymd_and_hms(2026, 7, 10, 12, 0, 0).unwrap();
+        let content = r#"{"timestamp":"2026-07-10T08:00:00Z","type":"event_msg","payload":{"type":"token_count","model":"gpt-5.4","info":{"last_token_usage":{"input_tokens":1000,"output_tokens":100,"total_tokens":1100}}}}
+{"timestamp":"2026-07-10T09:00:00Z","type":"event_msg","payload":{"type":"token_count","model":"gpt-5.3-codex","info":{"last_token_usage":{"input_tokens":800,"output_tokens":100,"total_tokens":900}}}}
+{"timestamp":"2026-07-10T10:00:00Z","type":"event_msg","payload":{"type":"token_count","model":"future-unpriced-model","info":{"last_token_usage":{"input_tokens":400,"output_tokens":100,"total_tokens":500}}}}"#;
+        let history = aggregate(parse_jsonl(content), now, false);
+        let today = history.today.unwrap();
+        let breakdown = today.model_breakdown.unwrap();
+
+        assert_eq!(today.tokens, 2_000);
+        assert_eq!(today.unknown_models, ["future-unpriced-model"]);
+        assert_eq!(
+            breakdown
+                .models
+                .iter()
+                .map(|entry| entry.model.as_str())
+                .collect::<Vec<_>>(),
+            ["gpt-5.4", "gpt-5.3-codex"]
+        );
+        assert_eq!(breakdown.source_note, "From your Codex logs (estimated)");
     }
 
     #[test]

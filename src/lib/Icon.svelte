@@ -4,6 +4,7 @@
     | 'back'
     | 'check'
     | 'chevron-down'
+    | 'chevron-up'
     | 'chevron-right'
     | 'gear'
     | 'grip-dots'
@@ -44,6 +45,8 @@
     <path d="m9.5 5 7 7-7 7" />
   {:else if name === 'chevron-down'}
     <path d="m6 9 6 6 6-6" />
+  {:else if name === 'chevron-up'}
+    <path d="m6 15 6-6 6 6" />
   {:else if name === 'reset'}
     <path d="M4 4v6h6" /><path d="M5.6 16.5a8 8 0 1 0 .6-9.5L4 10" />
   {:else if name === 'refresh'}

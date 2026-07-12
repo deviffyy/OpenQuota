@@ -1,7 +1,6 @@
 <script lang="ts">
   import { scale, slide } from 'svelte/transition';
   import { beginDrag } from './dragPreview';
-  import OpenQuotaMark from './OpenQuotaMark.svelte';
   import ProviderIcon from './ProviderIcon.svelte';
   import Icon from './Icon.svelte';
   import MetricRenderer from './MetricRenderer.svelte';
@@ -12,8 +11,10 @@
     AppSettings,
     MetricLayout,
     ProviderLayout,
+    UpdateProgress,
     UsageHistory,
     UsageViewState,
+    UpdateStatus,
   } from './types';
 
   interface Props {
@@ -24,7 +25,15 @@
     onCustomize: () => void;
     onOpenProviderCustomize: (providerId: string) => void;
     onShare: (providerId: string) => void;
-    onShareTotal: (projection: SpendProjection) => void;
+    onShareTotal: (projection: SpendProjection) => boolean | Promise<boolean>;
+    onRefresh: () => void;
+    reducedMotion: boolean;
+    updateStatus: UpdateStatus | null;
+    installingUpdate: boolean;
+    updateProgress: UpdateProgress | null;
+    updateError: string | null;
+    onInstallUpdate: () => void;
+    onOpenUpdatePage: () => void;
   }
   let {
     viewState,
@@ -35,6 +44,14 @@
     onOpenProviderCustomize,
     onShare,
     onShareTotal,
+    onRefresh,
+    reducedMotion,
+    updateStatus,
+    installingUpdate,
+    updateProgress,
+    updateError,
+    onInstallUpdate,
+    onOpenUpdatePage,
   }: Props = $props();
   const emptyUsage: UsageHistory = {
     today: null,
@@ -50,7 +67,6 @@
     null,
   );
   const enabledProviders = $derived(settings.providers.filter((provider) => provider.enabled));
-  const detectedProviders = $derived(settings.providers.filter((provider) => provider.detected));
   const providerUsage = $derived(
     enabledProviders
       .filter((provider) => providerSupportsSpend(provider.id))
@@ -168,6 +184,16 @@
   function springOut(progress: number) {
     return 1 - Math.pow(1 - progress, 3);
   }
+  function stalenessTooltip(refreshedAt: string) {
+    const elapsedSeconds = Math.max(0, Math.floor((now - Date.parse(refreshedAt)) / 1000));
+    if (!Number.isFinite(elapsedSeconds)) return 'Last update time unavailable';
+    if (elapsedSeconds < 60) return 'Last updated moments ago';
+    const minutes = Math.floor(elapsedSeconds / 60);
+    if (minutes < 60) return `Last updated ${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    return `Last updated ${hours}h${remainingMinutes ? ` ${remainingMinutes}m` : ''} ago`;
+  }
 </script>
 
 <svelte:window
@@ -177,23 +203,73 @@
   }}
 />
 
-{#if !settings.detectionNoticeDismissed}
-  <section class="detection-card" out:scale={{ start: 0.95, duration: 420, easing: springOut }}>
+{#if updateStatus?.available && updateStatus.version !== settings.dismissedUpdateVersion}
+  <section class="hint-card update-banner" aria-label="Update Available">
+    <span class="hint-card__icon"><Icon name="refresh" size={16} strokeWidth={2} /></span>
     <div>
-      <strong>{detectedProviders.length > 0 ? 'Providers Detected' : 'Starter Provider'}</strong
-      ><span
-        >{detectedProviders.length > 0
-          ? `${detectedProviders.map((provider) => providerDisplayName(provider.id)).join(', ')} enabled from local sign-ins.`
-          : 'No local login was detected. Codex stays available as the starter provider.'}</span
+      <strong>Update Available</strong>
+      <span>OpenQuota {updateStatus.version} is ready to download.</span>
+      {#if updateStatus.body}<small class="update-notes">{updateStatus.body}</small>{/if}
+      {#if installingUpdate && updateProgress}
+        <div
+          class="update-progress"
+          role="progressbar"
+          aria-label="Update download"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow={updateProgress.phase === 'installing'
+            ? 100
+            : (updateProgress.percent ?? undefined)}
+        >
+          <span
+            style:width={`${updateProgress.phase === 'installing' ? 100 : (updateProgress.percent ?? 8)}%`}
+          ></span>
+        </div>
+        <small>
+          {updateProgress.phase === 'installing'
+            ? 'Installing update…'
+            : updateProgress.percent === null
+              ? 'Downloading update…'
+              : `Downloading update… ${updateProgress.percent}%`}
+        </small>
+      {/if}
+      {#if updateError}<small class="notice-text">{updateError}</small>{/if}
+    </div>
+    <button
+      type="button"
+      onclick={updateStatus.installable ? onInstallUpdate : onOpenUpdatePage}
+      disabled={installingUpdate}
+      >{updateStatus.installable
+        ? installingUpdate
+          ? 'Updating…'
+          : 'Install Update'
+        : 'Download Update'}</button
+    >
+    <button
+      class="hint-card__dismiss"
+      type="button"
+      aria-label="Dismiss"
+      onclick={() =>
+        onSettingsChange({
+          ...settings,
+          dismissedUpdateVersion: updateStatus?.version ?? null,
+        })}>×</button
+    >
+  </section>
+{/if}
+
+{#if !settings.detectionNoticeDismissed}
+  <section
+    class="detection-card"
+    out:scale={{ start: 0.95, duration: reducedMotion ? 0 : 420, easing: springOut }}
+  >
+    <div>
+      <strong>Welcome to OpenQuota</strong><span
+        >We set you up with the AI tools found on your computer. Add or hide providers any time.</span
       >
     </div>
-    <button type="button" onclick={onCustomize}>Customize</button>
-    <button
-      class="dismiss"
-      type="button"
-      aria-label="Dismiss provider detection"
-      onclick={dismissDetection}>×</button
-    >
+    <button type="button" onclick={onCustomize}>Open Customize</button>
+    <button class="dismiss" type="button" aria-label="Dismiss" onclick={dismissDetection}>×</button>
   </section>
 {/if}
 
@@ -225,20 +301,24 @@
       ondrop={() => reorderProvider(provider.id)}
       oncontextmenu={(event) => openProviderMenu(event, provider.id)}
     >
-      <header class="provider-header">
-        <span
-          class="drag-grip"
-          aria-hidden="true"
-          draggable="true"
-          ondragstart={(event) => {
-            draggedProvider = provider.id;
-            beginDrag(event, providerDisplayName(provider.id), state.snapshot?.plan ?? 'Provider');
-          }}
-          ondragend={() => (draggedProvider = null)}><Icon name="grip-dots" size={13} /></span
-        >
+      <header
+        class="provider-header"
+        role="group"
+        aria-label={`Drag ${providerDisplayName(provider.id)} to reorder`}
+        draggable="true"
+        ondragstart={(event) => {
+          draggedProvider = provider.id;
+          beginDrag(event, providerDisplayName(provider.id), state.snapshot?.plan ?? 'Provider');
+        }}
+        ondragend={() => (draggedProvider = null)}
+      >
+        <span class="drag-grip" aria-hidden="true"><Icon name="grip-dots" size={13} /></span>
         <h1>{providerDisplayName(provider.id)}</h1>
         {#if state.snapshot.plan}<span class="plan">{state.snapshot.plan}</span>{/if}
-        {#if state.stale}<span class="status-badge">Stale</span>{/if}
+        {#if state.stale}<span
+            class="status-badge"
+            data-tooltip={stalenessTooltip(state.snapshot.refreshedAt)}>Outdated</span
+          >{/if}
         {#if state.refreshing}
           <span class="provider-refreshing" aria-label="Refreshing"
             ><Icon name="refresh" size={12} strokeWidth={2} /></span
@@ -291,15 +371,20 @@
             class="demand-divider"
             type="button"
             aria-expanded={provider.expanded}
+            aria-label={provider.expanded ? 'Show less' : 'Show more'}
             onclick={() => updateProvider({ ...provider, expanded: !provider.expanded })}
           >
-            <span></span><b>{provider.expanded ? 'Hide' : 'On Demand'}</b><i
-              class:expanded={provider.expanded}
-              ><Icon name="chevron-down" size={10} strokeWidth={2.2} /></i
-            ><span></span>
+            <Icon
+              name={provider.expanded ? 'chevron-up' : 'chevron-down'}
+              size={10}
+              strokeWidth={2.2}
+            />
           </button>
           {#if provider.expanded}
-            <div class="demand-metrics" transition:slide={{ duration: 420, easing: springOut }}>
+            <div
+              class="demand-metrics"
+              transition:slide={{ duration: reducedMotion ? 0 : 420, easing: springOut }}
+            >
               {#each demandMetrics as metric (metric.id)}
                 <div
                   class="metric-context-target"
@@ -345,17 +430,18 @@
       ondrop={() => reorderProvider(provider.id)}
       oncontextmenu={(event) => openProviderMenu(event, provider.id)}
     >
-      <header class="provider-header">
-        <span
-          class="drag-grip"
-          aria-hidden="true"
-          draggable="true"
-          ondragstart={(event) => {
-            draggedProvider = provider.id;
-            beginDrag(event, providerDisplayName(provider.id), 'No usage data');
-          }}
-          ondragend={() => (draggedProvider = null)}><Icon name="grip-dots" size={13} /></span
-        >
+      <header
+        class="provider-header"
+        role="group"
+        aria-label={`Drag ${providerDisplayName(provider.id)} to reorder`}
+        draggable="true"
+        ondragstart={(event) => {
+          draggedProvider = provider.id;
+          beginDrag(event, providerDisplayName(provider.id), 'No usage data');
+        }}
+        ondragend={() => (draggedProvider = null)}
+      >
+        <span class="drag-grip" aria-hidden="true"><Icon name="grip-dots" size={13} /></span>
         <h1>{providerDisplayName(provider.id)}</h1>
         <span
           class="provider-warning"
@@ -389,25 +475,23 @@
       tabindex="-1"
       onkeydown={handleContextMenuKey}
     >
-      <button type="button" role="menuitem" onclick={() => onOpenProviderCustomize(menuProvider.id)}
-        ><Icon name="sliders" size={15} />Customize</button
-      >
-      <button type="button" role="menuitem" onclick={() => onShare(menuProvider.id)}
-        ><Icon name="share" size={15} />Share Screenshot</button
-      >
-      <button
-        type="button"
-        role="menuitem"
-        onclick={() => updateProvider({ ...menuProvider, expanded: !menuProvider.expanded })}
-        ><Icon name="chevron-down" size={14} />{menuProvider.expanded ? 'Collapse' : 'Expand'} On Demand</button
-      >
-      <hr />
       <button
         class="danger"
         type="button"
         role="menuitem"
         onclick={() => hideProvider(menuProvider.id)}
         ><Icon name="power" size={15} />Hide {providerDisplayName(menuProvider.id)}</button
+      >
+      <hr />
+      <button type="button" role="menuitem" onclick={onRefresh}
+        ><Icon name="refresh" size={15} />Refresh {providerDisplayName(menuProvider.id)}</button
+      >
+      <button type="button" role="menuitem" onclick={() => onOpenProviderCustomize(menuProvider.id)}
+        ><Icon name="sliders" size={15} />Customize…</button
+      >
+      <hr />
+      <button type="button" role="menuitem" onclick={() => onShare(menuProvider.id)}
+        ><Icon name="share" size={15} />Share Screenshot</button
       >
     </div>
   {/if}
@@ -426,6 +510,14 @@
       tabindex="-1"
       onkeydown={handleContextMenuKey}
     >
+      <button
+        class="danger"
+        type="button"
+        role="menuitem"
+        onclick={() =>
+          patchMetric(metricProvider.id, menuMetric.id, { enabled: false, pinned: false })}
+        ><Icon name="power" size={15} />Hide</button
+      >
       {#if metricDefinition(menuMetric.id)?.pinnable}
         <button
           type="button"
@@ -438,30 +530,19 @@
               enabled: true,
             })}
           ><Icon name={menuMetric.pinned ? 'star-filled' : 'star'} size={15} />{menuMetric.pinned
-            ? 'Unpin'
-            : 'Pin'} Metric</button
+            ? 'Unstar'
+            : 'Star for menu bar'}</button
         >
       {/if}
-      <button
-        type="button"
-        role="menuitem"
-        onclick={() =>
-          patchMetric(metricProvider.id, menuMetric.id, {
-            section: menuMetric.section === 'alwaysVisible' ? 'onDemand' : 'alwaysVisible',
-          })}
-        ><Icon name="sliders" size={15} />Move to {menuMetric.section === 'alwaysVisible'
-          ? 'On Demand'
-          : 'Always Visible'}</button
-      >
       <hr />
+      <button type="button" role="menuitem" onclick={onRefresh}
+        ><Icon name="refresh" size={15} />Refresh {providerDisplayName(metricProvider.id)}</button
+      >
       <button
-        class="danger"
         type="button"
         role="menuitem"
-        onclick={() =>
-          patchMetric(metricProvider.id, menuMetric.id, { enabled: false, pinned: false })}
-        ><Icon name="power" size={15} />Hide {metricDefinition(menuMetric.id)?.label ??
-          menuMetric.id}</button
+        onclick={() => onOpenProviderCustomize(metricProvider.id)}
+        ><Icon name="sliders" size={15} />Customize…</button
       >
     </div>
   {/if}
@@ -469,8 +550,6 @@
 
 {#if enabledProviders.length === 0}
   <section class="empty-dashboard">
-    <OpenQuotaMark size={30} /><strong>No Providers Enabled</strong><span
-      >Turn a provider on in Customize to show usage.</span
-    ><button type="button" onclick={onCustomize}>Open Customize</button>
+    <span>Turn on Customize to choose what to show.</span>
   </section>
 {/if}

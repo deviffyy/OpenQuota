@@ -25,6 +25,13 @@
     if (definition.sourceId === 'yesterday') return snapshot.usage.yesterday;
     return snapshot.usage.last30Days;
   });
+  const usageSourceNote = $derived(
+    snapshot.providerId === 'claude'
+      ? 'From your Claude usage history (estimated)'
+      : snapshot.providerId === 'codex'
+        ? 'From your Codex logs (estimated)'
+        : `From your ${snapshot.providerId} usage history`,
+  );
 </script>
 
 {#if definition?.kind === 'quota' && quota}
@@ -47,7 +54,7 @@
       })}
   />
 {:else if definition?.kind === 'trend'}
-  <UsageTrend daily={snapshot.usage.daily} />
+  <UsageTrend daily={snapshot.usage.daily} sourceNote={usageSourceNote} />
 {:else if definition?.kind === 'usage'}
   <UsageMetric label={definition.label} {period} />
 {/if}

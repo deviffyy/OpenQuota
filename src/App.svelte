@@ -1,15 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { fly } from 'svelte/transition';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
-  import { getCurrentWindow, LogicalSize } from '@tauri-apps/api/window';
+  import { currentMonitor, getCurrentWindow } from '@tauri-apps/api/window';
   import CustomizeProviderDetail from './lib/CustomizeProviderDetail.svelte';
   import CustomizeProviderList from './lib/CustomizeProviderList.svelte';
   import Dashboard from './lib/Dashboard.svelte';
   import Icon from './lib/Icon.svelte';
   import { defaultMetricLayout, metricDefinition, providerDisplayName } from './lib/metrics';
   import OpenQuotaMark from './lib/OpenQuotaMark.svelte';
+  import { horizontalPageTransition, shouldSlideBetweenScreens } from './lib/pageTransition';
+  import { panelTargetHeight, screenPanelHeight } from './lib/panelSizing';
+  import { desktopPlatform, shortcutLabels } from './lib/platform';
   import { providerIconPath } from './lib/providerIconPaths';
   import SettingsScreen from './lib/SettingsScreen.svelte';
   import type { SpendProjection } from './lib/totalSpend';
@@ -17,9 +19,11 @@
     AppSettings,
     QuotaWindow,
     SettingsViewState,
+    UpdateProgress,
     UpdateStatus,
     UsageViewState,
   } from './lib/types';
+  import { automaticUpdateDelay, UPDATE_CHECK_INTERVAL_MS } from './lib/updateSchedule';
 
   type Screen = 'dashboard' | 'customize' | 'settings' | `provider:${string}`;
   type ShareRow =
@@ -32,7 +36,7 @@
     standaloneWindow: false,
     platformSummary: null,
     settings: {
-      schemaVersion: 3,
+      schemaVersion: 4,
       knownProviderIds: ['claude', 'codex', 'antigravity'],
       showTotalSpend: true,
       theme: 'system',
@@ -44,6 +48,8 @@
       alwaysShowPacing: false,
       launchAtLogin: false,
       autoCheckUpdates: true,
+      dismissedUpdateVersion: null,
+      lastUpdateCheckAt: null,
       globalShortcut: null,
       notifications: { almostOut: false, cuttingItClose: false, willRunOut: false },
       totalSpendMetric: 'cost',
@@ -57,19 +63,27 @@
   let settingsState = $state<SettingsViewState>(emptySettings);
   let screen = $state<Screen>('dashboard');
   let now = $state(Date.now());
-  let saving = $state(false);
   let settingsError = $state<string | null>(null);
   let updateStatus = $state<UpdateStatus | null>(null);
   let updateError = $state<string | null>(null);
   let checkingUpdate = $state(false);
   let installingUpdate = $state(false);
+  let updateProgress = $state<UpdateProgress | null>(null);
+  let automaticUpdatesReady = $state(false);
   let saveQueue: Promise<void> = Promise.resolve();
+  let measureFrame = 0;
   let resizeFrame = 0;
+  let resizeGeneration = 0;
+  let windowResizeAvailable = true;
+  let dashboardPanelHeight: number | null = null;
+  let reducedMotion = $state(false);
   let slideDirection = $state(1);
+  let slidePageTransition = $state(true);
   let customizationHistory = $state<AppSettings[]>([]);
   let confirmationMessage = $state<string | null>(null);
   let showAbout = $state(false);
   let shareMenuOpen = $state(false);
+  let optionsMenuElement = $state<HTMLDetailsElement>();
   let shareTimer: ReturnType<typeof setTimeout> | undefined;
   const providerStates = $derived(Object.values(viewState.providers));
   const anyRefreshing = $derived(providerStates.some((state) => state.refreshing));
@@ -80,7 +94,8 @@
       .sort()
       .at(-1),
   );
-  const showingCache = $derived(providerStates.some((state) => state.source === 'cache'));
+  const platform = desktopPlatform();
+  const shortcuts = shortcutLabels(platform);
 
   $effect(() => {
     const root = document.documentElement;
@@ -90,41 +105,88 @@
   });
 
   $effect(() => {
-    const targetScreen = screen;
-    const density = settingsState.settings.density;
-    const viewFingerprint = JSON.stringify(viewState);
-    if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
-    window.cancelAnimationFrame(resizeFrame);
-    resizeFrame = window.requestAnimationFrame(() => {
-      resizeFrame = window.requestAnimationFrame(() => {
-        if (density && viewFingerprint) void fitWindowToScreen(targetScreen);
-      });
-    });
+    if (!automaticUpdatesReady || !settingsState.settings.autoCheckUpdates) return;
+    const delay = automaticUpdateDelay(settingsState.settings.lastUpdateCheckAt);
+    let interval: ReturnType<typeof setInterval> | undefined;
+    const timer = setTimeout(() => {
+      void checkForUpdates();
+      interval = setInterval(() => void checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
+    }, delay);
+    return () => {
+      clearTimeout(timer);
+      if (interval) clearInterval(interval);
+    };
   });
 
-  async function fitWindowToScreen(targetScreen: Screen) {
-    const page = document.querySelector<HTMLElement>(`.screen-page[data-screen="${targetScreen}"]`);
+  function scheduleWindowFit() {
+    if (
+      typeof window === 'undefined' ||
+      !('__TAURI_INTERNALS__' in window) ||
+      !windowResizeAvailable
+    )
+      return;
+    window.cancelAnimationFrame(measureFrame);
+    measureFrame = window.requestAnimationFrame(() => void fitWindowToScreen());
+  }
+
+  async function fitWindowToScreen() {
+    const page = document.querySelector<HTMLElement>(`.screen-page[data-screen="${screen}"]`);
+    const content = document.querySelector<HTMLElement>('.content');
+    const stage = document.querySelector<HTMLElement>('.screen-stage');
+    const header = document.querySelector<HTMLElement>('.screen-header');
     const footer = document.querySelector<HTMLElement>('.footer');
-    if (!page) return;
-    const verticalPadding = targetScreen === 'dashboard' ? 26 : 68;
-    const target = Math.min(
-      680,
-      Math.max(200, Math.ceil(page.scrollHeight + verticalPadding + (footer?.offsetHeight ?? 0))),
-    );
+    if (!page || !content || !stage) return;
+    const pageHeight = page.scrollHeight;
+    stage.style.height = `${pageHeight}px`;
+    const contentStyle = window.getComputedStyle(content);
+    const contentPadding =
+      Number.parseFloat(contentStyle.paddingTop) + Number.parseFloat(contentStyle.paddingBottom);
+    const idealHeight =
+      pageHeight + contentPadding + (header?.offsetHeight ?? 0) + (footer?.offsetHeight ?? 0);
     const appWindow = getCurrentWindow();
+    const monitor = await currentMonitor().catch(() => null);
+    const workAreaHeight = monitor
+      ? monitor.workArea.size.height / monitor.scaleFactor
+      : window.screen.availHeight;
     const scale = await appWindow.scaleFactor();
     const current = (await appWindow.innerSize()).height / scale;
+    const contentTarget = panelTargetHeight(idealHeight, workAreaHeight);
+    const target = screenPanelHeight(
+      screen,
+      contentTarget,
+      dashboardPanelHeight ?? Math.round(current),
+    );
+    if (screen === 'dashboard') dashboardPanelHeight = target;
+    const generation = ++resizeGeneration;
+    window.cancelAnimationFrame(resizeFrame);
+    if (reducedMotion) {
+      await resizeWindow(target);
+      return;
+    }
+    if (Math.abs(current - target) < 1) return;
     const started = performance.now();
     const duration = 420;
     const animate = (time: number) => {
+      if (generation !== resizeGeneration) return;
       const progress = Math.min(1, (time - started) / duration);
       const eased = 1 - Math.pow(1 - progress, 3);
-      void appWindow.setSize(
-        new LogicalSize(320, Math.round(current + (target - current) * eased)),
-      );
-      if (progress < 1) resizeFrame = window.requestAnimationFrame(animate);
+      void resizeWindow(Math.round(current + (target - current) * eased));
+      if (progress < 1) {
+        resizeFrame = window.requestAnimationFrame(animate);
+      }
     };
     resizeFrame = window.requestAnimationFrame(animate);
+  }
+
+  async function resizeWindow(height: number) {
+    try {
+      await invoke('resize_main_window', { height });
+      return true;
+    } catch {
+      windowResizeAvailable = false;
+      settingsError = 'OpenQuota window could not adapt to its content.';
+      return false;
+    }
   }
 
   function closePopup() {
@@ -149,6 +211,7 @@
   }
   function navigate(next: Screen) {
     if (next === screen) return;
+    slidePageTransition = shouldSlideBetweenScreens(screen, next);
     slideDirection = screenRank(next) >= screenRank(screen) ? 1 : -1;
     screen = next;
   }
@@ -162,7 +225,6 @@
   }
   function saveSettings(next: AppSettings) {
     settingsState = { ...settingsState, settings: next };
-    saving = true;
     settingsError = null;
     saveQueue = saveQueue
       .then(async () => {
@@ -170,9 +232,6 @@
       })
       .catch((error: unknown) => {
         settingsError = typeof error === 'string' ? error : 'Settings could not be saved.';
-      })
-      .finally(() => {
-        saving = false;
       });
   }
   function cloneSettings(value: AppSettings): AppSettings {
@@ -212,7 +271,12 @@
     }
   }
   async function resetCustomization() {
-    if (!window.confirm('Reset all provider and metric customization?')) return;
+    if (
+      !window.confirm(
+        "Turns providers back on for the tools you have installed and resets every provider's metrics and order. Are you sure?",
+      )
+    )
+      return;
     customizationHistory = [
       ...customizationHistory.slice(-19),
       cloneSettings(settingsState.settings),
@@ -278,7 +342,7 @@
     } else {
       await navigator.clipboard.writeText(fallback);
     }
-    showConfirmation('Screenshot copied');
+    showConfirmation('Copied to clipboard');
   }
   async function shareProvider(providerId: string) {
     const card = document.querySelector<HTMLElement>(`[data-provider-id="${providerId}"]`);
@@ -409,7 +473,7 @@
   }
   async function shareTotalSpend(projection: SpendProjection) {
     const card = document.querySelector<HTMLElement>('[data-total-spend]');
-    if (!card) return;
+    if (!card) return false;
     try {
       const canvas = document.createElement('canvas');
       canvas.width = 720;
@@ -528,8 +592,10 @@
       context.font = '15px system-ui';
       context.fillText('OpenQuota · Local usage snapshot', 38, 478);
       await copyCanvas(canvas, card.innerText.trim());
+      return true;
     } catch {
       settingsError = 'Total Spend screenshot could not be copied.';
+      return false;
     }
   }
   async function copyDataPath() {
@@ -559,6 +625,20 @@
     menu.open = false;
     menu.querySelector<HTMLElement>('summary')?.focus();
   }
+  function closeOptionsMenu(restoreFocus = false) {
+    if (!optionsMenuElement?.open) return;
+    optionsMenuElement.open = false;
+    if (restoreFocus) optionsMenuElement.querySelector<HTMLElement>('summary')?.focus();
+  }
+  function handleWindowPointerDown(event: PointerEvent) {
+    if (
+      optionsMenuElement?.open &&
+      event.target instanceof Node &&
+      !optionsMenuElement.contains(event.target)
+    ) {
+      closeOptionsMenu();
+    }
+  }
   async function requestNotifications() {
     try {
       settingsState = await invoke<SettingsViewState>('request_notification_permission');
@@ -566,25 +646,47 @@
       settingsError = 'Notification permission could not be requested.';
     }
   }
-  async function checkForUpdates() {
+  async function checkForUpdates(manual = false) {
+    if (checkingUpdate || installingUpdate) return;
     checkingUpdate = true;
-    updateError = null;
+    if (manual) updateError = null;
     try {
-      updateStatus = await invoke<UpdateStatus>('check_for_updates');
+      const status = await invoke<UpdateStatus>('check_for_updates');
+      updateStatus = status;
+      saveSettings({
+        ...settingsState.settings,
+        lastUpdateCheckAt: new Date().toISOString(),
+      });
+      if (manual && !status.available && screen !== 'settings') {
+        showConfirmation(`OpenQuota ${status.currentVersion} is up to date.`);
+      }
     } catch (error) {
-      updateError = typeof error === 'string' ? error : 'Updates could not be checked.';
+      if (manual) {
+        updateError = typeof error === 'string' ? error : 'Updates could not be checked.';
+      }
     } finally {
       checkingUpdate = false;
     }
   }
   async function installUpdate() {
+    if (installingUpdate || checkingUpdate) return;
     installingUpdate = true;
+    updateProgress = { phase: 'downloading', downloaded: 0, total: null, percent: null };
     updateError = null;
     try {
       await invoke('install_update');
     } catch (error) {
       updateError = typeof error === 'string' ? error : 'The update could not be installed.';
       installingUpdate = false;
+      updateProgress = null;
+    }
+  }
+  async function openUpdatePage() {
+    try {
+      await invoke('open_update_page');
+    } catch (error) {
+      updateError =
+        typeof error === 'string' ? error : 'The OpenQuota download page could not be opened.';
     }
   }
   function nextUpdateLabel(value: string | undefined) {
@@ -598,6 +700,30 @@
   }
 
   onMount(() => {
+    const motionQuery = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const updateMotionPreference = () => {
+      reducedMotion = motionQuery.matches;
+      document.documentElement.toggleAttribute('data-reduced-motion', reducedMotion);
+      scheduleWindowFit();
+    };
+    updateMotionPreference();
+    motionQuery.addEventListener('change', updateMotionPreference);
+
+    const popover = document.querySelector<HTMLElement>('.popover');
+    const resizeObserver =
+      typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(scheduleWindowFit);
+    const observePanelParts = () => {
+      resizeObserver?.disconnect();
+      document
+        .querySelectorAll<HTMLElement>('.screen-page, .screen-header, .footer, .notice')
+        .forEach((element) => resizeObserver?.observe(element));
+      scheduleWindowFit();
+    };
+    const mutationObserver = new MutationObserver(observePanelParts);
+    if (popover) {
+      mutationObserver.observe(popover, { childList: true, subtree: true, characterData: true });
+    }
+    observePanelParts();
     const handleKeydown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -623,6 +749,14 @@
       ) {
         event.preventDefault();
         undoCustomization();
+      } else if (
+        (event.ctrlKey || event.metaKey) &&
+        event.key.toLowerCase() === 'q' &&
+        !(event.target instanceof HTMLInputElement) &&
+        !(event.target instanceof HTMLTextAreaElement)
+      ) {
+        event.preventDefault();
+        quitApp();
       }
     };
     document.addEventListener('keydown', handleKeydown);
@@ -642,24 +776,34 @@
       resetTransientUi();
       navigate('dashboard');
     }).then((stop) => cleanup.push(stop));
+    void listen<UpdateProgress>('update-progress', (event) => {
+      updateProgress = event.payload;
+    }).then((stop) => cleanup.push(stop));
     void invoke<UsageViewState>('get_usage_state')
       .then((state) => (viewState = state))
       .catch(() => (settingsError = 'OpenQuota backend is unavailable.'));
     void invoke<SettingsViewState>('get_app_settings')
       .then((state) => {
         settingsState = state;
-        if (state.settings.autoCheckUpdates) void checkForUpdates();
+        automaticUpdatesReady = true;
       })
       .catch(() => (settingsError = 'Settings are unavailable.'));
     return () => {
       document.removeEventListener('keydown', handleKeydown);
       window.clearInterval(clock);
+      window.cancelAnimationFrame(measureFrame);
+      window.cancelAnimationFrame(resizeFrame);
+      motionQuery.removeEventListener('change', updateMotionPreference);
+      document.documentElement.removeAttribute('data-reduced-motion');
+      mutationObserver.disconnect();
+      resizeObserver?.disconnect();
       cleanup.forEach((stop) => stop());
     };
   });
 </script>
 
 <svelte:head><meta name="color-scheme" content="light dark" /></svelte:head>
+<svelte:window onpointerdown={handleWindowPointerDown} />
 
 <main
   class="popover"
@@ -697,54 +841,70 @@
   {/if}
   <div class="content" class:content--chrome={screen !== 'dashboard'}>
     {#if settingsError}<div class="notice notice--blocking" role="alert">{settingsError}</div>{/if}
-    {#key screen}
-      <div
-        class="screen-page"
-        data-screen={screen}
-        in:fly={{ x: 320 * slideDirection, duration: 420, easing: springOut }}
-        out:fly={{ x: -320 * slideDirection, duration: 420, easing: springOut }}
-      >
-        {#if screen === 'dashboard'}
-          <Dashboard
-            {viewState}
-            settings={settingsState.settings}
-            {now}
-            onSettingsChange={saveSettings}
-            onCustomize={() => navigate('customize')}
-            onOpenProviderCustomize={(id) => navigate(`provider:${id}`)}
-            onShare={shareProvider}
-            onShareTotal={shareTotalSpend}
-          />
-        {:else if screen === 'settings'}
-          <SettingsScreen
-            settingsView={settingsState}
-            onChange={saveSettings}
-            onRequestNotifications={requestNotifications}
-            {updateStatus}
-            {updateError}
-            {checkingUpdate}
-            {installingUpdate}
-            onCheckForUpdates={checkForUpdates}
-            onInstallUpdate={installUpdate}
-            onCustomize={() => navigate('customize')}
-            onCopyDataPath={copyDataPath}
-          />
-        {:else if screen === 'customize'}
-          <CustomizeProviderList
-            settings={settingsState.settings}
-            onOpen={(id) => navigate(`provider:${id}`)}
-            onChange={saveCustomization}
-            onSettings={() => navigate('settings')}
-          />
-        {:else if screen.startsWith('provider:')}
-          <CustomizeProviderDetail
-            settings={settingsState.settings}
-            providerId={screen.slice(9)}
-            onChange={saveCustomization}
-          />
-        {/if}
-      </div>
-    {/key}
+    <div class="screen-stage">
+      {#key screen}
+        <div
+          class="screen-page"
+          data-screen={screen}
+          in:horizontalPageTransition={{
+            direction: slideDirection,
+            duration: reducedMotion || !slidePageTransition ? 0 : 420,
+            easing: springOut,
+          }}
+          out:horizontalPageTransition={{
+            direction: -slideDirection,
+            duration: reducedMotion || !slidePageTransition ? 0 : 420,
+            easing: springOut,
+          }}
+        >
+          {#if screen === 'dashboard'}
+            <Dashboard
+              {viewState}
+              settings={settingsState.settings}
+              {now}
+              onSettingsChange={saveSettings}
+              onCustomize={() => navigate('customize')}
+              onOpenProviderCustomize={(id) => navigate(`provider:${id}`)}
+              onShare={shareProvider}
+              onShareTotal={shareTotalSpend}
+              onRefresh={refresh}
+              {reducedMotion}
+              {updateStatus}
+              {installingUpdate}
+              {updateProgress}
+              {updateError}
+              onInstallUpdate={installUpdate}
+              onOpenUpdatePage={openUpdatePage}
+            />
+          {:else if screen === 'settings'}
+            <SettingsScreen
+              settingsView={settingsState}
+              onChange={saveSettings}
+              onRequestNotifications={requestNotifications}
+              {updateError}
+              {checkingUpdate}
+              {updateStatus}
+              onCheckForUpdates={() => void checkForUpdates(true)}
+              onCustomize={() => navigate('customize')}
+              onCopyDataPath={copyDataPath}
+            />
+          {:else if screen === 'customize'}
+            <CustomizeProviderList
+              settings={settingsState.settings}
+              onOpen={(id) => navigate(`provider:${id}`)}
+              onChange={saveCustomization}
+              onSettings={() => navigate('settings')}
+            />
+          {:else if screen.startsWith('provider:')}
+            <CustomizeProviderDetail
+              settings={settingsState.settings}
+              providerId={screen.slice(9)}
+              onChange={saveCustomization}
+            />
+          {/if}
+        </div>
+      {/key}
+    </div>
   </div>
 
   {#if screen === 'dashboard' || screen === 'settings'}
@@ -757,17 +917,11 @@
         aria-label="Refresh provider usage"
       >
         <span>OpenQuota 0.1.0</span><small
-          >{anyRefreshing
-            ? 'Updating…'
-            : saving
-              ? 'Saving settings…'
-              : showingCache
-                ? 'Showing disk cache'
-                : nextUpdateLabel(latestRefresh)}</small
+          >{anyRefreshing ? 'Updating…' : nextUpdateLabel(latestRefresh)}</small
         >
       </button>
       {#if screen === 'dashboard'}
-        <details class="options-menu">
+        <details class="options-menu" bind:this={optionsMenuElement}>
           <summary aria-label="Open options" onkeydown={handleOptionsKey}
             ><span>Options</span><Icon name="chevron-down" size={11} strokeWidth={2.2} /></summary
           >
@@ -777,6 +931,11 @@
             aria-label="Options menu"
             tabindex="-1"
             onkeydown={handleOptionsKey}
+            onclick={(event) => {
+              if (event.target instanceof Element && event.target.closest('button')) {
+                closeOptionsMenu();
+              }
+            }}
           >
             <button
               class="menu-item"
@@ -790,7 +949,7 @@
               type="button"
               aria-label="Settings"
               onclick={() => navigate('settings')}
-              ><Icon name="gear" /><span>Settings</span><kbd>⌘,</kbd></button
+              ><Icon name="gear" /><span>Settings</span><kbd>{shortcuts.settings}</kbd></button
             >
             <hr />
             <details
@@ -813,7 +972,7 @@
                 {/if}
               </div>
             </details>
-            <button class="menu-item" type="button" onclick={checkForUpdates}
+            <button class="menu-item" type="button" onclick={() => void checkForUpdates(true)}
               ><Icon name="refresh" /><span>Check for Updates…</span></button
             >
             <hr />
@@ -825,7 +984,7 @@
               type="button"
               aria-label="Quit OpenQuota"
               onclick={quitApp}
-              ><Icon name="power" /><span>Quit OpenQuota</span><kbd>⌘Q</kbd></button
+              ><Icon name="power" /><span>Quit OpenQuota</span><kbd>{shortcuts.quit}</kbd></button
             >
           </div>
         </details>

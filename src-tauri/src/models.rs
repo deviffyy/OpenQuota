@@ -31,6 +31,25 @@ pub struct UsagePeriod {
     pub tokens: u64,
     pub estimated_cost_usd: Option<f64>,
     pub estimate_complete: bool,
+    #[serde(default)]
+    pub model_breakdown: Option<ModelUsageBreakdown>,
+    #[serde(default)]
+    pub unknown_models: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelUsageEntry {
+    pub model: String,
+    pub total_tokens: u64,
+    pub cost_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelUsageBreakdown {
+    pub models: Vec<ModelUsageEntry>,
+    pub source_note: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -217,6 +236,8 @@ pub struct AppSettings {
     pub always_show_pacing: bool,
     pub launch_at_login: bool,
     pub auto_check_updates: bool,
+    pub dismissed_update_version: Option<String>,
+    pub last_update_check_at: Option<DateTime<Utc>>,
     pub global_shortcut: Option<String>,
     pub notifications: NotificationPreferences,
     pub total_spend_metric: TotalSpendMetric,
@@ -227,7 +248,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            schema_version: 3,
+            schema_version: 4,
             providers: Vec::new(),
             known_provider_ids: Vec::new(),
             show_total_spend: true,
@@ -240,6 +261,8 @@ impl Default for AppSettings {
             always_show_pacing: false,
             launch_at_login: false,
             auto_check_updates: true,
+            dismissed_update_version: None,
+            last_update_check_at: None,
             global_shortcut: None,
             notifications: NotificationPreferences::default(),
             total_spend_metric: TotalSpendMetric::Cost,
@@ -257,4 +280,21 @@ pub struct SettingsViewState {
     pub integration_error: Option<String>,
     pub standalone_window: bool,
     pub platform_summary: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::AppSettings;
+
+    #[test]
+    fn older_settings_default_new_update_state_fields() {
+        let mut value = serde_json::to_value(AppSettings::default()).unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("dismissedUpdateVersion");
+        object.remove("lastUpdateCheckAt");
+
+        let settings: AppSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(settings.dismissed_update_version, None);
+        assert_eq!(settings.last_update_check_at, None);
+    }
 }

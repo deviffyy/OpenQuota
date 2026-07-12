@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import Icon from './Icon.svelte';
   import { providerDisplayName } from './metrics';
   import { emptySpendMessage, projectSpend, type SpendProjection } from './totalSpend';
@@ -8,50 +9,73 @@
     providers: Array<{ id: string; usage: UsageHistory }>;
     settings: AppSettings;
     onChange: (settings: AppSettings) => void;
-    onShare: (projection: SpendProjection) => void;
+    onShare: (projection: SpendProjection) => boolean | Promise<boolean>;
   }
   let { providers, settings, onChange, onShare }: Props = $props();
   const projection = $derived(
     projectSpend(providers, settings.totalSpendPeriod, settings.totalSpendMetric),
   );
-  const tokenProjection = $derived(projectSpend(providers, settings.totalSpendPeriod, 'tokens'));
   const providerNames = $derived(providers.map((provider) => providerDisplayName(provider.id)));
-  const ringGradient = $derived.by(() => {
+  const ringSegments = $derived.by(() => {
     const total = projection.slices.reduce((sum, provider) => sum + provider.value, 0);
-    if (total <= 0) return 'var(--meter-track)';
-    if (projection.slices.length === 1) {
-      return `var(--provider-${projection.slices[0].id}, var(--provider))`;
-    }
+    if (total <= 0) return [];
     const floored = projection.slices.map((provider) => Math.max(provider.value / total, 0.025));
     const flooredTotal = floored.reduce((sum, share) => sum + share, 0);
     let cursor = 0;
-    const stops = projection.slices.flatMap((provider, index) => {
-      const start = cursor;
-      cursor += (floored[index] / flooredTotal) * 100;
-      const gap = Math.min(0.8, (cursor - start) * 0.15);
-      return [
-        `var(--card) ${start}% ${start + gap / 2}%`,
-        `var(--provider-${provider.id}, var(--provider)) ${start + gap / 2}% ${cursor - gap / 2}%`,
-        `var(--card) ${cursor - gap / 2}% ${cursor}%`,
-      ];
+    return projection.slices.map((provider, index) => {
+      const share = (floored[index] / flooredTotal) * 100;
+      const gap = projection.slices.length === 1 ? 0 : Math.min(1.2, share * 0.15);
+      const segment = {
+        id: provider.id,
+        length: Math.max(0.5, share - gap),
+        offset: cursor + gap / 2,
+      };
+      cursor += share;
+      return segment;
     });
-    return `conic-gradient(${stops.join(', ')})`;
+  });
+  const periodIndex = $derived(
+    settings.totalSpendPeriod === 'today' ? 0 : settings.totalSpendPeriod === 'yesterday' ? 1 : 2,
+  );
+  let shareCopied = $state(false);
+  let shareTimer: ReturnType<typeof setTimeout> | undefined;
+
+  onDestroy(() => {
+    if (shareTimer) clearTimeout(shareTimer);
   });
 
+  function compact(value: number) {
+    return new Intl.NumberFormat('en-US', {
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    }).format(value);
+  }
   function display(value: number | null) {
     if (value === null) return '—';
-    if (settings.totalSpendMetric === 'tokens') {
-      return new Intl.NumberFormat('en-US', {
-        notation: 'compact',
-        maximumFractionDigits: 1,
-      }).format(value);
-    }
-    return `$${value >= 100 ? value.toFixed(0) : value.toFixed(2)}`;
+    if (settings.totalSpendMetric === 'tokens') return compact(value);
+    const dollars = `$${value >= 1000 ? compact(value) : value.toFixed(2)}`;
+    return settings.totalSpendMetric === 'costPerMillion' ? `${dollars}/MTok` : dollars;
   }
-  function unit(value: number | null) {
-    if (value === null) return '';
-    if (settings.totalSpendMetric === 'tokens') return 'tokens';
-    return settings.totalSpendMetric === 'costPerMillion' ? '/ MTok' : 'estimated';
+  function ringCenter(value: number | null) {
+    if (value === null) return { primary: '—', unit: '' };
+    if (settings.totalSpendMetric === 'cost') {
+      return {
+        primary: value >= 1000 ? `$${compact(value)}` : `$${value.toFixed(0)}`,
+        unit: 'dollars',
+      };
+    }
+    if (settings.totalSpendMetric === 'costPerMillion') {
+      return {
+        primary: value >= 1000 ? `$${compact(value)}` : `$${value.toFixed(2)}`,
+        unit: 'MTok',
+      };
+    }
+    const magnitude = Math.abs(value);
+    if (magnitude >= 1_000_000_000)
+      return { primary: compact(value / 1_000_000_000), unit: 'billion' };
+    if (magnitude >= 1_000_000) return { primary: compact(value / 1_000_000), unit: 'million' };
+    if (magnitude >= 1_000) return { primary: compact(value / 1_000), unit: 'thousand' };
+    return { primary: compact(value), unit: 'tokens' };
   }
   function metricTitle() {
     if (settings.totalSpendMetric === 'tokens') return 'Tokens';
@@ -61,13 +85,19 @@
   function patch(patch: Partial<AppSettings>) {
     onChange({ ...settings, ...patch });
   }
+  async function share() {
+    if (!(await onShare(projection))) return;
+    shareCopied = true;
+    if (shareTimer) clearTimeout(shareTimer);
+    shareTimer = setTimeout(() => (shareCopied = false), 1400);
+  }
 </script>
 
 <section class="total-spend-section" aria-label="Total Spend" data-total-spend>
   <div class="total-card__header">
     <div class="total-card__title">
       <select
-        aria-label="Total Spend metric"
+        aria-label="Total Spend Metric"
         value={settings.totalSpendMetric}
         onchange={(event) =>
           patch({ totalSpendMetric: event.currentTarget.value as AppSettings['totalSpendMetric'] })}
@@ -88,11 +118,17 @@
       type="button"
       aria-label={`Share ${metricTitle()} Screenshot`}
       data-tooltip="Share Screenshot"
-      onclick={() => onShare(projection)}><Icon name="share" size={14} strokeWidth={1.8} /></button
+      onclick={share}
+      ><Icon name={shareCopied ? 'check' : 'share'} size={14} strokeWidth={1.8} /></button
     >
   </div>
   <div class="total-card">
     <div class="period-switcher" aria-label="Total Spend period">
+      <span
+        class="period-switcher__selection"
+        style={`transform: translateX(${periodIndex * 100}%)`}
+        aria-hidden="true"
+      ></span>
       {#each [['today', 'Today'], ['yesterday', 'Yesterday'], ['last30Days', '30 Days']] as option (option[0])}
         <button
           class:active={settings.totalSpendPeriod === option[0]}
@@ -105,18 +141,26 @@
     {#if projection.centerValue === null}
       <div class="total-card__empty">
         <span>{emptySpendMessage(settings.totalSpendMetric)}</span>
-        {#if settings.totalSpendMetric !== 'tokens' && tokenProjection.centerValue !== null}
-          <button type="button" onclick={() => patch({ totalSpendMetric: 'tokens' })}
-            >View available tokens</button
-          >
-        {/if}
       </div>
     {:else}
       <div class="total-card__body">
-        <div class="spend-ring" style={`background: ${ringGradient}`}>
-          <div>
-            <strong>{display(projection.centerValue)}</strong><span
-              >{unit(projection.centerValue)}</span
+        <div class="spend-ring">
+          <svg viewBox="0 0 104 104" aria-hidden="true">
+            <circle class="spend-ring__track" cx="52" cy="52" r="40" pathLength="100" />
+            {#each ringSegments as segment (segment.id)}
+              <circle
+                class="spend-ring__segment"
+                cx="52"
+                cy="52"
+                r="40"
+                pathLength="100"
+                style={`--segment-color: var(--provider-${segment.id}, var(--provider)); --segment-length: ${segment.length}; --segment-offset: ${segment.offset}`}
+              />
+            {/each}
+          </svg>
+          <div class="spend-ring__label">
+            <strong>{ringCenter(projection.centerValue).primary}</strong><span
+              >{ringCenter(projection.centerValue).unit}</span
             >
           </div>
         </div>

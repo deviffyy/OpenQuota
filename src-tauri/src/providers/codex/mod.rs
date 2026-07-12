@@ -95,12 +95,6 @@ impl CodexProvider {
         }
         let mapped = map_usage(&response, now)?;
         let usage = scan_local_usage(&self.storage, now)?;
-        if !usage.unknown_models.is_empty() {
-            warnings.push(format!(
-                "No public price is available for: {}. Token totals remain measured; cost estimates may be incomplete.",
-                usage.unknown_models.join(", ")
-            ));
-        }
         Ok(ProviderSnapshot {
             provider_id: "codex".into(),
             plan: mapped.plan,

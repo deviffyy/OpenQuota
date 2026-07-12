@@ -1,4 +1,4 @@
-use std::process::Command;
+use crate::child_process::background_command;
 
 #[derive(Debug, Clone)]
 pub struct LanguageServer {
@@ -21,8 +21,14 @@ pub fn discover() -> Option<LanguageServer> {
 #[cfg(target_os = "windows")]
 fn discover_windows() -> Option<LanguageServer> {
     let script = r#"$items=Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'language_server|agy' -and $_.CommandLine -match 'antigravity' } | ForEach-Object { [pscustomobject]@{ command=$_.CommandLine; ports=@(Get-NetTCPConnection -OwningProcess $_.ProcessId -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort -Unique) } }; @($items) | ConvertTo-Json -Compress -Depth 4"#;
-    let output = Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+    let output = background_command("powershell")
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            script,
+        ])
         .output()
         .ok()?;
     if !output.status.success() {
@@ -52,7 +58,7 @@ fn discover_windows() -> Option<LanguageServer> {
 
 #[cfg(not(target_os = "windows"))]
 fn discover_unix() -> Option<LanguageServer> {
-    let output = Command::new("ps")
+    let output = background_command("ps")
         .args(["-ax", "-o", "pid=,command="])
         .output()
         .ok()?;
@@ -71,7 +77,7 @@ fn discover_unix() -> Option<LanguageServer> {
         let csrf = extract_flag(command, "--csrf_token").unwrap_or_default();
         let extension_port =
             extract_flag(command, "--extension_server_port").and_then(|value| value.parse().ok());
-        let ports = Command::new("lsof")
+        let ports = background_command("lsof")
             .args(["-nP", "-iTCP", "-sTCP:LISTEN", "-a", "-p", pid])
             .output()
             .ok()

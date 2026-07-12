@@ -203,7 +203,10 @@ mod tests {
     use tempfile::tempdir;
 
     use super::Storage;
-    use crate::models::{AppSettings, DailyUsage, ProviderSnapshot, UsageHistory};
+    use crate::models::{
+        AppSettings, DailyUsage, ModelUsageBreakdown, ModelUsageEntry, ProviderSnapshot,
+        UsageHistory, UsagePeriod,
+    };
 
     #[test]
     fn snapshot_round_trip_contains_no_credentials() {
@@ -214,6 +217,20 @@ mod tests {
             plan: Some("Plus".into()),
             quotas: Vec::new(),
             usage: UsageHistory {
+                today: Some(UsagePeriod {
+                    tokens: 42,
+                    estimated_cost_usd: Some(0.12),
+                    estimate_complete: true,
+                    model_breakdown: Some(ModelUsageBreakdown {
+                        models: vec![ModelUsageEntry {
+                            model: "gpt-5.4".into(),
+                            total_tokens: 42,
+                            cost_usd: Some(0.12),
+                        }],
+                        source_note: "From your Codex logs (estimated)".into(),
+                    }),
+                    unknown_models: Vec::new(),
+                }),
                 daily: vec![DailyUsage {
                     date: "2026-07-10".into(),
                     tokens: 42,

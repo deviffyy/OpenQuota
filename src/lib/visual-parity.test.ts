@@ -8,7 +8,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('OpenUsage visual parity', () => {
+describe('native visual contract', () => {
   it.each(['claude', 'codex', 'antigravity'])(
     'packages the exact %s provider icon',
     (providerId) => {
@@ -31,25 +31,43 @@ describe('OpenUsage visual parity', () => {
     expect(antigravity.container.querySelector('path')).toHaveAttribute('fill', '#4285F4');
   });
 
-  it('uses the OpenUsage hover dwell and grace timing for Usage Trend details', async () => {
+  it('uses the shared hover dwell and grace timing for Usage Trend details', async () => {
     vi.useFakeTimers();
     const today = new Date();
     const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     render(UsageTrend, {
       daily: [{ date, tokens: 42_000, estimatedCostUsd: 0.21, estimateComplete: true }],
+      sourceNote: 'From your Codex logs (estimated)',
     });
     const chart = screen.getByRole('group', { name: 'Usage trend chart details' });
 
     await fireEvent.mouseEnter(chart);
     await vi.advanceTimersByTimeAsync(399);
-    expect(screen.queryByText('Peak 42K')).not.toBeInTheDocument();
+    expect(screen.queryByText('peak 42K tokens')).not.toBeInTheDocument();
     await vi.advanceTimersByTimeAsync(1);
-    expect(screen.getByText('Peak 42K')).toBeInTheDocument();
+    expect(screen.getByText('peak 42K tokens')).toBeInTheDocument();
+    expect(screen.getByText('From your Codex logs (estimated)')).toBeInTheDocument();
 
     await fireEvent.mouseLeave(chart);
     await vi.advanceTimersByTimeAsync(179);
-    expect(screen.getByText('Peak 42K')).toBeInTheDocument();
+    expect(screen.getByText('peak 42K tokens')).toBeInTheDocument();
     await vi.advanceTimersByTimeAsync(1);
-    expect(screen.queryByText('Peak 42K')).not.toBeInTheDocument();
+    expect(screen.queryByText('peak 42K tokens')).not.toBeInTheDocument();
+  });
+
+  it('reveals an exact day value when a detail bar is hovered', async () => {
+    vi.useFakeTimers();
+    const today = new Date();
+    const date = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const { container } = render(UsageTrend, {
+      daily: [{ date, tokens: 42_000, estimatedCostUsd: 0.21, estimateComplete: true }],
+      sourceNote: 'From your Codex logs (estimated)',
+    });
+    await fireEvent.mouseEnter(screen.getByRole('group', { name: 'Usage trend chart details' }));
+    await vi.advanceTimersByTimeAsync(400);
+    const bars = container.querySelectorAll<HTMLElement>('.trend-detail__bars i');
+    await fireEvent.mouseEnter(bars[bars.length - 1]);
+    expect(screen.getByText(/· 42K tokens$/)).toBeInTheDocument();
+    expect(container.querySelectorAll('.trend-detail__bars i.muted')).toHaveLength(29);
   });
 });

@@ -176,18 +176,35 @@ jobs:
     needs: publish-artifacts
     runs-on: ubuntu-22.04
     steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
       - name: Download and verify release metadata
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir release-check
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern latest.json --dir release-check
+            --pattern latest.json \
+            --pattern '*-setup.exe' \
+            --pattern '*-setup.exe.sig' \
+            --pattern '*.AppImage' \
+            --pattern '*.AppImage.sig' \
+            --pattern '*.deb' \
+            --pattern '*.deb.sig' \
+            --pattern '*.app.tar.gz' \
+            --pattern '*.app.tar.gz.sig' \
+            --dir release-check
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
             --json assets --jq '.assets[].name' > release-check/assets.txt
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+            > release-check/release.json
           node <<'NODE'
           const fs = require('node:fs');
           const update = JSON.parse(fs.readFileSync('release-check/latest.json', 'utf8'));
+          const release = JSON.parse(fs.readFileSync('release-check/release.json', 'utf8'));
+          const assets = new Map(release.assets.map((asset) => [asset.id, asset.name]));
           const keys = Object.keys(update.platforms ?? {});
           for (const prefix of ['windows-', 'linux-', 'darwin-']) {
             if (!keys.some((key) => key.startsWith(prefix))) {
@@ -198,6 +215,15 @@ jobs:
             if (!entry.url || !entry.signature) {
               throw new Error(`Incomplete updater entry: ${platform}`);
             }
+            const match = entry.url.match(/\/assets\/(\d+)$/);
+            const asset = match && assets.get(Number(match[1]));
+            if (!asset) throw new Error(`Unknown updater asset for ${platform}: ${entry.url}`);
+            const publishedSignature = fs
+              .readFileSync(`release-check/${asset}.sig`, 'utf8')
+              .trim();
+            if (publishedSignature !== entry.signature.trim()) {
+              throw new Error(`latest.json signature mismatch for ${platform}`);
+            }
           }
           NODE
           grep -Eiq '\.exe$' release-check/assets.txt
@@ -206,6 +232,29 @@ jobs:
           grep -Eiq '\.dmg$' release-check/assets.txt
           grep -Eiq '\.sig$' release-check/assets.txt
           grep -Fxq 'latest.json' release-check/assets.txt
+
+      - name: Verify updater signatures with the bundled public key
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y minisign
+          node <<'NODE'
+          const fs = require('node:fs');
+          const config = require('./src-tauri/tauri.conf.json');
+          const encoded = config.plugins?.updater?.pubkey;
+          if (!encoded) throw new Error('Missing updater public key');
+          fs.writeFileSync('release-check/updater-public.key', Buffer.from(encoded, 'base64'));
+          NODE
+          verified=0
+          for signature in release-check/*.sig; do
+            artifact="${signature%.sig}"
+            test -f "$artifact"
+            base64 --decode "$signature" > "$signature.minisig"
+            minisign -Vm "$artifact" \
+              -p release-check/updater-public.key \
+              -x "$signature.minisig"
+            verified=$((verified + 1))
+          done
+          test "$verified" -eq 4
 
       - name: Publish verified release
         env:

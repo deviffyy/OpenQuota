@@ -33,7 +33,6 @@
 </script>
 
 <section class="screen customize-screen" aria-label="Customize">
-  <p class="screen-intro">Choose providers and arrange how they appear on the dashboard.</p>
   <div class="customize-list" role="list">
     {#each settings.providers as provider (provider.id)}
       <div
@@ -58,14 +57,11 @@
         <span class="reorder-grip" aria-hidden="true"
           ><Icon name="grip-lines" size={16} strokeWidth={2} /></span
         >
-        <ProviderIcon providerId={provider.id} />
         <button class="provider-list-main" type="button" onclick={() => onOpen(provider.id)}
-          ><b>{providerDisplayName(provider.id)}</b><small
-            >{provider.enabled
-              ? provider.detected
-                ? 'Active · Detected locally'
-                : 'Active'
-              : 'Inactive'} · {provider.metrics.filter((metric) => metric.enabled).length} metrics</small
+          ><ProviderIcon providerId={provider.id} /><span
+            ><b>{providerDisplayName(provider.id)}</b><small
+              >{provider.metrics.length} metrics</small
+            ></span
           ></button
         >
         <label class="switch"
@@ -89,13 +85,7 @@
   </div>
   <button class="screen-cross-link" type="button" aria-label="Settings" onclick={onSettings}>
     <Icon name="gear" size={17} />
-    <span><b>Settings</b><small>App behavior and appearance</small></span>
+    <span><b>Settings</b><small>Notifications, appearance and more</small></span>
     <Icon name="chevron-right" size={13} strokeWidth={2.2} />
   </button>
-  <p class="customize-footer">
-    {settings.providers.reduce(
-      (count, provider) => count + provider.metrics.filter((metric) => metric.pinned).length,
-      0,
-    )} pinned
-  </p>
 </section>

@@ -11,12 +11,10 @@
     settingsView: SettingsViewState;
     onChange: (settings: AppSettings) => void;
     onRequestNotifications: () => void;
-    updateStatus: UpdateStatus | null;
     updateError: string | null;
     checkingUpdate: boolean;
-    installingUpdate: boolean;
+    updateStatus: UpdateStatus | null;
     onCheckForUpdates: () => void;
-    onInstallUpdate: () => void;
     onCustomize: () => void;
     onCopyDataPath: () => void;
   }
@@ -24,12 +22,10 @@
     settingsView,
     onChange,
     onRequestNotifications,
-    updateStatus,
     updateError,
     checkingUpdate,
-    installingUpdate,
+    updateStatus,
     onCheckForUpdates,
-    onInstallUpdate,
     onCustomize,
     onCopyDataPath,
   }: Props = $props();
@@ -42,6 +38,14 @@
   function patchNotification(key: keyof NotificationPreferences, enabled: boolean) {
     if (enabled && settingsView.notificationPermission === 'prompt') onRequestNotifications();
     patch({ notifications: { ...settings.notifications, [key]: enabled } });
+  }
+  function lastChecked(value: string) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'Last check unavailable';
+    return `Last checked ${new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(date)}`;
   }
   function record(event: KeyboardEvent) {
     if (!recording) return;
@@ -92,27 +96,28 @@
     </div>{/if}
 
   <div class="settings-section">
-    <h2>Startup</h2>
+    <h2>General</h2>
     <label class="setting-row"
-      ><span><b>Show Total Spend</b><small>Combined cost and token summary.</small></span><input
+      ><span><b>Show Total Spend</b></span><input
         type="checkbox"
         checked={settings.showTotalSpend}
         onchange={(event) => patch({ showTotalSpend: event.currentTarget.checked })}
       /></label
     >
     <label class="setting-row"
-      ><span><b>Launch at Login</b><small>Start OpenQuota with your computer.</small></span><input
+      ><span><b>Launch at Login</b></span><input
         type="checkbox"
         checked={settings.launchAtLogin}
         onchange={(event) => patch({ launchAtLogin: event.currentTarget.checked })}
       /></label
     >
     <div class="setting-row">
-      <span><b>Global Shortcut</b><small>Toggle the popup from anywhere.</small></span>
+      <span><b>Global Shortcut</b></span>
       <div class="shortcut-field">
         <button
           class:recording
           type="button"
+          data-tooltip="Open OpenQuota from anywhere"
           onclick={() => (recording = !recording)}
           onkeydown={record}
           >{recording ? 'Type Shortcut…' : (settings.globalShortcut ?? 'Record Shortcut')}</button
@@ -128,8 +133,7 @@
   <div class="settings-section">
     <h2>Appearance</h2>
     <label class="setting-row"
-      ><span><b>Menu Bar</b><small>Show pinned values as text or compact usage bars.</small></span
-      ><select
+      ><span><b>Icon Style</b></span><select
         value={settings.menuBarStyle}
         onchange={(event) =>
           patch({ menuBarStyle: event.currentTarget.value as AppSettings['menuBarStyle'] })}
@@ -159,8 +163,8 @@
         value={settings.timeFormat}
         onchange={(event) =>
           patch({ timeFormat: event.currentTarget.value as AppSettings['timeFormat'] })}
-        ><option value="system">Automatic</option><option value="twelveHour">12 Hour</option><option
-          value="twentyFourHour">24 Hour</option
+        ><option value="system">Auto</option><option value="twelveHour">12-hour</option><option
+          value="twentyFourHour">24-hour</option
         ></select
       ></label
     >
@@ -187,7 +191,12 @@
     >
     <label class="setting-row"
       ><span
-        ><b>Always Show Pacing</b><small>Show projections even when usage is healthy.</small></span
+        ><b>Always Show Pacing</b><i
+          class="setting-info"
+          data-tooltip="Show how you're pacing on every metric, not just ones near their limit"
+          aria-label="Show how you're pacing on every metric, not just ones near their limit"
+          ><Icon name="about" size={12} strokeWidth={1.8} /></i
+        ></span
       ><input
         type="checkbox"
         checked={settings.alwaysShowPacing}
@@ -197,66 +206,48 @@
   </div>
 
   <div class="settings-section">
-    <h2>Updates</h2>
-    <label class="setting-row"
-      ><span
-        ><b>Automatic Checks</b><small>Look for signed updates when OpenQuota starts.</small></span
-      ><input
-        type="checkbox"
-        checked={settings.autoCheckUpdates}
-        onchange={(event) => patch({ autoCheckUpdates: event.currentTarget.checked })}
-      /></label
-    >
-    <div class="setting-row">
-      <span
-        ><b
-          >{updateStatus?.available
-            ? `OpenQuota ${updateStatus.version} is available`
-            : updateStatus
-              ? 'OpenQuota is up to date'
-              : 'Check for Updates'}</b
-        ><small
-          >{updateError ??
-            updateStatus?.body ??
-            `Current version ${updateStatus?.currentVersion ?? '0.1.0'}`}</small
-        ></span
-      >
-      {#if updateStatus?.available}<button
-          type="button"
-          class="secondary-button"
-          disabled={installingUpdate}
-          onclick={onInstallUpdate}>{installingUpdate ? 'Installing…' : 'Install'}</button
-        >{:else}<button
-          type="button"
-          class="secondary-button"
-          disabled={checkingUpdate}
-          onclick={onCheckForUpdates}>{checkingUpdate ? 'Checking…' : 'Check'}</button
-        >{/if}
-    </div>
-  </div>
-
-  <div class="settings-section">
     <h2>
       Notifications {#if settingsView.notificationPermission === 'denied'}<span
           class="permission-warning">!</span
         >{/if}
     </h2>
     <label class="setting-row"
-      ><span><b>Almost Out</b><small>Under 10% remaining.</small></span><input
+      ><span
+        ><b>Almost Out</b><i
+          class="setting-info"
+          data-tooltip="Alert when a limit drops below 10% remaining."
+          aria-label="Alert when a limit drops below 10% remaining."
+          ><Icon name="about" size={12} strokeWidth={1.8} /></i
+        ></span
+      ><input
         type="checkbox"
         checked={settings.notifications.almostOut}
         onchange={(event) => patchNotification('almostOut', event.currentTarget.checked)}
       /></label
     >
     <label class="setting-row"
-      ><span><b>Cutting It Close</b><small>Projected to finish near the limit.</small></span><input
+      ><span
+        ><b>Cutting It Close</b><i
+          class="setting-info"
+          data-tooltip="Alert when a limit is projected to finish with little left."
+          aria-label="Alert when a limit is projected to finish with little left."
+          ><Icon name="about" size={12} strokeWidth={1.8} /></i
+        ></span
+      ><input
         type="checkbox"
         checked={settings.notifications.cuttingItClose}
         onchange={(event) => patchNotification('cuttingItClose', event.currentTarget.checked)}
       /></label
     >
     <label class="setting-row"
-      ><span><b>Will Run Out</b><small>Projected to run out before reset.</small></span><input
+      ><span
+        ><b>Will Run Out</b><i
+          class="setting-info"
+          data-tooltip="Alert when a limit is projected to finish before it resets."
+          aria-label="Alert when a limit is projected to finish before it resets."
+          ><Icon name="about" size={12} strokeWidth={1.8} /></i
+        ></span
+      ><input
         type="checkbox"
         checked={settings.notifications.willRunOut}
         onchange={(event) => patchNotification('willRunOut', event.currentTarget.checked)}
@@ -270,20 +261,51 @@
   <div class="settings-section">
     <h2>Privacy</h2>
     <div class="setting-row">
-      <span
-        ><b>Anonymous Usage</b><small
-          >OpenQuota sends no analytics; settings and snapshots stay local.</small
-        ></span
-      ><strong class="setting-status">Off</strong>
+      <span><b>Share Anonymous Usage</b></span><strong class="setting-status">Off</strong>
     </div>
+    <p class="settings-disclosure">
+      OpenQuota sends no analytics. No account details, credentials, or usage values are sent.
+    </p>
   </div>
 
   <div class="settings-section">
     <h2>Advanced</h2>
     <div class="setting-row">
-      <span><b>Application Data</b><small>SQLite cache, settings and local snapshots.</small></span
-      ><button class="secondary-button" type="button" onclick={onCopyDataPath}>Copy Path</button>
+      <span><b>Application Data</b></span><button
+        class="secondary-button"
+        type="button"
+        onclick={onCopyDataPath}>Copy Path</button
+      >
     </div>
+  </div>
+
+  <div class="settings-section">
+    <h2>Updates</h2>
+    <label class="setting-row"
+      ><span><b>Check for Updates Automatically</b></span><input
+        type="checkbox"
+        checked={settings.autoCheckUpdates}
+        onchange={(event) => patch({ autoCheckUpdates: event.currentTarget.checked })}
+      /></label
+    >
+    <div class="setting-row setting-row--button">
+      <button
+        type="button"
+        class="secondary-button settings-wide-button"
+        disabled={checkingUpdate}
+        onclick={onCheckForUpdates}>{checkingUpdate ? 'Checking…' : 'Check for Updates…'}</button
+      >
+    </div>
+    {#if updateStatus}
+      <p class="settings-note update-status-note">
+        {updateStatus.available && updateStatus.version
+          ? `OpenQuota ${updateStatus.version} is available on the Dashboard.`
+          : `OpenQuota ${updateStatus.currentVersion} is up to date.`}
+      </p>
+    {:else if settings.lastUpdateCheckAt}
+      <p class="settings-note update-status-note">{lastChecked(settings.lastUpdateCheckAt)}</p>
+    {/if}
+    {#if updateError}<p class="settings-note notice-text">{updateError}</p>{/if}
   </div>
 
   <button class="screen-cross-link" type="button" aria-label="Customize" onclick={onCustomize}>

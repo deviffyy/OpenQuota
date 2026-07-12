@@ -184,7 +184,12 @@ pub fn default_settings(detected: &HashSet<String>) -> AppSettings {
 
 pub fn normalize(settings: &mut AppSettings, detected: &HashSet<String>) {
     let migrating_to_multi_provider = settings.schema_version < 3;
-    settings.schema_version = 3;
+    settings.schema_version = 4;
+    settings.dismissed_update_version = settings
+        .dismissed_update_version
+        .take()
+        .map(|version| version.trim().to_owned())
+        .filter(|version| !version.is_empty());
     settings.global_shortcut = settings
         .global_shortcut
         .take()
@@ -356,6 +361,8 @@ mod tests {
         let first = SettingsService::new(storage.clone(), &detected);
         let mut settings = first.get();
         settings.density = crate::models::DensityPreference::Compact;
+        settings.dismissed_update_version = Some("0.2.0".to_owned());
+        settings.last_update_check_at = Some(chrono::Utc::now());
         settings.providers.rotate_left(1);
         settings.providers[1].metrics.rotate_right(1);
         let expected = first.update(settings).unwrap();
@@ -400,6 +407,7 @@ mod tests {
             &mut settings,
             &HashSet::from(["codex".to_owned(), "antigravity".to_owned()]),
         );
+        assert_eq!(settings.schema_version, 4);
         assert_eq!(
             settings
                 .providers

@@ -2,7 +2,6 @@
   import { metricDefinition, providerDisplayName } from './metrics';
   import type { AppSettings, MetricLayout, MetricSection, ProviderLayout } from './types';
   import Icon from './Icon.svelte';
-  import ProviderIcon from './ProviderIcon.svelte';
   import { beginDrag } from './dragPreview';
 
   interface Props {
@@ -33,13 +32,10 @@
   function togglePin(metric: MetricLayout) {
     if (!provider || !metricDefinition(metric.id)?.pinnable) return;
     if (!metric.pinned && provider.metrics.filter((item) => item.pinned).length >= 2) {
-      showMessage('Up to 2 pinned metrics per provider', 'denied');
+      showMessage('Up to 2 stars per provider', 'denied');
       return;
     }
-    showMessage(
-      `${metricDefinition(metric.id)?.label ?? metric.id} ${metric.pinned ? 'unpinned' : 'pinned'}`,
-      'success',
-    );
+    showMessage(metric.pinned ? 'Removed from menu bar' : 'Starred for menu bar', 'success');
     updateMetric({ ...metric, enabled: true, pinned: !metric.pinned });
   }
   function showMessage(text: string, kind: 'success' | 'denied') {
@@ -81,22 +77,6 @@
     class="screen customize-detail"
     aria-label={`Customize ${providerDisplayName(provider.id)}`}
   >
-    <div class="provider-toggle-row">
-      <ProviderIcon providerId={provider.id} /><span
-        ><b>{providerDisplayName(provider.id)}</b><small
-          >{provider.detected ? 'Detected locally' : 'Not detected locally'}</small
-        ></span
-      ><label class="switch"
-        ><input
-          aria-label={`Enable ${providerDisplayName(provider.id)}`}
-          type="checkbox"
-          checked={provider.enabled}
-          onchange={(event) =>
-            updateProvider({ ...provider, enabled: event.currentTarget.checked })}
-        /><span></span></label
-      >
-    </div>
-
     {#each ['alwaysVisible', 'onDemand'] as section (section)}
       {@const sectionMetrics = provider.metrics.filter((metric) => metric.section === section)}
       <div
@@ -114,7 +94,7 @@
               ondragover={(event) => event.preventDefault()}
               ondrop={() => dropIntoSection(section as MetricSection)}
             >
-              Drop metrics here
+              Drag metrics here
             </div>
           {/if}
           {#each sectionMetrics as metric (metric.id)}
@@ -171,13 +151,7 @@
           {/each}
         </div>
       </div>
-      {#if section === 'alwaysVisible'}<div class="section-divider">
-          <span></span>On Demand<span></span>
-        </div>{/if}
     {/each}
-    <p class="customize-message">
-      {provider.metrics.filter((metric) => metric.pinned).length} of 2 pinned
-    </p>
     {#if message}
       <div class:denied={messageKind === 'denied'} class="customization-pill" role="status">
         <Icon
