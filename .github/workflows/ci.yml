@@ -86,7 +86,7 @@ jobs:
       - name: Smoke test Linux X11 fallback window
         if: runner.os == 'Linux'
         run: |
-          dbus-run-session -- xvfb-run -a bash -euo pipefail -c '
+          xvfb-run -a dbus-run-session -- bash -euo pipefail -c '
             export HOME="${RUNNER_TEMP}/openquota-x11-home"
             export XDG_CONFIG_HOME="${HOME}/xdg"
             export XDG_CURRENT_DESKTOP="ubuntu:GNOME"
