@@ -72,6 +72,8 @@
   let updateProgress = $state<UpdateProgress | null>(null);
   let automaticUpdatesReady = $state(false);
   let saveQueue: Promise<void> = Promise.resolve();
+  let settingsRevision = 0;
+  let pendingSettingsSaves = 0;
   let measureFrame = 0;
   let resizeFrame = 0;
   let resizeGeneration = 0;
@@ -225,14 +227,27 @@
     else closePopup();
   }
   function saveSettings(next: AppSettings) {
+    const revision = ++settingsRevision;
+    pendingSettingsSaves += 1;
     settingsState = { ...settingsState, settings: next };
     settingsError = null;
     saveQueue = saveQueue
       .then(async () => {
-        settingsState = await invoke<SettingsViewState>('save_app_settings', { settings: next });
+        const saved = await invoke<SettingsViewState>('save_app_settings', { settings: next });
+        if (revision === settingsRevision) settingsState = saved;
       })
-      .catch((error: unknown) => {
-        settingsError = typeof error === 'string' ? error : 'Settings could not be saved.';
+      .catch(async (error: unknown) => {
+        if (revision === settingsRevision) {
+          settingsError = typeof error === 'string' ? error : 'Settings could not be saved.';
+          try {
+            settingsState = await invoke<SettingsViewState>('get_app_settings');
+          } catch {
+            settingsError = 'Settings could not be saved or reloaded.';
+          }
+        }
+      })
+      .finally(() => {
+        pendingSettingsSaves -= 1;
       });
   }
   function cloneSettings(value: AppSettings): AppSettings {
@@ -775,10 +790,9 @@
     void listen<UsageViewState>('usage-state', (event) => (viewState = event.payload)).then(
       (stop) => cleanup.push(stop),
     );
-    void listen<SettingsViewState>(
-      'settings-state',
-      (event) => (settingsState = event.payload),
-    ).then((stop) => cleanup.push(stop));
+    void listen<SettingsViewState>('settings-state', (event) => {
+      if (pendingSettingsSaves === 0) settingsState = event.payload;
+    }).then((stop) => cleanup.push(stop));
     void listen<string>('open-screen', (event) =>
       navigate(event.payload === 'settings' ? 'settings' : 'customize'),
     ).then((stop) => cleanup.push(stop));

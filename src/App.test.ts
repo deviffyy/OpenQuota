@@ -935,6 +935,30 @@ describe('OpenQuota dashboard', () => {
     );
   });
 
+  it('reloads persisted settings when a settings save fails', async () => {
+    mocks.invoke.mockImplementation(
+      (command: string, args?: { settings?: SettingsViewState['settings'] }) => {
+        if (command === 'get_usage_state') return Promise.resolve(liveState);
+        if (command === 'get_app_settings') return Promise.resolve(settingsState);
+        if (command === 'save_app_settings')
+          return Promise.reject('Launch at login is unavailable.');
+        if (command === 'resize_main_window') return Promise.resolve();
+        return Promise.reject(new Error(`unexpected command ${command} ${String(args)}`));
+      },
+    );
+    render(App);
+    await screen.findByText('Plus');
+    await fireEvent.click(screen.getByLabelText('Open options'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const launchAtLogin = screen.getByRole('checkbox', { name: 'Launch at Login' });
+
+    await fireEvent.click(launchAtLogin);
+
+    await waitFor(() => expect(launchAtLogin).not.toBeChecked());
+    expect(screen.getByRole('alert')).toHaveTextContent('Launch at login is unavailable.');
+    expect(mocks.invoke).toHaveBeenCalledWith('get_app_settings');
+  });
+
   it('reorders dashboard metrics directly with a custom drag lift', async () => {
     render(App);
     await screen.findByText('Plus');

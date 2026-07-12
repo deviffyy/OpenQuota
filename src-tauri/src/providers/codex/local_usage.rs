@@ -54,19 +54,22 @@ pub fn scan_local_usage(storage: &Storage, now: DateTime<Utc>) -> Result<UsageHi
         .checked_sub_days(Days::new(29))
         .unwrap_or(NaiveDate::MIN);
     let mut events = Vec::new();
+    let paths = discover_session_files(&homes);
+    let mut seen_paths = HashSet::with_capacity(paths.len());
 
-    for path in discover_session_files(&homes) {
+    for path in paths {
         let metadata = match fs::metadata(&path) {
             Ok(metadata) => metadata,
             Err(_) => continue,
         };
+        seen_paths.insert(path.clone());
         let modified_millis = metadata
             .modified()
             .ok()
             .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
             .map(|value| value.as_millis() as i64)
             .unwrap_or_default();
-        let cached = storage.load_log_events(&path, metadata.len(), modified_millis)?;
+        let cached = storage.load_log_events("codex", &path, metadata.len(), modified_millis)?;
         let parsed = if let Some(parsed) = cached
             .as_deref()
             .and_then(|json| serde_json::from_str::<Vec<TokenEvent>>(json).ok())
@@ -75,7 +78,7 @@ pub fn scan_local_usage(storage: &Storage, now: DateTime<Utc>) -> Result<UsageHi
         } else {
             let parsed = parse_path(&path);
             let json = serde_json::to_string(&parsed).map_err(|_| CodexError::LocalUsage)?;
-            storage.save_log_events(&path, metadata.len(), modified_millis, &json)?;
+            storage.save_log_events("codex", &path, metadata.len(), modified_millis, &json)?;
             parsed
         };
         events.extend(
@@ -84,6 +87,7 @@ pub fn scan_local_usage(storage: &Storage, now: DateTime<Utc>) -> Result<UsageHi
                 .filter(|event| event.timestamp.with_timezone(&Local).date_naive() >= since_date),
         );
     }
+    storage.prune_log_events("codex", &seen_paths)?;
 
     Ok(aggregate(events, now, fast_tier))
 }

@@ -1,6 +1,7 @@
 use std::{
+    collections::HashSet,
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Mutex, MutexGuard},
 };
 
@@ -51,13 +52,20 @@ impl Storage {
                path TEXT PRIMARY KEY,
                size INTEGER NOT NULL,
                modified_millis INTEGER NOT NULL,
-               events_json TEXT NOT NULL
+               events_json TEXT NOT NULL,
+               provider_id TEXT NOT NULL DEFAULT ''
              );
              CREATE TABLE IF NOT EXISTS app_settings (
                id INTEGER PRIMARY KEY CHECK (id = 1),
                payload TEXT NOT NULL
              );",
         )?;
+        if !Self::has_column(&connection, "log_file_cache", "provider_id")? {
+            connection.execute(
+                "ALTER TABLE log_file_cache ADD COLUMN provider_id TEXT NOT NULL DEFAULT ''",
+                [],
+            )?;
+        }
         Ok(Self {
             connection: Mutex::new(connection),
         })
@@ -109,6 +117,7 @@ impl Storage {
 
     pub fn load_log_events(
         &self,
+        provider_id: &str,
         path: &Path,
         size: u64,
         modified_millis: i64,
@@ -117,8 +126,13 @@ impl Storage {
         connection
             .query_row(
                 "SELECT events_json FROM log_file_cache
-                 WHERE path = ?1 AND size = ?2 AND modified_millis = ?3",
-                params![path.to_string_lossy(), size as i64, modified_millis],
+                 WHERE provider_id = ?1 AND path = ?2 AND size = ?3 AND modified_millis = ?4",
+                params![
+                    provider_id,
+                    path.to_string_lossy(),
+                    size as i64,
+                    modified_millis
+                ],
                 |row| row.get(0),
             )
             .optional()
@@ -127,6 +141,7 @@ impl Storage {
 
     pub fn save_log_events(
         &self,
+        provider_id: &str,
         path: &Path,
         size: u64,
         modified_millis: i64,
@@ -134,19 +149,48 @@ impl Storage {
     ) -> Result<(), StorageError> {
         let connection = self.connection()?;
         connection.execute(
-            "INSERT INTO log_file_cache(path, size, modified_millis, events_json)
-             VALUES (?1, ?2, ?3, ?4)
+            "INSERT INTO log_file_cache(path, size, modified_millis, events_json, provider_id)
+             VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(path) DO UPDATE SET
                size = excluded.size,
                modified_millis = excluded.modified_millis,
-               events_json = excluded.events_json",
+               events_json = excluded.events_json,
+               provider_id = excluded.provider_id",
             params![
                 path.to_string_lossy(),
                 size as i64,
                 modified_millis,
-                events_json
+                events_json,
+                provider_id
             ],
         )?;
+        Ok(())
+    }
+
+    pub fn prune_log_events(
+        &self,
+        provider_id: &str,
+        seen_paths: &HashSet<PathBuf>,
+    ) -> Result<(), StorageError> {
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
+        let cached_paths = {
+            let mut statement =
+                transaction.prepare("SELECT path FROM log_file_cache WHERE provider_id = ?1")?;
+            let paths = statement
+                .query_map([provider_id], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            paths
+        };
+        for cached_path in cached_paths {
+            if !seen_paths.contains(Path::new(&cached_path)) {
+                transaction.execute(
+                    "DELETE FROM log_file_cache WHERE provider_id = ?1 AND path = ?2",
+                    params![provider_id, cached_path],
+                )?;
+            }
+        }
+        transaction.commit()?;
         Ok(())
     }
 
@@ -195,10 +239,24 @@ impl Storage {
     fn connection(&self) -> Result<MutexGuard<'_, Connection>, StorageError> {
         self.connection.lock().map_err(|_| StorageError::Poisoned)
     }
+
+    fn has_column(
+        connection: &Connection,
+        table: &str,
+        column: &str,
+    ) -> Result<bool, rusqlite::Error> {
+        let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+        let columns = statement
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(columns.iter().any(|name| name == column))
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{collections::HashSet, path::PathBuf};
+
     use chrono::Utc;
     use tempfile::tempdir;
 
@@ -262,5 +320,46 @@ mod tests {
         };
         storage.save_settings(&settings).unwrap();
         assert_eq!(storage.load_settings().unwrap(), Some(settings));
+    }
+
+    #[test]
+    fn log_cache_pruning_is_scoped_to_a_provider() {
+        let directory = tempdir().unwrap();
+        let storage = Storage::open(&directory.path().join("openquota.db")).unwrap();
+        let codex_old = PathBuf::from("/logs/codex-old.jsonl");
+        let codex_current = PathBuf::from("/logs/codex-current.jsonl");
+        let claude_current = PathBuf::from("/logs/claude-current.jsonl");
+        for (provider, path) in [
+            ("codex", &codex_old),
+            ("codex", &codex_current),
+            ("claude", &claude_current),
+        ] {
+            storage
+                .save_log_events(provider, path, 10, 20, "[]")
+                .unwrap();
+        }
+
+        storage
+            .prune_log_events("codex", &HashSet::from([codex_current.clone()]))
+            .unwrap();
+
+        assert_eq!(
+            storage
+                .load_log_events("codex", &codex_old, 10, 20)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            storage
+                .load_log_events("codex", &codex_current, 10, 20)
+                .unwrap(),
+            Some("[]".to_owned())
+        );
+        assert_eq!(
+            storage
+                .load_log_events("claude", &claude_current, 10, 20)
+                .unwrap(),
+            Some("[]".to_owned())
+        );
     }
 }

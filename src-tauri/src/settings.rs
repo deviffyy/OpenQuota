@@ -5,7 +5,7 @@ use std::{
 
 use crate::{
     models::{AppSettings, MetricLayout, MetricSection, ProviderLayout, SettingsViewState},
-    storage::Storage,
+    storage::{Storage, StorageError},
 };
 
 pub const CLAUDE_PROVIDER_ID: &str = "claude";
@@ -92,18 +92,16 @@ pub struct SettingsService {
 }
 
 impl SettingsService {
-    pub fn new(storage: Arc<Storage>, detected: &HashSet<String>) -> Self {
+    pub fn new(storage: Arc<Storage>, detected: &HashSet<String>) -> Result<Self, StorageError> {
         let mut settings = storage
-            .load_settings()
-            .ok()
-            .flatten()
+            .load_settings()?
             .unwrap_or_else(|| default_settings(detected));
         normalize(&mut settings, detected);
-        let _ = storage.save_settings(&settings);
-        Self {
+        storage.save_settings(&settings)?;
+        Ok(Self {
             storage,
             settings: RwLock::new(settings),
-        }
+        })
     }
 
     pub fn get(&self) -> AppSettings {
@@ -358,7 +356,7 @@ mod tests {
         let directory = tempdir().unwrap();
         let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
         let detected = HashSet::from(["codex".to_owned(), "antigravity".to_owned()]);
-        let first = SettingsService::new(storage.clone(), &detected);
+        let first = SettingsService::new(storage.clone(), &detected).unwrap();
         let mut settings = first.get();
         settings.density = crate::models::DensityPreference::Compact;
         settings.dismissed_update_version = Some("0.2.0".to_owned());
@@ -366,7 +364,7 @@ mod tests {
         settings.providers.rotate_left(1);
         settings.providers[1].metrics.rotate_right(1);
         let expected = first.update(settings).unwrap();
-        let second = SettingsService::new(storage, &detected);
+        let second = SettingsService::new(storage, &detected).unwrap();
         assert_eq!(second.get(), expected);
     }
 
@@ -416,5 +414,37 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["claude", "codex", "antigravity"]
         );
+    }
+
+    #[test]
+    fn invalid_saved_settings_are_not_overwritten_with_defaults() {
+        let directory = tempdir().unwrap();
+        let database_path = directory.path().join("openquota.db");
+        let connection = rusqlite::Connection::open(&database_path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE app_settings (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    payload TEXT NOT NULL
+                );",
+            )
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO app_settings(id, payload) VALUES (1, ?1)",
+                ["{not-valid-json"],
+            )
+            .unwrap();
+        drop(connection);
+        let storage = Arc::new(Storage::open(&database_path).unwrap());
+
+        assert!(SettingsService::new(storage.clone(), &HashSet::new()).is_err());
+        let connection = rusqlite::Connection::open(&database_path).unwrap();
+        let payload: String = connection
+            .query_row("SELECT payload FROM app_settings WHERE id = 1", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(payload, "{not-valid-json");
     }
 }

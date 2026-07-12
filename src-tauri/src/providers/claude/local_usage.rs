@@ -56,10 +56,13 @@ pub fn scan_local_usage(
         .checked_sub_days(Days::new(29))
         .unwrap_or(NaiveDate::MIN);
     let mut events = Vec::new();
-    for path in discover_files() {
+    let paths = discover_files();
+    let mut seen_paths = HashSet::with_capacity(paths.len());
+    for path in paths {
         let Ok(metadata) = fs::metadata(&path) else {
             continue;
         };
+        seen_paths.insert(path.clone());
         let modified_millis = metadata
             .modified()
             .ok()
@@ -67,7 +70,7 @@ pub fn scan_local_usage(
             .map(|value| value.as_millis() as i64)
             .unwrap_or_default();
         let cached = storage
-            .load_log_events(&path, metadata.len(), modified_millis)
+            .load_log_events("claude", &path, metadata.len(), modified_millis)
             .map_err(|_| ClaudeError::LocalUsage)?;
         let parsed = if let Some(parsed) = cached
             .as_deref()
@@ -80,7 +83,7 @@ pub fn scan_local_usage(
                 .unwrap_or_default();
             let json = serde_json::to_string(&parsed).map_err(|_| ClaudeError::LocalUsage)?;
             storage
-                .save_log_events(&path, metadata.len(), modified_millis, &json)
+                .save_log_events("claude", &path, metadata.len(), modified_millis, &json)
                 .map_err(|_| ClaudeError::LocalUsage)?;
             parsed
         };
@@ -90,6 +93,9 @@ pub fn scan_local_usage(
                 .filter(|event| event.timestamp.with_timezone(&Local).date_naive() >= since_date),
         );
     }
+    storage
+        .prune_log_events("claude", &seen_paths)
+        .map_err(|_| ClaudeError::LocalUsage)?;
     Ok(aggregate(deduplicate(events), now))
 }
 

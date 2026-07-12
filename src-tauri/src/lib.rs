@@ -686,7 +686,7 @@ pub fn run() {
                 .map(|provider| provider.id().to_owned())
                 .collect();
             let service = Arc::new(ProviderService::new(providers, storage.clone()));
-            let settings = Arc::new(SettingsService::new(storage, &detected));
+            let settings = Arc::new(SettingsService::new(storage, &detected)?);
             let notifications = Arc::new(NotificationEvaluator::default());
             app.manage(service.clone());
             app.manage(settings.clone());
