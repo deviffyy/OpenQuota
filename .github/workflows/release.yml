@@ -252,11 +252,6 @@ jobs:
             }
           }
           NODE
-          jq -r '.platforms[].url' release-check/latest.json | sort -u |
-          while IFS= read -r url; do
-            curl --fail --location --silent --show-error \
-              --range 0-0 --output /dev/null "$url"
-          done
           grep -Eiq '\.exe$' release-check/assets.txt
           grep -Eiq '\.AppImage$' release-check/assets.txt
           grep -Eiq '\.deb$' release-check/assets.txt
@@ -304,3 +299,20 @@ jobs:
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
             -F draft=false \
             -f make_latest=true
+
+      - name: Verify public updater downloads
+        run: |
+          urls="$(jq -r '.platforms[].url' release-check/latest.json | sort -u)"
+          while IFS= read -r url; do
+            downloaded=false
+            for attempt in 1 2 3 4 5; do
+              if curl --fail --location --silent --show-error \
+                --range 0-0 --output /dev/null "$url"; then
+                downloaded=true
+                break
+              fi
+              echo "Public download is not ready yet (attempt $attempt/5): $url"
+              sleep 3
+            done
+            test "$downloaded" = true
+          done <<< "$urls"
