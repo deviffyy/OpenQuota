@@ -185,21 +185,28 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir release-check
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern latest.json \
-            --pattern '*-setup.exe' \
-            --pattern '*-setup.exe.sig' \
-            --pattern '*.AppImage' \
-            --pattern '*.AppImage.sig' \
-            --pattern '*.deb' \
-            --pattern '*.deb.sig' \
-            --pattern '*.app.tar.gz' \
-            --pattern '*.app.tar.gz.sig' \
-            --dir release-check
-          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
-            --json assets --jq '.assets[].name' > release-check/assets.txt
-          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$RELEASE_TAG" \
+          release_id="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .id" | head -n 1)"
+          test -n "$release_id" || {
+            echo "Draft release not found for $RELEASE_TAG" >&2
+            exit 1
+          }
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" \
             > release-check/release.json
+          jq -r '.assets[].name' release-check/release.json \
+            > release-check/assets.txt
+          jq -r '.assets[]
+            | select(
+                .name == "latest.json"
+                or (.name | test("(-setup\\.exe|\\.AppImage|\\.deb|\\.app\\.tar\\.gz)(\\.sig)?$"))
+              )
+            | [.id, .name]
+            | @tsv' release-check/release.json |
+          while IFS=$'\t' read -r asset_id asset_name; do
+            gh api "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" \
+              -H 'Accept: application/octet-stream' \
+              > "release-check/$asset_name"
+          done
           node <<'NODE'
           const fs = require('node:fs');
           const update = JSON.parse(fs.readFileSync('release-check/latest.json', 'utf8'));
@@ -259,4 +266,10 @@ jobs:
       - name: Publish verified release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+        run: |
+          release_id="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
+            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .id" | head -n 1)"
+          test -n "$release_id"
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            -F draft=false \
+            -f make_latest=true
