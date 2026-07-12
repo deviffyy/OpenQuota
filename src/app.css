@@ -158,6 +158,7 @@ select {
   color: var(--secondary);
   font-size: 11px;
   line-height: 1;
+  white-space: nowrap;
 }
 
 .status-badge {
@@ -176,6 +177,24 @@ select {
   margin-left: auto;
   color: var(--secondary);
   place-items: center;
+}
+
+.provider-status-slot {
+  display: grid;
+  width: 16px;
+  height: 18px;
+  flex: 0 0 16px;
+  margin-left: auto;
+  opacity: 0;
+  place-items: center;
+}
+
+.provider-status-slot.active {
+  opacity: 1;
+}
+
+.provider-header .provider-mark {
+  margin-left: 0;
 }
 
 .provider-warning,
@@ -248,7 +267,7 @@ select {
 }
 
 .metric__heading h2,
-.metric__heading span {
+.metric__heading > span {
   margin: 0;
   font-size: 13px;
   line-height: 17px;
@@ -258,7 +277,7 @@ select {
   font-weight: 650;
 }
 
-.metric__heading span {
+.metric__heading > span {
   color: var(--secondary);
   font-weight: 450;
 }
@@ -267,6 +286,24 @@ select {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+}
+
+.metric__heading .pace-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  color: var(--secondary);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  line-height: 17px;
+}
+
+.metric__heading .pace-warning__icon {
+  color: var(--meter-critical);
 }
 
 .meter {
@@ -278,11 +315,29 @@ select {
   background: var(--meter-track);
 }
 
+.meter-shell {
+  position: relative;
+  height: 5px;
+  margin: 6px 0 5px;
+}
+
+.meter-shell .meter {
+  margin: 0;
+}
+
 .meter__fill {
   position: absolute;
   inset: 0 auto 0 0;
   border-radius: inherit;
   background: var(--meter-fill);
+  width: 0;
+  transition:
+    width var(--motion-switch),
+    background-color var(--motion-switch);
+}
+
+.meter__fill--visible {
+  width: max(5px, var(--fill-percent));
 }
 
 .meter--warning .meter__fill {
@@ -300,6 +355,7 @@ select {
   height: 9px;
   border-radius: 2px;
   background: var(--secondary);
+  left: clamp(1px, var(--pace-percent), calc(100% - 1px));
   transform: translateX(-1px);
 }
 
@@ -307,6 +363,7 @@ select {
   color: var(--secondary);
   font-size: 12px;
   line-height: 16px;
+  font-variant-numeric: tabular-nums;
 }
 
 .metric__reading strong {
@@ -338,10 +395,6 @@ select {
 .metric__reading button:focus-visible {
   background: var(--button-hover);
   box-shadow: 0 0 0 3px var(--button-hover);
-}
-
-.pace-critical {
-  color: var(--meter-critical) !important;
 }
 
 .usage-row {
@@ -862,9 +915,15 @@ select {
 }
 
 .trend-empty {
-  margin: 8px 0 0;
+  display: flex;
+  width: clamp(90px, 48%, 150px);
+  min-height: 18px;
+  align-items: center;
+  justify-content: flex-end;
+  margin: 0;
   color: var(--secondary);
   font-size: 10px;
+  text-align: right;
 }
 
 .empty-dashboard {
@@ -1336,7 +1395,7 @@ input[type='checkbox'] {
 }
 
 :root[data-density='compact'] .metric__heading h2,
-:root[data-density='compact'] .metric__heading span {
+:root[data-density='compact'] .metric__heading > span {
   font-size: 13px;
 }
 
@@ -1523,7 +1582,7 @@ body,
 }
 
 .metric__heading h2,
-.metric__heading span {
+.metric__heading > span {
   font-size: 13px;
   line-height: 16px;
 }
@@ -1534,6 +1593,10 @@ body,
 
 .meter {
   height: 5px;
+  margin: 4px 0;
+}
+
+.meter-shell {
   margin: 4px 0;
 }
 
@@ -2498,6 +2561,10 @@ input[type='checkbox']:checked::after {
 
 :root[data-density='compact'] .trend-bars {
   height: 14px;
+}
+
+:root[data-density='compact'] .trend-empty {
+  min-height: 14px;
 }
 
 :root[data-density='compact'] .setting-row,

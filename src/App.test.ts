@@ -706,6 +706,95 @@ describe('OpenQuota dashboard', () => {
     expect(mocks.invoke).toHaveBeenCalledWith('dismiss_main_window');
   });
 
+  it('keeps the Claude card structure stable while optional quota data refreshes', async () => {
+    let finishRefresh: ((state: UsageViewState) => void) | undefined;
+    const refreshResult = new Promise<UsageViewState>((resolve) => (finishRefresh = resolve));
+    const initialClaude: ProviderViewState = {
+      ...claudeState,
+      snapshot: {
+        ...claudeState.snapshot!,
+        quotas: claudeState.snapshot!.quotas.filter((quota) => quota.id !== 'extra'),
+      },
+    };
+    const initialState: UsageViewState = { providers: { claude: initialClaude } };
+    const refreshedState: UsageViewState = { providers: { claude: claudeState } };
+    const claudeSettings: SettingsViewState = {
+      ...settingsState,
+      settings: {
+        ...settingsState.settings,
+        showTotalSpend: false,
+        providers: [
+          {
+            id: 'claude',
+            enabled: true,
+            detected: true,
+            expanded: false,
+            metrics: [
+              {
+                id: 'claude.session',
+                enabled: true,
+                section: 'alwaysVisible',
+                pinned: true,
+              },
+              {
+                id: 'claude.extra',
+                enabled: true,
+                section: 'alwaysVisible',
+                pinned: false,
+              },
+            ],
+          },
+        ],
+      },
+    };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === 'get_usage_state') return Promise.resolve(initialState);
+      if (command === 'get_app_settings') return Promise.resolve(claudeSettings);
+      if (command === 'refresh_usage') return refreshResult;
+      return Promise.resolve();
+    });
+
+    render(App);
+    const provider = await screen.findByRole('group', { name: 'Claude provider' });
+    const card = within(provider).getByRole('region', { name: 'Claude usage' });
+    const extraRow = within(provider).getByRole('group', { name: 'Extra Usage options' });
+    expect(within(extraRow).getByText('No data')).toBeInTheDocument();
+    const statusSlot = provider.querySelector('.provider-status-slot');
+    expect(statusSlot).toBeInTheDocument();
+    expect(statusSlot).not.toHaveClass('active');
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh provider usage' }));
+    expect(await within(provider).findByLabelText('Refreshing')).toBeInTheDocument();
+    expect(statusSlot).toHaveClass('active');
+    expect(within(provider).getByRole('region', { name: 'Claude usage' })).toBe(card);
+    expect(within(provider).getByRole('group', { name: 'Extra Usage options' })).toBe(extraRow);
+
+    finishRefresh?.(refreshedState);
+    await waitFor(() => expect(within(extraRow).queryByText('No data')).not.toBeInTheDocument());
+    expect(within(provider).getByRole('region', { name: 'Claude usage' })).toBe(card);
+    expect(within(provider).getByRole('group', { name: 'Extra Usage options' })).toBe(extraRow);
+    expect(statusSlot).not.toHaveClass('active');
+  });
+
+  it('restores stable provider chrome when a refresh request fails to start', async () => {
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === 'get_usage_state') return Promise.resolve(liveState);
+      if (command === 'get_app_settings') return Promise.resolve(settingsState);
+      if (command === 'refresh_usage') return Promise.reject(new Error('offline'));
+      return Promise.resolve();
+    });
+    render(App);
+    const provider = await screen.findByRole('group', { name: 'Codex provider' });
+    const card = within(provider).getByRole('region', { name: 'Codex usage' });
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh provider usage' }));
+    await waitFor(() =>
+      expect(within(provider).queryByLabelText('Refreshing')).not.toBeInTheDocument(),
+    );
+    expect(within(provider).getByRole('region', { name: 'Codex usage' })).toBe(card);
+    expect(provider.querySelector('.provider-status-slot')).not.toHaveClass('active');
+    expect(screen.getByText('OpenQuota could not start a provider refresh.')).toBeInTheDocument();
+  });
+
   it('shows platform-correct Ctrl shortcuts and handles Ctrl+Q', async () => {
     render(App);
     await screen.findByText('Plus');

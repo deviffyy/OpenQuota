@@ -256,6 +256,7 @@
     saveSettings(previous);
   }
   async function refresh() {
+    if (anyRefreshing) return;
     viewState = {
       providers: Object.fromEntries(
         Object.entries(viewState.providers).map(([id, state]) => [
@@ -267,6 +268,14 @@
     try {
       viewState = await invoke<UsageViewState>('refresh_usage');
     } catch {
+      viewState = {
+        providers: Object.fromEntries(
+          Object.entries(viewState.providers).map(([id, state]) => [
+            id,
+            { ...state, refreshing: false },
+          ]),
+        ),
+      };
       settingsError = 'OpenQuota could not start a provider refresh.';
     }
   }

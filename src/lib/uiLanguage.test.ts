@@ -14,6 +14,14 @@ describe('native UI language contract', () => {
     expect(css).toMatch(/\.setting-row\s*{[^}]*font-size: 13px;/s);
   });
 
+  it('keeps the critical flame colored while its warning copy stays secondary', () => {
+    expect(css).not.toMatch(/\.metric__heading span\s*{/);
+    expect(css).toMatch(
+      /\.metric__heading \.pace-warning__icon\s*{[^}]*color: var\(--meter-critical\);/s,
+    );
+    expect(css).toMatch(/\.metric__heading \.pace-warning\s*{[^}]*color: var\(--secondary\);/s);
+  });
+
   it('keeps Customize concise and free of duplicate status and count copy', () => {
     expect(customizeList).toContain('Notifications, appearance and more');
     expect(customizeList).toContain('{provider.metrics.length} metrics');

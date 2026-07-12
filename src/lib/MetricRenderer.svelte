@@ -19,6 +19,12 @@
       ? snapshot.quotas.find((item) => item.id === definition.sourceId)
       : undefined,
   );
+  const isSessionWindow = $derived(
+    definition?.kind === 'quota' &&
+      ((snapshot.providerId === 'claude' && definition.sourceId === 'session') ||
+        (snapshot.providerId === 'antigravity' &&
+          (definition.sourceId === 'geminiPro' || definition.sourceId === 'claude'))),
+  );
   const period = $derived.by(() => {
     if (definition?.kind !== 'usage') return null;
     if (definition.sourceId === 'today') return snapshot.usage.today;
@@ -42,6 +48,7 @@
     resetDisplay={settings.resetDisplay}
     timeFormat={settings.timeFormat}
     alwaysShowPacing={settings.alwaysShowPacing}
+    {isSessionWindow}
     onToggleUsage={() =>
       onSettingsChange({
         ...settings,
@@ -53,6 +60,21 @@
         resetDisplay: settings.resetDisplay === 'countdown' ? 'exact' : 'countdown',
       })}
   />
+{:else if definition?.kind === 'quota'}
+  <section class="metric metric--no-data" aria-label={`${definition.label} quota`}>
+    <div class="metric__heading"><h2>{definition.label}</h2></div>
+    <div class="meter-shell">
+      <div
+        class="meter"
+        role="progressbar"
+        aria-label={`${definition.label} used`}
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="0"
+      ></div>
+    </div>
+    <div class="metric__reading"><span>No data</span><span>Reset unavailable</span></div>
+  </section>
 {:else if definition?.kind === 'trend'}
   <UsageTrend daily={snapshot.usage.daily} sourceNote={usageSourceNote} />
 {:else if definition?.kind === 'usage'}

@@ -5,7 +5,9 @@ use std::{
 
 use chrono::{DateTime, Duration, Utc};
 
-use crate::models::{AppSettings, NotificationPreferences, ProviderSnapshot, QuotaWindow};
+use crate::models::{
+    AppSettings, NotificationPreferences, ProviderSnapshot, QuotaFormat, QuotaWindow,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PaceSeverity {
@@ -24,9 +26,13 @@ pub struct PaceProjection {
     pub run_out_at: Option<DateTime<Utc>>,
 }
 
-pub fn project(window: &QuotaWindow, now: DateTime<Utc>) -> PaceProjection {
+pub fn project(
+    window: &QuotaWindow,
+    now: DateTime<Utc>,
+    is_session_window: bool,
+) -> PaceProjection {
     let used = window.used_percent.clamp(0.0, 100.0);
-    if used >= 99.5 {
+    if is_visibly_spent(window, used) {
         return PaceProjection {
             severity: PaceSeverity::Spent,
             projected_used_percent: Some(100.0),
@@ -40,31 +46,65 @@ pub fn project(window: &QuotaWindow, now: DateTime<Utc>) -> PaceProjection {
     if window.period_seconds == 0 || resets_at <= now {
         return level_projection(used);
     }
+    if is_session_window && used <= 0.0 {
+        return level_projection(used);
+    }
     let period = Duration::seconds(window.period_seconds as i64);
     let starts_at = resets_at - period;
-    let elapsed_seconds = now.signed_duration_since(starts_at).num_seconds().max(0) as f64;
+    let elapsed_seconds = now
+        .signed_duration_since(starts_at)
+        .num_milliseconds()
+        .max(0) as f64
+        / 1000.0;
     let progress = (elapsed_seconds / window.period_seconds as f64).clamp(0.0, 1.0);
     // Very young windows carry too little signal for a useful burn-rate projection.
-    if elapsed_seconds < 60.0 || progress < 0.02 {
+    if elapsed_seconds < (window.period_seconds as f64 * 0.01).max(60.0) {
         return level_projection(used);
     }
     let projected = used / progress;
-    let severity = if projected >= 100.0 {
-        PaceSeverity::RunningOut
-    } else if 100.0 - projected < 10.0 {
-        PaceSeverity::Close
-    } else {
-        PaceSeverity::Healthy
-    };
-    let run_out_at = (projected >= 100.0 && used > 0.0).then(|| {
-        starts_at + Duration::milliseconds((elapsed_seconds * 1000.0 * 100.0 / used) as i64)
-    });
+    if projected <= 90.0 {
+        return PaceProjection {
+            severity: PaceSeverity::Healthy,
+            projected_used_percent: Some(projected),
+            even_pace_percent: Some(progress * 100.0),
+            run_out_at: None,
+        };
+    }
+    if used < 5.0 {
+        return level_projection(used);
+    }
+    if projected <= 100.0 {
+        return PaceProjection {
+            severity: if (100.0 - projected).round() >= 1.0 {
+                PaceSeverity::Close
+            } else {
+                PaceSeverity::RunningOut
+            },
+            projected_used_percent: Some(projected),
+            even_pace_percent: Some(progress * 100.0),
+            run_out_at: None,
+        };
+    }
+    let candidate =
+        starts_at + Duration::milliseconds((elapsed_seconds * 1000.0 * 100.0 / used) as i64);
+    let run_out_at = (candidate > now && candidate < resets_at).then_some(candidate);
     PaceProjection {
-        severity,
+        severity: PaceSeverity::RunningOut,
         projected_used_percent: Some(projected),
         even_pace_percent: Some(progress * 100.0),
         run_out_at,
     }
+}
+
+fn is_visibly_spent(window: &QuotaWindow, used_percent: f64) -> bool {
+    if window.format == QuotaFormat::Dollars {
+        if let (Some(used), Some(limit)) = (window.used_value, window.limit_value) {
+            if limit > 0.0 {
+                return ((limit - used) * 100.0).round() / 100.0 <= 0.0;
+            }
+        }
+    }
+    (100.0 - used_percent).round() <= 0.0
 }
 
 fn level_projection(_used: f64) -> PaceProjection {
@@ -151,7 +191,12 @@ impl NotificationEvaluator {
             if !enabled.contains(metric_id.as_str()) {
                 continue;
             }
-            let projection = project(window, now);
+            let is_session_window = match snapshot.provider_id.as_str() {
+                "claude" => window.id == "session",
+                "antigravity" => matches!(window.id.as_str(), "geminiPro" | "claude"),
+                _ => false,
+            };
+            let projection = project(window, now, is_session_window);
             let state = states.entry(metric_id).or_default();
             let mut new_alerts = transition(
                 state,
@@ -178,6 +223,10 @@ fn transition(
     toggles: &NotificationPreferences,
     metric: &str,
 ) -> Vec<PaceAlert> {
+    let severity = match severity {
+        PaceSeverity::Spent => PaceSeverity::RunningOut,
+        value => value,
+    };
     if reset_advanced(resets_at, state.resets_at) {
         state.fired.clear();
         state.previous = None;
@@ -216,7 +265,7 @@ fn transition(
                 state.fired.remove(&Milestone::WillRunOut);
             }
         }
-        if previous.is_none_or(|value| severity <= value) || !milestones.is_empty() {
+        if previous.is_some_and(|value| severity <= value) || !milestones.is_empty() {
             state.previous = Some(severity);
         }
     }
@@ -294,17 +343,80 @@ mod tests {
     fn projection_colors_by_expected_usage_at_reset() {
         let now = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
         assert_eq!(
-            project(&window(30.0, 0.5), now).severity,
+            project(&window(30.0, 0.5), now, false).severity,
             PaceSeverity::Healthy
         );
         assert_eq!(
-            project(&window(46.0, 0.5), now).severity,
+            project(&window(46.0, 0.5), now, false).severity,
             PaceSeverity::Close
         );
         assert_eq!(
-            project(&window(60.0, 0.5), now).severity,
+            project(&window(60.0, 0.5), now, false).severity,
             PaceSeverity::RunningOut
         );
+    }
+
+    #[test]
+    fn projection_uses_reference_signal_and_low_usage_guards() {
+        let now = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
+        let ready = project(&window(1.0, 0.015), now, false);
+        assert_eq!(ready.severity, PaceSeverity::Healthy);
+        assert!((ready.projected_used_percent.unwrap() - 66.666).abs() < 0.01);
+        assert_eq!(
+            project(&window(1.0, 0.009), now, false).severity,
+            PaceSeverity::Untracked
+        );
+        assert_eq!(
+            project(&window(4.0, 0.02), now, false).severity,
+            PaceSeverity::Untracked
+        );
+    }
+
+    #[test]
+    fn projection_preserves_subsecond_elapsed_precision() {
+        let now = Utc.timestamp_millis_opt(1_800_000_000_500).unwrap();
+        let mut value = window(1.0, 0.015);
+        value.resets_at = Some(now + Duration::milliseconds(9_849_500));
+        let projection = project(&value, now, false);
+        assert_eq!(projection.severity, PaceSeverity::Healthy);
+        assert!((projection.projected_used_percent.unwrap() - 66.445).abs() < 0.01);
+    }
+
+    #[test]
+    fn exact_limit_and_zero_spare_have_no_run_out_time() {
+        let now = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
+        for used in [50.0, 49.8] {
+            let projection = project(&window(used, 0.5), now, false);
+            assert_eq!(projection.severity, PaceSeverity::RunningOut);
+            assert_eq!(projection.run_out_at, None);
+        }
+    }
+
+    #[test]
+    fn fresh_session_and_display_precision_match_the_visible_row() {
+        let now = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
+        assert_eq!(
+            project(&window(0.0, 0.5), now, true).severity,
+            PaceSeverity::Untracked
+        );
+        assert_eq!(
+            project(&window(0.0, 0.5), now, false).severity,
+            PaceSeverity::Healthy
+        );
+        assert_ne!(
+            project(&window(99.5, 0.5), now, false).severity,
+            PaceSeverity::Spent
+        );
+        assert_eq!(
+            project(&window(99.51, 0.5), now, false).severity,
+            PaceSeverity::Spent
+        );
+
+        let mut dollars = window(99.0, 0.5);
+        dollars.format = crate::models::QuotaFormat::Dollars;
+        dollars.used_value = Some(9.996);
+        dollars.limit_value = Some(10.0);
+        assert_eq!(project(&dollars, now, false).severity, PaceSeverity::Spent);
     }
 
     #[test]
@@ -392,6 +504,48 @@ mod tests {
                 Some(next_reset),
                 &toggles,
                 "Weekly"
+            )
+            .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn disabled_worsening_is_not_consumed_from_an_untracked_baseline() {
+        let reset = Some(Utc.timestamp_opt(1_800_010_000, 0).unwrap());
+        let mut state = NotificationState::default();
+        let disabled = NotificationPreferences::default();
+        transition(
+            &mut state,
+            PaceSeverity::Untracked,
+            50.0,
+            reset,
+            &disabled,
+            "Weekly",
+        );
+        assert!(transition(
+            &mut state,
+            PaceSeverity::Close,
+            20.0,
+            reset,
+            &disabled,
+            "Weekly",
+        )
+        .is_empty());
+        assert_eq!(state.previous, None);
+
+        let enabled = NotificationPreferences {
+            cutting_it_close: true,
+            ..NotificationPreferences::default()
+        };
+        assert_eq!(
+            transition(
+                &mut state,
+                PaceSeverity::Close,
+                20.0,
+                reset,
+                &enabled,
+                "Weekly",
             )
             .len(),
             1

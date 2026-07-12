@@ -319,21 +319,23 @@
             class="status-badge"
             data-tooltip={stalenessTooltip(state.snapshot.refreshedAt)}>Outdated</span
           >{/if}
-        {#if state.refreshing}
-          <span class="provider-refreshing" aria-label="Refreshing"
-            ><Icon name="refresh" size={12} strokeWidth={2} /></span
-          >
-        {:else if state.error}
-          <span
-            class="provider-warning"
-            role="alert"
-            data-tooltip={state.error}
-            aria-label={state.error}
-            ><Icon name="warning" size={12} strokeWidth={2} /><span class="sr-only"
-              >{state.error}</span
-            ></span
-          >
-        {/if}
+        <span class="provider-status-slot" class:active={state.refreshing || state.error !== null}>
+          {#if state.refreshing}
+            <span class="provider-refreshing" aria-label="Refreshing"
+              ><Icon name="refresh" size={12} strokeWidth={2} /></span
+            >
+          {:else if state.error}
+            <span
+              class="provider-warning"
+              role="alert"
+              data-tooltip={state.error}
+              aria-label={state.error}
+              ><Icon name="warning" size={12} strokeWidth={2} /><span class="sr-only"
+                >{state.error}</span
+              ></span
+            >
+          {/if}
+        </span>
         <span class="provider-mark"><ProviderIcon providerId={provider.id} size={17} /></span>
       </header>
       <section class="provider-card" aria-label={`${providerDisplayName(provider.id)} usage`}>
@@ -443,15 +445,17 @@
       >
         <span class="drag-grip" aria-hidden="true"><Icon name="grip-dots" size={13} /></span>
         <h1>{providerDisplayName(provider.id)}</h1>
-        <span
-          class="provider-warning"
-          role="alert"
-          data-tooltip={state.error}
-          aria-label={state.error}
-          ><Icon name="warning" size={12} strokeWidth={2} /><span class="sr-only"
-            >{state.error}</span
-          ></span
-        >
+        <span class="provider-status-slot active">
+          <span
+            class="provider-warning"
+            role="alert"
+            data-tooltip={state.error}
+            aria-label={state.error}
+            ><Icon name="warning" size={12} strokeWidth={2} /><span class="sr-only"
+              >{state.error}</span
+            ></span
+          >
+        </span>
         <span class="provider-mark"><ProviderIcon providerId={provider.id} size={17} /></span>
       </header>
       <section class="provider-card"><p class="empty-row">No usage data</p></section>

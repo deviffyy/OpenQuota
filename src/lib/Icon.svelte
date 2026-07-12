@@ -7,6 +7,7 @@
     | 'chevron-up'
     | 'chevron-right'
     | 'gear'
+    | 'flame-filled'
     | 'grip-dots'
     | 'grip-lines'
     | 'power'
@@ -73,6 +74,12 @@
     <path d="m5 12 4 4L19 6" />
   {:else if name === 'warning'}
     <path d="M12 3 2.8 20h18.4Z" /><path d="M12 9v4" /><path d="M12 17h.01" />
+  {:else if name === 'flame-filled'}
+    <path
+      fill="currentColor"
+      stroke="none"
+      d="M13.7 2.3c.5 3.4-1 5-2.5 6.5-1.2 1.2-2.3 2.3-2.3 4.2 0 1.2.5 2.2 1.4 2.9-.1-1.9.8-3.4 2.3-4.7.2 1.7 1.2 2.8 2.1 3.8.8.9 1.4 1.8 1.4 3 0 2.2-1.8 4-4.1 4-4.5 0-8.1-3.5-8.1-7.8 0-3.7 2.1-6.2 4.4-8.4-.1 2.1.7 3.4 1.7 4.2.2-3.8 1.9-6.2 3.7-7.7Z"
+    />
   {:else if name === 'grip-lines'}
     <path d="M7 8h10M7 12h10M7 16h10" />
   {:else if name === 'grip-dots'}
