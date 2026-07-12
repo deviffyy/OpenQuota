@@ -12,6 +12,7 @@
     MetricLayout,
     ProviderLayout,
     UpdateProgress,
+    UpdateFailure,
     UsageHistory,
     UsageViewState,
     UpdateStatus,
@@ -31,7 +32,7 @@
     updateStatus: UpdateStatus | null;
     installingUpdate: boolean;
     updateProgress: UpdateProgress | null;
-    updateError: string | null;
+    updateError: UpdateFailure | null;
     onInstallUpdate: () => void;
     onOpenUpdatePage: () => void;
   }
@@ -209,7 +210,10 @@
     <div>
       <strong>Update Available</strong>
       <span>OpenQuota {updateStatus.version} is ready to download.</span>
-      {#if updateStatus.body}<small class="update-notes">{updateStatus.body}</small>{/if}
+      {#if updateStatus.body}<details class="update-notes">
+          <summary>What’s new</summary>
+          <p>{updateStatus.body}</p>
+        </details>{/if}
       {#if installingUpdate && updateProgress}
         <div
           class="update-progress"
@@ -228,23 +232,37 @@
         <small>
           {updateProgress.phase === 'installing'
             ? 'Installing update…'
-            : updateProgress.percent === null
-              ? 'Downloading update…'
-              : `Downloading update… ${updateProgress.percent}%`}
+            : updateProgress.phase === 'retrying'
+              ? 'Download interrupted. Retrying…'
+              : updateProgress.percent === null
+                ? 'Downloading update…'
+                : `Downloading update… ${updateProgress.percent}%`}
         </small>
       {/if}
-      {#if updateError}<small class="notice-text">{updateError}</small>{/if}
+      {#if updateError}<div class="update-error" role="alert">
+          <strong>{updateError.message}</strong><small>{updateError.action}</small>
+        </div>{/if}
     </div>
-    <button
-      type="button"
-      onclick={updateStatus.installable ? onInstallUpdate : onOpenUpdatePage}
-      disabled={installingUpdate}
-      >{updateStatus.installable
-        ? installingUpdate
-          ? 'Updating…'
-          : 'Install Update'
-        : 'Download Update'}</button
-    >
+    <div class="update-actions">
+      <button
+        type="button"
+        class="update-primary-action"
+        onclick={updateStatus.installable ? onInstallUpdate : onOpenUpdatePage}
+        disabled={installingUpdate}
+        >{updateStatus.installable
+          ? installingUpdate
+            ? 'Updating…'
+            : updateError?.retryable
+              ? 'Try Again'
+              : 'Install Update'
+          : 'Download from GitHub'}</button
+      >
+      {#if updateStatus.installable && !installingUpdate}
+        <button type="button" class="update-release-action" onclick={onOpenUpdatePage}
+          >View Release</button
+        >
+      {/if}
+    </div>
     <button
       class="hint-card__dismiss"
       type="button"

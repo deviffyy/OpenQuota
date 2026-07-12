@@ -6,13 +6,14 @@
     NotificationPreferences,
     SettingsViewState,
     UpdateStatus,
+    UpdateFailure,
   } from './types';
 
   interface Props {
     settingsView: SettingsViewState;
     onChange: (settings: AppSettings) => void;
     onRequestNotifications: () => void;
-    updateError: string | null;
+    updateError: UpdateFailure | null;
     checkingUpdate: boolean;
     updateStatus: UpdateStatus | null;
     onCheckForUpdates: () => void;
@@ -314,15 +315,32 @@
       >
     </div>
     {#if updateStatus}
-      <p class="settings-note update-status-note">
-        {updateStatus.available && updateStatus.version
-          ? `OpenQuota ${updateStatus.version} is available on the Dashboard.`
-          : `OpenQuota ${updateStatus.currentVersion} is up to date.`}
-      </p>
+      <div class="settings-update-status" class:available={updateStatus.available}>
+        <span class="settings-update-status__icon"
+          ><Icon
+            name={updateStatus.available ? 'refresh' : 'check'}
+            size={13}
+            strokeWidth={2.2}
+          /></span
+        >
+        <span
+          ><b
+            >{updateStatus.available && updateStatus.version
+              ? `OpenQuota ${updateStatus.version} is available`
+              : `OpenQuota ${updateStatus.currentVersion} is up to date`}</b
+          ><small
+            >{updateStatus.available
+              ? 'Open the Dashboard to install it.'
+              : 'You have the latest verified release.'}</small
+          ></span
+        >
+      </div>
     {:else if settings.lastUpdateCheckAt}
       <p class="settings-note update-status-note">{lastChecked(settings.lastUpdateCheckAt)}</p>
     {/if}
-    {#if updateError}<p class="settings-note notice-text">{updateError}</p>{/if}
+    {#if updateError}<div class="settings-update-error" role="alert">
+        <b>{updateError.message}</b><small>{updateError.action}</small>
+      </div>{/if}
   </div>
 
   <button class="screen-cross-link" type="button" aria-label="Customize" onclick={onCustomize}>

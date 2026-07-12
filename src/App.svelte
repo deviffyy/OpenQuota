@@ -20,6 +20,7 @@
     QuotaWindow,
     SettingsViewState,
     UpdateProgress,
+    UpdateFailure,
     UpdateStatus,
     UsageViewState,
   } from './lib/types';
@@ -66,7 +67,7 @@
   let now = $state(Date.now());
   let settingsError = $state<string | null>(null);
   let updateStatus = $state<UpdateStatus | null>(null);
-  let updateError = $state<string | null>(null);
+  let updateError = $state<UpdateFailure | null>(null);
   let checkingUpdate = $state(false);
   let installingUpdate = $state(false);
   let updateProgress = $state<UpdateProgress | null>(null);
@@ -694,7 +695,7 @@
       }
     } catch (error) {
       if (manual) {
-        updateError = typeof error === 'string' ? error : 'Updates could not be checked.';
+        updateError = updateFailure(error, 'Updates could not be checked.');
       }
     } finally {
       checkingUpdate = false;
@@ -708,7 +709,7 @@
     try {
       await invoke('install_update');
     } catch (error) {
-      updateError = typeof error === 'string' ? error : 'The update could not be installed.';
+      updateError = updateFailure(error, 'The update could not be installed.');
       installingUpdate = false;
       updateProgress = null;
     }
@@ -717,9 +718,27 @@
     try {
       await invoke('open_update_page');
     } catch (error) {
-      updateError =
-        typeof error === 'string' ? error : 'The OpenQuota download page could not be opened.';
+      updateError = updateFailure(error, 'The OpenQuota download page could not be opened.');
     }
+  }
+  function updateFailure(error: unknown, fallback: string): UpdateFailure {
+    if (error && typeof error === 'object') {
+      const candidate = error as Partial<UpdateFailure>;
+      if (typeof candidate.message === 'string') {
+        return {
+          code: typeof candidate.code === 'string' ? candidate.code : 'update_failed',
+          message: candidate.message,
+          action: typeof candidate.action === 'string' ? candidate.action : 'Try again later.',
+          retryable: candidate.retryable !== false,
+        };
+      }
+    }
+    return {
+      code: 'update_failed',
+      message: typeof error === 'string' ? error : fallback,
+      action: 'Try again or download the installer from the release page.',
+      retryable: true,
+    };
   }
   function nextUpdateLabel(value: string | undefined) {
     if (!value) return 'Waiting for first update';

@@ -237,7 +237,7 @@ describe('OpenQuota dashboard', () => {
     expect(screen.getByRole('progressbar', { name: 'Weekly used' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Total Spend' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Usage Trend' })).toBeInTheDocument();
-    expect(screen.getByText('OpenQuota 0.1.2')).toBeInTheDocument();
+    expect(screen.getByText('OpenQuota 0.1.3')).toBeInTheDocument();
   });
 
   it('renders Claude and Antigravity independently with provider-specific quota formats', async () => {
@@ -522,7 +522,8 @@ describe('OpenQuota dashboard', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Check for Updates…' }));
     await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith('check_for_updates'));
-    expect(await screen.findByText('OpenQuota 0.1.0 is up to date.')).toBeInTheDocument();
+    expect(await screen.findByText('OpenQuota 0.1.0 is up to date')).toBeInTheDocument();
+    expect(screen.getByText('You have the latest verified release.')).toBeInTheDocument();
     expect(mocks.invoke).toHaveBeenCalledWith(
       'save_app_settings',
       expect.objectContaining({
@@ -600,7 +601,7 @@ describe('OpenQuota dashboard', () => {
     await screen.findByText('Plus');
     await fireEvent.click(screen.getByLabelText('Open options'));
     await fireEvent.click(screen.getByRole('button', { name: 'Check for Updates…' }));
-    await fireEvent.click(await screen.findByRole('button', { name: 'Download Update' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Download from GitHub' }));
     expect(mocks.invoke).toHaveBeenCalledWith('open_update_page');
   });
 
@@ -646,9 +647,56 @@ describe('OpenQuota dashboard', () => {
     );
 
     progressListener?.({
+      payload: { phase: 'retrying', downloaded: 42, total: 100, percent: 42 },
+    });
+    expect(await screen.findByText('Download interrupted. Retrying…')).toBeInTheDocument();
+
+    progressListener?.({
       payload: { phase: 'installing', downloaded: 100, total: 100, percent: 100 },
     });
     expect(await screen.findByText('Installing update…')).toBeInTheDocument();
+  });
+
+  it('explains recoverable update failures and offers safe fallback actions', async () => {
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === 'get_usage_state') return Promise.resolve(liveState);
+      if (command === 'get_app_settings') return Promise.resolve(settingsState);
+      if (command === 'save_app_settings') return Promise.resolve(settingsState);
+      if (command === 'check_for_updates')
+        return Promise.resolve({
+          available: true,
+          currentVersion: '0.1.0',
+          version: '0.2.0',
+          body: null,
+          installable: true,
+          releaseUrl: 'https://github.com/deviffyy/OpenQuota/releases/latest',
+        });
+      if (command === 'install_update')
+        return Promise.reject({
+          code: 'download_forbidden',
+          message: 'GitHub refused the update download.',
+          action: 'Try again or download it from the release page.',
+          retryable: true,
+        });
+      if (command === 'open_update_page') return Promise.resolve();
+      return Promise.resolve();
+    });
+
+    render(App);
+    await screen.findByText('Plus');
+    await fireEvent.click(screen.getByLabelText('Open options'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Check for Updates…' }));
+    await fireEvent.click(await screen.findByRole('button', { name: 'Install Update' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'GitHub refused the update download.',
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'Try again or download it from the release page.',
+    );
+    expect(screen.getByRole('button', { name: 'Try Again' })).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'View Release' }));
+    expect(mocks.invoke).toHaveBeenCalledWith('open_update_page');
   });
 
   it('records a global shortcut and requests notification permission', async () => {

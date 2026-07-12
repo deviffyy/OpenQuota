@@ -215,11 +215,18 @@ jobs:
               -H 'Accept: application/octet-stream' \
               > "release-check/$asset_name"
           done
+          node .github/scripts/normalize-updater-json.mjs \
+            release-check/latest.json \
+            release-check/release.json \
+            "$GITHUB_REPOSITORY" \
+            "$RELEASE_TAG"
+          gh release upload "$RELEASE_TAG" release-check/latest.json --clobber
           node <<'NODE'
           const fs = require('node:fs');
           const update = JSON.parse(fs.readFileSync('release-check/latest.json', 'utf8'));
           const release = JSON.parse(fs.readFileSync('release-check/release.json', 'utf8'));
-          const assets = new Map(release.assets.map((asset) => [asset.id, asset.name]));
+          const assetNames = new Set(release.assets.map((asset) => asset.name));
+          const prefix = `https://github.com/${process.env.GITHUB_REPOSITORY}/releases/download/${encodeURIComponent(process.env.RELEASE_TAG)}/`;
           const keys = Object.keys(update.platforms ?? {});
           for (const prefix of ['windows-', 'linux-', 'darwin-']) {
             if (!keys.some((key) => key.startsWith(prefix))) {
@@ -230,9 +237,13 @@ jobs:
             if (!entry.url || !entry.signature) {
               throw new Error(`Incomplete updater entry: ${platform}`);
             }
-            const match = entry.url.match(/\/assets\/(\d+)$/);
-            const asset = match && assets.get(Number(match[1]));
-            if (!asset) throw new Error(`Unknown updater asset for ${platform}: ${entry.url}`);
+            if (!entry.url.startsWith(prefix)) {
+              throw new Error(`Updater URL is not a public release download for ${platform}: ${entry.url}`);
+            }
+            const asset = decodeURIComponent(entry.url.slice(prefix.length));
+            if (!assetNames.has(asset)) {
+              throw new Error(`Unknown updater asset for ${platform}: ${entry.url}`);
+            }
             const publishedSignature = fs
               .readFileSync(`release-check/${asset}.sig`, 'utf8')
               .trim();
@@ -241,6 +252,11 @@ jobs:
             }
           }
           NODE
+          jq -r '.platforms[].url' release-check/latest.json | sort -u |
+          while IFS= read -r url; do
+            curl --fail --location --silent --show-error \
+              --range 0-0 --output /dev/null "$url"
+          done
           grep -Eiq '\.exe$' release-check/assets.txt
           grep -Eiq '\.AppImage$' release-check/assets.txt
           grep -Eiq '\.deb$' release-check/assets.txt

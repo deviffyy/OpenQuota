@@ -118,10 +118,17 @@ export interface UpdateStatus {
 }
 
 export interface UpdateProgress {
-  phase: 'downloading' | 'installing';
+  phase: 'downloading' | 'retrying' | 'installing';
   downloaded: number;
   total: number | null;
   percent: number | null;
+}
+
+export interface UpdateFailure {
+  code: string;
+  message: string;
+  action: string;
+  retryable: boolean;
 }
 
 export interface SettingsViewState {

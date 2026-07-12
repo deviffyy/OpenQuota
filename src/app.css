@@ -647,16 +647,40 @@ select {
   line-height: 13px;
 }
 
-.hint-card > button:not(.hint-card__dismiss) {
+.update-actions button {
   width: fit-content;
-  grid-column: 2;
-  margin-top: 4px;
   padding: 4px 8px;
   border: 0;
   border-radius: 6px;
   color: var(--text);
   background: var(--button-hover);
   font-size: 10px;
+}
+
+.hint-card > .update-actions {
+  display: flex;
+  grid-column: 2;
+  align-items: center;
+  flex-direction: row;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.update-actions .update-primary-action {
+  color: white;
+  background: var(--meter-fill);
+  font-weight: 600;
+}
+
+.update-actions .update-release-action {
+  color: var(--secondary);
+  background: transparent;
+}
+
+.update-actions .update-release-action:hover,
+.update-actions .update-release-action:focus-visible {
+  color: var(--text);
+  background: var(--button-hover);
 }
 
 .hint-card__dismiss {
@@ -685,14 +709,44 @@ select {
 }
 
 .update-notes {
-  display: -webkit-box;
-  overflow: hidden;
+  margin-top: 3px;
   color: var(--secondary);
   font-size: 9px;
   line-height: 12px;
+}
+
+.update-notes summary {
+  width: fit-content;
+  color: var(--secondary);
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.update-notes p {
+  max-height: 72px;
+  margin: 5px 0 0;
+  padding-right: 3px;
+  overflow-y: auto;
   white-space: pre-line;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+}
+
+.update-error {
+  gap: 1px;
+  margin-top: 4px;
+  padding: 6px 7px;
+  border-radius: 7px;
+  color: var(--error);
+  background: var(--error-bg);
+}
+
+.update-error strong {
+  font-size: 10px;
+}
+
+.update-error small {
+  color: var(--error);
+  font-size: 9px;
+  line-height: 12px;
 }
 
 .update-progress {
@@ -2515,6 +2569,62 @@ input[type='checkbox']:checked::after {
 .settings-note.update-status-note {
   color: var(--secondary);
   background: var(--card);
+}
+
+.settings-update-status,
+.settings-update-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 12px 8px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--card);
+}
+
+.settings-update-status > span:last-child,
+.settings-update-error {
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-update-status__icon {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border-radius: 50%;
+  color: var(--provider);
+  background: color-mix(in srgb, var(--provider) 12%, transparent);
+  place-items: center;
+}
+
+.settings-update-status.available .settings-update-status__icon {
+  color: var(--meter-fill);
+  background: color-mix(in srgb, var(--meter-fill) 12%, transparent);
+}
+
+.settings-update-status b,
+.settings-update-error b {
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.settings-update-status small,
+.settings-update-error small {
+  color: var(--secondary);
+  font-size: 9px;
+  line-height: 12px;
+}
+
+.settings-update-error {
+  display: flex;
+  color: var(--error);
+  background: var(--error-bg);
+}
+
+.settings-update-error small {
+  color: var(--error);
 }
 
 .options-menu__panel hr,
