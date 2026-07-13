@@ -31,7 +31,7 @@ jobs:
     if: ${{ !inputs.verify_only }}
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_TAG }}
 
@@ -121,7 +121,7 @@ jobs:
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_TAG }}
 
@@ -184,7 +184,7 @@ jobs:
     if: ${{ always() && (inputs.verify_only || needs.publish-artifacts.result == 'success') }}
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.RELEASE_TAG }}
 
