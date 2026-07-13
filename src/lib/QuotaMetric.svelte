@@ -191,3 +191,87 @@
     {/if}
   </div>
 </section>
+
+<style>
+  :global {
+    .metric__heading .pace-warning {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      color: var(--secondary);
+      background: transparent;
+      font: inherit;
+      font-size: 13px;
+      line-height: 17px;
+    }
+
+    .metric__heading .pace-warning__icon {
+      color: var(--meter-critical);
+    }
+
+    .meter__fill {
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 0;
+      border-radius: inherit;
+      background: var(--meter-fill);
+      transition:
+        width var(--motion-switch),
+        background-color var(--motion-switch);
+    }
+
+    .meter__fill--visible {
+      width: max(5px, var(--fill-percent));
+    }
+
+    .meter--warning .meter__fill {
+      background: var(--meter-warning);
+    }
+
+    .meter--critical .meter__fill {
+      background: var(--meter-critical);
+    }
+
+    .meter__pace {
+      position: absolute;
+      top: -2px;
+      left: clamp(1px, var(--pace-percent), calc(100% - 1px));
+      width: 2px;
+      height: 9px;
+      border-radius: 2px;
+      background: var(--secondary);
+      transform: translateX(-1px);
+    }
+
+    .metric__reading strong {
+      color: var(--text);
+      font-weight: 450;
+    }
+
+    .metric__reading button {
+      padding: 0;
+      border: 0;
+      border-radius: 6px;
+      color: inherit;
+      background: none;
+      cursor: pointer;
+      transition:
+        color 120ms ease,
+        background-color 120ms ease;
+    }
+
+    .metric__reading button:first-child {
+      color: var(--text);
+      font-weight: 500;
+    }
+
+    .metric__reading button:hover,
+    .metric__reading button:focus-visible {
+      background: var(--button-hover);
+      box-shadow: 0 0 0 3px var(--button-hover);
+    }
+  }
+</style>

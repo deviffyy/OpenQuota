@@ -225,7 +225,7 @@ describe('OpenQuota dashboard', () => {
     const totalSpend = await screen.findByRole('region', { name: 'Total Spend' });
     expect(within(totalSpend).getByText('No cost data for this period')).toBeInTheDocument();
     await fireEvent.click(within(totalSpend).getByRole('combobox', { name: 'Total Spend Metric' }));
-    await fireEvent.click(within(totalSpend).getByRole('option', { name: 'Tokens' }));
+    await fireEvent.click(screen.getByRole('option', { name: 'Tokens' }));
     expect(within(totalSpend).getByText('Codex')).toBeInTheDocument();
     expect(within(totalSpend).getByText('2.1')).toBeInTheDocument();
     expect(within(totalSpend).getByText('million')).toBeInTheDocument();

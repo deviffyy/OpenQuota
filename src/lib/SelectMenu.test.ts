@@ -7,7 +7,11 @@ const options = [
   { value: 'tokens', label: 'Tokens' },
 ];
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 describe('SelectMenu', () => {
   it('opens an application-styled listbox and selects an option', async () => {
@@ -15,7 +19,9 @@ describe('SelectMenu', () => {
     render(SelectMenu, { label: 'Metric', value: 'cost', options, onChange });
 
     await fireEvent.click(screen.getByRole('combobox', { name: 'Metric' }));
-    expect(screen.getByRole('listbox', { name: 'Metric' })).toBeInTheDocument();
+    const listbox = screen.getByRole('listbox', { name: 'Metric' });
+    expect(listbox).toBeInTheDocument();
+    expect(listbox.parentElement).toBe(document.body);
     expect(screen.getByRole('option', { name: 'Cost' })).toHaveAttribute('aria-selected', 'true');
 
     await fireEvent.click(screen.getByRole('option', { name: 'Tokens' }));
@@ -34,5 +40,42 @@ describe('SelectMenu', () => {
     await fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     expect(trigger).toHaveFocus();
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
+  });
+
+  it('opens above the trigger when the visible area below is too small', async () => {
+    vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(200);
+    vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (
+      this: Element,
+    ) {
+      if (this.getAttribute('role') === 'combobox') {
+        return {
+          top: 160,
+          right: 300,
+          bottom: 188,
+          left: 188,
+          width: 112,
+          height: 28,
+          x: 188,
+          y: 160,
+          toJSON: () => ({}),
+        };
+      }
+      return {
+        top: 0,
+        right: 0,
+        bottom: 0,
+        left: 0,
+        width: 0,
+        height: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      };
+    });
+
+    render(SelectMenu, { label: 'Metric', value: 'cost', options, onChange: vi.fn() });
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Metric' }));
+
+    expect(screen.getByRole('listbox', { name: 'Metric' })).toHaveClass('select-menu__list--above');
   });
 });

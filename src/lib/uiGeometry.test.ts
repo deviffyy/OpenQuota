@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest';
+import baseCss from '../styles/base.css?raw';
 import layoutCss from '../styles/layout.css?raw';
 import componentCss from '../styles/components.css?raw';
+import tokensCss from '../styles/tokens.css?raw';
 import tauriConfigSource from '../../src-tauri/tauri.conf.json?raw';
 import { PANEL_MIN_HEIGHT, PANEL_SCREEN_FRACTION } from './panelSizing';
+import { coLocatedComponentCss } from './uiStyleSources';
 
-const css = `${layoutCss}\n${componentCss}`;
+const css = `${layoutCss}\n${componentCss}\n${coLocatedComponentCss}`;
 
 const tauriConfig = JSON.parse(tauriConfigSource) as {
   app: { windows: Array<{ width: number; minHeight: number }> };
@@ -36,11 +39,33 @@ describe('popover geometry contract', () => {
     expect(css).toMatch(/\.footer\s*{[^}]*min-height: 52px;/s);
   });
 
+  it('keeps shared rules below component-owned styles regardless of bundle order', () => {
+    expect(tokensCss).toContain('@layer tokens, base, shared;');
+    expect(baseCss).toContain('@layer base');
+    expect(layoutCss).toContain('@layer shared');
+    expect(componentCss).toContain('@layer shared');
+    expect(coLocatedComponentCss).not.toContain('@layer shared');
+  });
+
   it('keeps reorder handles reachable on touch and hybrid-pointer devices', () => {
     expect(css).toContain('@media (hover: none), (pointer: coarse), (any-pointer: coarse)');
     expect(css).toMatch(/\.metric-reorder-handle\s*{[^}]*width: 44px;[^}]*height: 44px;/s);
     expect(css).toMatch(
       /\.drag-grip::after,[\s\S]*\.reorder-grip::after\s*{[^}]*width: 44px;[^}]*height: 44px;/,
+    );
+  });
+
+  it('keeps compact rows aligned and compact controls genuinely dense', () => {
+    expect(css).toMatch(/:root\[data-density='compact'\] \.usage-row\s*{[^}]*padding: 3px 14px;/s);
+    expect(css).toMatch(/:root\[data-density='compact'\] \.trend-row\s*{[^}]*padding: 6px 14px;/s);
+    expect(css).toMatch(
+      /:root\[data-density='compact'\] \.select-menu__trigger\s*{[^}]*min-height: 26px;/s,
+    );
+    expect(css).toMatch(
+      /:root\[data-density='compact'\] \.screen-cross-link\s*{[^}]*min-height: 42px;/s,
+    );
+    expect(css).toMatch(
+      /:root\[data-density='compact'\] \.spend-ring\s*{[^}]*width: 88px;[^}]*height: 88px;/s,
     );
   });
 

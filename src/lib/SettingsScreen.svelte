@@ -334,3 +334,312 @@
     <Icon name="chevron-right" size={13} strokeWidth={2.2} />
   </button>
 </section>
+
+<style>
+  :global {
+    .settings-section {
+      margin-bottom: 10px;
+    }
+
+    .setting-row {
+      display: flex;
+      min-height: 40px;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 6px 10px;
+      border-top: 1px solid var(--separator);
+      font-size: 11px;
+    }
+
+    .settings-section h2 + .setting-row {
+      border-top: 0;
+    }
+
+    .setting-row > span {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    .setting-row b {
+      font-weight: 550;
+    }
+
+    .setting-row small {
+      color: var(--secondary);
+      font-size: 9px;
+      line-height: 12px;
+    }
+
+    input[type='checkbox'] {
+      width: 15px;
+      height: 15px;
+      accent-color: var(--meter-fill);
+    }
+
+    .shortcut-field {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+    }
+
+    .shortcut-field button {
+      max-width: 115px;
+      padding: 4px 7px;
+      overflow: hidden;
+      border: 1px solid var(--separator);
+      border-radius: 6px;
+      color: var(--secondary);
+      background: var(--tray);
+      font-family: ui-monospace, monospace;
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .shortcut-field button.recording {
+      border-color: var(--meter-fill);
+      color: var(--text);
+    }
+
+    .shortcut-field button[aria-label='Clear global shortcut'] {
+      display: grid;
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      color: var(--secondary);
+      font-family: inherit;
+      place-items: center;
+    }
+
+    .shortcut-field button[aria-label='Clear global shortcut']:hover,
+    .shortcut-field button[aria-label='Clear global shortcut']:focus-visible {
+      outline: none;
+      color: var(--text);
+      background: var(--button-hover);
+    }
+
+    .secondary-button {
+      flex: 0 0 auto;
+      padding: 4px 8px;
+      border: 1px solid var(--separator);
+      border-radius: 6px;
+      color: var(--text);
+      background: var(--tray);
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    .secondary-button:disabled {
+      opacity: 0.55;
+    }
+
+    .permission-warning {
+      display: inline-grid;
+      width: 13px;
+      height: 13px;
+      margin-left: 3px;
+      border-radius: 50%;
+      color: white;
+      background: var(--warning);
+      font-size: 8px;
+      place-items: center;
+    }
+
+    .settings-note,
+    .version-row {
+      margin: 0;
+      padding: 6px 10px 9px;
+      color: var(--warning);
+      font-size: 9px;
+    }
+
+    .version-row {
+      padding: 3px 0 8px;
+      color: var(--tertiary);
+      text-align: center;
+    }
+
+    .settings-section {
+      margin-bottom: 14px;
+      overflow: visible;
+      background: transparent;
+    }
+
+    .settings-section > .setting-row {
+      border-top: 0;
+      background: var(--card);
+    }
+
+    .settings-section > h2 + .setting-row {
+      border-radius: 12px 12px 0 0;
+    }
+
+    .settings-section > .setting-row:last-child,
+    .settings-section > .settings-note:last-child {
+      border-radius: 0 0 12px 12px;
+    }
+
+    .settings-section > h2 + .setting-row:last-child {
+      border-radius: 12px;
+    }
+
+    .setting-row {
+      min-height: 40px;
+      padding: 9px 12px;
+      border: 0;
+      font-size: 13px;
+    }
+
+    .setting-row b {
+      font-weight: 400;
+    }
+
+    .setting-row .select-menu__trigger {
+      font-size: 13px;
+    }
+
+    .setting-row small {
+      font-size: 10px;
+      line-height: 12px;
+    }
+
+    input[type='checkbox'] {
+      width: 28px;
+      height: 16px;
+      flex: 0 0 auto;
+      margin: 0;
+      appearance: none;
+      border-radius: 9px;
+      background: var(--meter-track);
+      cursor: pointer;
+      transition: background-color 160ms ease;
+    }
+
+    input[type='checkbox']::after {
+      display: block;
+      width: 12px;
+      height: 12px;
+      margin: 2px;
+      border-radius: 50%;
+      background: white;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+      content: '';
+      transition: transform 160ms ease;
+    }
+
+    input[type='checkbox']:checked {
+      background: var(--meter-fill);
+    }
+
+    input[type='checkbox']:checked::after {
+      transform: translateX(12px);
+    }
+
+    .version-row {
+      font-size: 10px;
+    }
+
+    .setting-row > span:has(.setting-info) {
+      align-items: center;
+      flex-direction: row;
+      gap: 6px;
+    }
+
+    .setting-info {
+      display: inline-grid;
+      flex: 0 0 auto;
+      color: var(--secondary);
+      font-style: normal;
+      place-items: center;
+    }
+
+    .setting-row--button {
+      display: block;
+    }
+
+    .settings-wide-button {
+      width: 100%;
+      min-height: 28px;
+      font-size: 12px;
+    }
+
+    .settings-note.notice-text {
+      border-radius: 0 0 12px 12px;
+      background: var(--card);
+    }
+
+    .notification-actions {
+      padding: 8px 12px 10px;
+      border-top: 1px solid var(--separator);
+      border-radius: 0 0 12px 12px;
+      background: var(--card);
+    }
+
+    .notification-attention {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--warning);
+    }
+
+    .notification-attention > span {
+      display: flex;
+      min-width: 0;
+      flex: 1;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .notification-attention b {
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 13px;
+    }
+
+    .notification-attention small {
+      color: var(--secondary);
+      font-size: 9px;
+      line-height: 12px;
+    }
+
+    .notification-attention .secondary-button {
+      flex: 0 0 auto;
+    }
+
+    .settings-update-error {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin: 0 12px 8px;
+      padding: 8px;
+      border-radius: 8px;
+      color: var(--error);
+      background: var(--error-bg);
+    }
+
+    .settings-update-error b {
+      font-size: 11px;
+      line-height: 14px;
+    }
+
+    .settings-update-error small {
+      color: var(--error);
+      font-size: 9px;
+      line-height: 12px;
+    }
+
+    :root[data-density='compact'] .setting-row {
+      gap: 8px;
+      padding-right: 10px;
+      padding-left: 10px;
+    }
+
+    :root[data-density='compact'] .screen-cross-link {
+      min-height: 42px;
+      margin-top: 8px;
+    }
+  }
+</style>

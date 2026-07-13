@@ -111,3 +111,99 @@
     <Icon name="chevron-right" size={13} strokeWidth={2.2} />
   </button>
 </section>
+
+<style>
+  :global {
+    .provider-list-row {
+      display: flex;
+      min-height: 52px;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 7px;
+      border-top: 1px solid var(--separator);
+    }
+
+    .provider-list-row:first-child {
+      border-top: 0;
+    }
+
+    .provider-list-row.inactive {
+      opacity: 0.55;
+    }
+
+    .reorder-grip {
+      position: relative;
+      color: var(--tertiary);
+      cursor: grab;
+      font-size: 16px;
+    }
+
+    .reorder-grip::after {
+      position: absolute;
+      inset: -10px -8px;
+      content: '';
+    }
+
+    .provider-list-main {
+      display: flex;
+      min-width: 0;
+      flex: 1;
+      align-items: center;
+      flex-direction: row;
+      gap: 10px;
+      padding: 4px;
+      border: 0;
+      color: var(--text);
+      background: none;
+      text-align: left;
+    }
+
+    .provider-list-main > span {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+    }
+
+    .provider-list-main b {
+      font-size: 13px;
+    }
+
+    .provider-list-main small {
+      color: var(--secondary);
+      font-size: 9px;
+    }
+
+    .provider-list-row {
+      min-height: 42px;
+      gap: 10px;
+      padding: 9px 12px;
+      border-top-color: var(--separator);
+    }
+
+    .provider-list-row > .provider-icon {
+      color: var(--text);
+    }
+
+    .provider-list-main b {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .provider-list-main small {
+      font-size: 11px;
+    }
+
+    .switch input {
+      position: absolute;
+    }
+
+    .switch span {
+      width: 28px;
+      height: 16px;
+    }
+
+    .chevron {
+      font-size: 18px;
+    }
+  }
+</style>

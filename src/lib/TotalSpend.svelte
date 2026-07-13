@@ -178,3 +178,330 @@
     {/if}
   </div>
 </section>
+
+<style>
+  :global {
+    .total-card {
+      margin-bottom: 12px;
+      padding: 10px 11px;
+      border-radius: 12px;
+      background: var(--card);
+    }
+
+    .total-card__header,
+    .total-card__body,
+    .trend-heading {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .period-switcher {
+      position: relative;
+      display: flex;
+      padding: 2px;
+      border-radius: 7px;
+      background: var(--meter-track);
+    }
+
+    .period-switcher button {
+      position: relative;
+      z-index: 1;
+      padding: 3px 6px;
+      border: 0;
+      border-radius: 5px;
+      color: var(--secondary);
+      background: transparent;
+      font-size: 9px;
+      cursor: pointer;
+    }
+
+    .period-switcher button.active {
+      color: var(--text);
+      background: transparent;
+      box-shadow: none;
+    }
+
+    .period-switcher__selection {
+      position: absolute;
+      top: 3px;
+      bottom: 3px;
+      left: 3px;
+      width: calc((100% - 6px) / 3);
+      border-radius: 999px;
+      background: var(--tray);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+      transition: transform var(--motion-spring);
+    }
+
+    .total-card__body {
+      justify-content: flex-start;
+      padding-top: 10px;
+    }
+
+    .spend-ring {
+      position: relative;
+      display: grid;
+      width: 74px;
+      height: 74px;
+      flex: 0 0 74px;
+      place-items: center;
+    }
+
+    .spend-ring svg {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      transform: rotate(-90deg);
+    }
+
+    .spend-ring circle {
+      fill: none;
+      stroke-width: 12;
+    }
+
+    .spend-ring__track {
+      stroke: var(--meter-track);
+    }
+
+    .spend-ring__segment {
+      stroke: var(--segment-color);
+      stroke-dasharray: var(--segment-length) calc(100 - var(--segment-length));
+      stroke-dashoffset: calc(-1 * var(--segment-offset));
+      stroke-linecap: round;
+      transition:
+        stroke-dasharray var(--motion-spring),
+        stroke-dashoffset var(--motion-spring);
+    }
+
+    .spend-ring__label {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+    }
+
+    .spend-ring strong {
+      max-width: 48px;
+      overflow: hidden;
+      font-size: 13px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .spend-ring span,
+    .spend-legend small {
+      color: var(--secondary);
+      font-size: 8px;
+    }
+
+    .spend-legend {
+      display: grid;
+      flex: 1;
+      grid-template-columns: 1fr auto;
+      gap: 2px 8px;
+      font-size: 11px;
+    }
+
+    .spend-legend span i {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      margin-right: 5px;
+      border-radius: 50%;
+      background: var(--provider);
+    }
+
+    .spend-legend small {
+      grid-column: 1 / -1;
+    }
+
+    .icon-button {
+      display: grid;
+      width: 30px;
+      height: 30px;
+      margin-left: 0;
+      padding: 0;
+      border: 0;
+      border-radius: 50%;
+      color: var(--secondary);
+      background: transparent;
+      cursor: default;
+      place-items: center;
+    }
+
+    .icon-button:hover,
+    .icon-button:focus-visible {
+      color: var(--text);
+      background: var(--button-hover);
+    }
+
+    .icon-button:focus-visible {
+      outline: 2px solid var(--meter-fill);
+      outline-offset: 2px;
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .icon-button {
+        transition:
+          color 120ms ease,
+          background-color 120ms ease;
+      }
+    }
+
+    .total-spend-section {
+      margin-bottom: 0;
+    }
+
+    .total-card__header {
+      min-height: 24px;
+      margin-bottom: 4px;
+      padding: 0 4px 2px;
+    }
+
+    .total-card__title {
+      display: flex;
+      min-width: 0;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .select-menu--title {
+      min-width: 0;
+    }
+
+    .select-menu--title .select-menu__trigger {
+      min-height: 24px;
+      gap: 4px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .select-menu--title .select-menu__trigger:hover,
+    .select-menu--title .select-menu__trigger[aria-expanded='true'] {
+      color: var(--meter-fill);
+      background: transparent;
+    }
+
+    .select-menu__list--title {
+      min-width: 138px;
+      transform-origin: top left;
+    }
+
+    .select-menu__list--title.select-menu__list--above {
+      transform-origin: bottom left;
+    }
+
+    .total-card__header .icon-button--plain {
+      width: 20px;
+      height: 20px;
+      flex: 0 0 20px;
+      color: var(--secondary);
+      cursor: pointer;
+    }
+
+    .total-card__header .total-card__info {
+      width: 16px;
+      height: 20px;
+      flex-basis: 16px;
+      cursor: help;
+    }
+
+    .total-card {
+      margin: 0;
+      padding: 12px 14px;
+    }
+
+    .period-switcher {
+      width: 100%;
+      padding: 3px;
+      background: var(--meter-track);
+    }
+
+    .period-switcher button {
+      min-height: 23px;
+      flex: 1;
+      padding: 4px 12px;
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .period-switcher button.active {
+      font-weight: 600;
+    }
+
+    .total-card__body {
+      gap: 18px;
+      padding-top: 12px;
+    }
+
+    .spend-ring {
+      width: 104px;
+      height: 104px;
+      flex-basis: 104px;
+      padding: 0;
+    }
+
+    .spend-ring strong {
+      max-width: 68px;
+    }
+
+    .spend-legend {
+      align-content: center;
+      gap: 7px 8px;
+    }
+
+    .spend-legend strong {
+      color: var(--secondary);
+      font-weight: 500;
+      text-align: right;
+    }
+
+    .total-card__empty {
+      display: flex;
+      min-height: 76px;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 8px;
+      color: var(--secondary);
+      font-size: 11px;
+      text-align: center;
+    }
+
+    :root[data-density='compact'] .total-card {
+      padding: 10px 12px;
+    }
+
+    :root[data-density='compact'] .period-switcher button {
+      min-height: 21px;
+      padding: 3px 10px;
+    }
+
+    :root[data-density='compact'] .total-card__body {
+      gap: 14px;
+      padding-top: 8px;
+    }
+
+    :root[data-density='compact'] .spend-ring {
+      width: 88px;
+      height: 88px;
+      flex-basis: 88px;
+    }
+
+    :root[data-density='compact'] .spend-ring strong {
+      max-width: 58px;
+    }
+
+    :root[data-density='compact'] .total-card__empty {
+      min-height: 64px;
+    }
+  }
+</style>

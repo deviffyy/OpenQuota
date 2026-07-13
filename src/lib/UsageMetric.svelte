@@ -89,3 +89,75 @@
     onLeave={scheduleHide}
   />
 {/if}
+
+<style>
+  :global {
+    .usage-row {
+      padding: 6px 14px;
+      font-size: 12px;
+      line-height: 15px;
+    }
+
+    .usage-row--condensed {
+      padding-top: 2px;
+    }
+
+    .usage-row span {
+      font-weight: 650;
+    }
+
+    .usage-row strong,
+    .usage-row > button {
+      font-weight: 450;
+      text-align: right;
+    }
+
+    .usage-row > button {
+      padding: 0;
+      border: 0;
+      color: inherit;
+      background: none;
+      font: inherit;
+    }
+
+    .usage-row > button:disabled {
+      opacity: 1;
+    }
+
+    .usage-reading-interactive {
+      padding: 0 1px;
+      border-radius: 6px;
+      outline: none;
+      cursor: default;
+      transition:
+        background-color 120ms ease,
+        box-shadow 120ms ease;
+    }
+
+    .usage-reading-interactive:hover,
+    .usage-reading-interactive:focus-visible {
+      background: var(--button-hover);
+      box-shadow: 0 0 0 4px var(--button-hover);
+    }
+
+    .usage-label-warning {
+      display: inline-block;
+      margin-left: 4px;
+      color: var(--meter-warning);
+      font-style: normal;
+      font-size: 9px;
+      transform: translateY(-1px);
+    }
+
+    .usage-divider {
+      height: 1px;
+      margin: 3px 0 5px;
+      background: var(--separator);
+    }
+
+    :root[data-density='compact'] .usage-row {
+      padding: 3px 14px;
+      font-size: 11px;
+    }
+  }
+</style>

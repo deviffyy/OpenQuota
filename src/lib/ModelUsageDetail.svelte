@@ -73,3 +73,115 @@
   </div>
   <p>{breakdown.sourceNote}</p>
 </div>
+
+<style>
+  :global {
+    .model-usage-detail {
+      position: fixed;
+      right: 8px;
+      z-index: 100;
+      box-sizing: border-box;
+      width: 280px;
+      max-height: calc(100vh - 16px);
+      padding: 14px;
+      overflow-y: auto;
+      border: 1px solid var(--separator);
+      border-radius: 12px;
+      color: var(--text);
+      background: color-mix(in srgb, var(--tray) 97%, transparent);
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28);
+      animation: model-detail-in 120ms ease-out both;
+    }
+
+    .model-usage-detail h3 {
+      margin: 0 0 8px;
+      font-size: 13px;
+      font-weight: 650;
+      line-height: 17px;
+    }
+
+    .model-usage-list {
+      display: grid;
+    }
+
+    .model-usage-row {
+      display: grid;
+      gap: 2px;
+      padding: 6px 0;
+    }
+
+    .model-usage-primary,
+    .model-usage-secondary {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 11px;
+      line-height: 14px;
+    }
+
+    .model-usage-primary strong {
+      overflow: hidden;
+      font-weight: 650;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .model-usage-primary span,
+    .model-usage-secondary span {
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
+
+    .model-usage-secondary {
+      color: var(--secondary);
+    }
+
+    .model-usage-meter {
+      height: 5px;
+      margin-top: 2px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: var(--meter-track);
+    }
+
+    .model-usage-meter i {
+      display: block;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--meter-fill);
+    }
+
+    .model-usage-detail > p {
+      margin: 8px 0 0;
+      color: var(--secondary);
+      font-size: 10px;
+      line-height: 13px;
+      text-align: center;
+    }
+
+    @keyframes model-detail-in {
+      from {
+        opacity: 0;
+        transform: translateY(-2px) scale(0.98);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    :root[data-density='compact'] .model-usage-detail h3 {
+      font-size: 12px;
+    }
+
+    :root[data-density='compact'] .model-usage-primary,
+    :root[data-density='compact'] .model-usage-secondary {
+      font-size: 10px;
+    }
+
+    :root[data-density='compact'] .model-usage-row {
+      padding: 4px 0;
+    }
+  }
+</style>

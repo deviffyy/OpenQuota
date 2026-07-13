@@ -6,8 +6,9 @@ import customizeDetail from './CustomizeProviderDetail.svelte?raw';
 import customizeList from './CustomizeProviderList.svelte?raw';
 import dashboard from './Dashboard.svelte?raw';
 import settings from './SettingsScreen.svelte?raw';
+import { coLocatedComponentCss } from './uiStyleSources';
 
-const css = `${tokensCss}\n${layoutCss}\n${sharedComponentCss}`;
+const css = `${tokensCss}\n${layoutCss}\n${sharedComponentCss}\n${coLocatedComponentCss}`;
 
 describe('native UI language contract', () => {
   it('uses the platform system font and reference type sizes', () => {

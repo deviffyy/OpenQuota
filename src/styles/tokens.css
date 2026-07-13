@@ -1,37 +1,41 @@
-:root {
-  font-family:
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    sans-serif;
-  color: #171719;
-  background: transparent;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  --tray: #ffffff;
-  --card: color-mix(in srgb, var(--text) 5%, var(--tray));
-  --card-hover: color-mix(in srgb, var(--text) 8%, var(--tray));
-  --text: #171719;
-  --secondary: #727278;
-  --tertiary: #a5a5aa;
-  --meter-track: color-mix(in srgb, var(--text) 14%, var(--tray));
-  --meter-fill: #1689ef;
-  --meter-warning: #e5a400;
-  --meter-critical: #e3483f;
-  --provider: #10a37f;
-  --provider-codex: #10a37f;
-  --provider-claude: #de7356;
-  --provider-antigravity: #4285f4;
-  --separator: color-mix(in srgb, var(--text) 9%, transparent);
-  --button-hover: color-mix(in srgb, var(--text) 8%, transparent);
-  --warning: #a85d00;
-  --warning-bg: #fff4df;
-  --error: #b42318;
-  --error-bg: #fff0ee;
-  --motion-spring: 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
-  --motion-switch: 180ms ease-in-out;
-  color-scheme: light;
+@layer tokens, base, shared;
+
+@layer tokens {
+  :root {
+    font-family:
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      'Segoe UI',
+      sans-serif;
+    color: #171719;
+    background: transparent;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
+    --tray: #ffffff;
+    --card: color-mix(in srgb, var(--text) 5%, var(--tray));
+    --card-hover: color-mix(in srgb, var(--text) 8%, var(--tray));
+    --text: #171719;
+    --secondary: #727278;
+    --tertiary: #a5a5aa;
+    --meter-track: color-mix(in srgb, var(--text) 14%, var(--tray));
+    --meter-fill: #1689ef;
+    --meter-warning: #e5a400;
+    --meter-critical: #e3483f;
+    --provider: #10a37f;
+    --provider-codex: #10a37f;
+    --provider-claude: #de7356;
+    --provider-antigravity: #4285f4;
+    --separator: color-mix(in srgb, var(--text) 9%, transparent);
+    --button-hover: color-mix(in srgb, var(--text) 8%, transparent);
+    --warning: #a85d00;
+    --warning-bg: #fff4df;
+    --error: #b42318;
+    --error-bg: #fff0ee;
+    --motion-spring: 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+    --motion-switch: 180ms ease-in-out;
+    color-scheme: light;
+  }
 }
 
 @media (prefers-color-scheme: dark) {

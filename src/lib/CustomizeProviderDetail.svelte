@@ -189,3 +189,151 @@
     {/if}
   </section>
 {/if}
+
+<style>
+  :global {
+    .metric-section {
+      margin-top: 4px;
+    }
+
+    .customize-metric-row {
+      display: flex;
+      min-height: 39px;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 6px;
+      border-top: 1px solid var(--separator);
+    }
+
+    .customize-metric-row:first-child {
+      border-top: 0;
+    }
+
+    .customize-metric-row.disabled {
+      opacity: 0.55;
+    }
+
+    .customize-metric-row > label {
+      display: flex;
+      min-width: 0;
+      flex: 1;
+      align-items: center;
+      gap: 5px;
+      font-size: 10px;
+    }
+
+    .pin-button.pinned {
+      color: var(--warning);
+    }
+
+    .metric-section {
+      margin-top: 0;
+      margin-bottom: 14px;
+    }
+
+    .customize-metric-row {
+      min-height: 42px;
+      gap: 10px;
+      padding: 9px 12px;
+    }
+
+    .customize-metric-row > label {
+      font-size: 12px;
+    }
+
+    .customize-metric-name {
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
+      font-size: 13px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .customize-metric-pin-slot {
+      display: grid;
+      width: 25px;
+      height: 25px;
+      flex: 0 0 25px;
+      place-items: center;
+    }
+
+    .customize-metric-row > .switch {
+      display: block;
+      flex: 0 0 28px;
+    }
+
+    .empty-drop-zone {
+      display: grid;
+      height: 30px;
+      margin: 8px;
+      border: 1px dashed var(--separator);
+      border-radius: 8px;
+      color: var(--tertiary);
+      font-size: 10px;
+      place-items: center;
+    }
+
+    .customization-pill {
+      position: sticky;
+      bottom: 8px;
+      z-index: 20;
+      display: flex;
+      width: max-content;
+      max-width: calc(100% - 16px);
+      align-items: center;
+      gap: 6px;
+      margin: 8px auto 0;
+      padding: 7px 10px;
+      border: 1px solid var(--separator);
+      border-radius: 999px;
+      color: var(--text);
+      background: color-mix(in srgb, var(--tray) 96%, transparent);
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.22);
+      font-size: 10px;
+      animation: detail-in var(--motion-spring) both;
+    }
+
+    .customization-pill .symbol-icon {
+      color: #34c759;
+    }
+
+    .customization-pill.denied {
+      color: var(--warning);
+      animation:
+        detail-in var(--motion-spring) both,
+        deny-shake 400ms linear 100ms both;
+    }
+
+    .customization-pill.denied .symbol-icon {
+      color: var(--warning);
+    }
+
+    @keyframes deny-shake {
+      0%,
+      100% {
+        transform: translateX(0);
+      }
+
+      17% {
+        transform: translateX(5px);
+      }
+
+      33% {
+        transform: translateX(-5px);
+      }
+
+      50% {
+        transform: translateX(5px);
+      }
+
+      67% {
+        transform: translateX(-5px);
+      }
+
+      83% {
+        transform: translateX(5px);
+      }
+    }
+  }
+</style>

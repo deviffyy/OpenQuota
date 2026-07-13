@@ -744,3 +744,501 @@
     <span>Turn on Customize to choose what to show.</span>
   </section>
 {/if}
+
+<style>
+  :global {
+    .provider-header {
+      display: flex;
+      min-height: 28px;
+      align-items: center;
+      gap: 7px;
+      padding: 0 4px 4px 2px;
+    }
+
+    .provider-header h1 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 650;
+      letter-spacing: -0.01em;
+    }
+
+    .plan {
+      color: var(--secondary);
+      font-size: 11px;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .status-badge {
+      padding: 2px 6px;
+      border-radius: 999px;
+      color: var(--warning);
+      background: var(--warning-bg);
+      font-size: 9px;
+      font-weight: 650;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .provider-mark {
+      display: grid;
+      margin-left: auto;
+      color: var(--secondary);
+      place-items: center;
+    }
+
+    .provider-status-slot {
+      display: grid;
+      width: 16px;
+      height: 18px;
+      flex: 0 0 16px;
+      margin-left: auto;
+      opacity: 0;
+      place-items: center;
+    }
+
+    .provider-status-slot.active {
+      opacity: 1;
+    }
+
+    .provider-header .provider-mark {
+      margin-left: 0;
+    }
+
+    .provider-warning,
+    .provider-refreshing {
+      display: grid;
+      width: 16px;
+      height: 18px;
+      flex: 0 0 16px;
+      place-items: center;
+    }
+
+    .provider-warning {
+      color: var(--warning);
+      cursor: help;
+    }
+
+    .provider-refreshing {
+      color: var(--secondary);
+      animation: spin 900ms linear infinite;
+    }
+
+    .drag-grip {
+      display: grid;
+      width: 8px;
+      grid-template-columns: repeat(2, 2px);
+      grid-template-rows: repeat(3, 2px);
+      gap: 2px;
+      opacity: 0.6;
+    }
+
+    .drag-grip i {
+      width: 2px;
+      height: 2px;
+      border-radius: 50%;
+      background: var(--tertiary);
+    }
+
+    .provider-card {
+      padding: 5px 12px;
+      border-radius: 12px;
+      background: var(--card);
+    }
+
+    .demand-divider {
+      display: grid;
+      width: 100%;
+      min-height: 24px;
+      padding: 5px 14px;
+      border: 0;
+      color: var(--secondary);
+      background: none;
+      cursor: pointer;
+      place-items: center;
+    }
+
+    .demand-metrics {
+      overflow: hidden;
+    }
+
+    .detection-card {
+      position: relative;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      margin-bottom: 10px;
+      padding: 10px 28px 10px 11px;
+      border-radius: 11px;
+      background: color-mix(in srgb, var(--provider) 11%, var(--card));
+    }
+
+    .hint-card {
+      position: relative;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 3px 10px;
+      margin-bottom: 14px;
+      padding: 11px 32px 11px 12px;
+      border-radius: 12px;
+      background: var(--card);
+    }
+
+    .hint-card__icon {
+      display: grid;
+      width: 22px;
+      height: 22px;
+      grid-row: 1 / span 2;
+      color: var(--meter-fill);
+      place-items: center;
+    }
+
+    .hint-card > div {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .hint-card strong {
+      font-size: 12px;
+    }
+
+    .hint-card span {
+      color: var(--secondary);
+      font-size: 10px;
+      line-height: 13px;
+    }
+
+    .update-actions button {
+      width: fit-content;
+      padding: 4px 8px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--text);
+      background: var(--button-hover);
+      font-size: 10px;
+    }
+
+    .hint-card > .update-actions {
+      display: flex;
+      grid-column: 2;
+      align-items: center;
+      flex-direction: row;
+      gap: 6px;
+      margin-top: 5px;
+    }
+
+    .update-actions .update-primary-action {
+      color: white;
+      background: var(--meter-fill);
+      font-weight: 600;
+    }
+
+    .update-actions .update-release-action {
+      color: var(--secondary);
+      background: transparent;
+    }
+
+    .update-actions .update-release-action:hover,
+    .update-actions .update-release-action:focus-visible {
+      color: var(--text);
+      background: var(--button-hover);
+    }
+
+    .hint-card__dismiss {
+      position: absolute;
+      top: 5px;
+      right: 6px;
+      display: grid;
+      width: 20px;
+      height: 20px;
+      padding: 0;
+      border: 0;
+      border-radius: 5px;
+      color: var(--secondary);
+      background: transparent;
+      cursor: pointer;
+      place-items: center;
+    }
+
+    .hint-card__dismiss:hover,
+    .hint-card__dismiss:focus-visible,
+    .detection-card .dismiss:hover,
+    .detection-card .dismiss:focus-visible {
+      outline: none;
+      color: var(--text);
+      background: var(--button-hover);
+    }
+
+    .update-notes {
+      margin-top: 3px;
+      color: var(--secondary);
+      font-size: 9px;
+      line-height: 12px;
+    }
+
+    .update-notes summary {
+      width: fit-content;
+      color: var(--secondary);
+      cursor: pointer;
+      font-size: 10px;
+    }
+
+    .update-notes p {
+      max-height: 72px;
+      margin: 5px 0 0;
+      padding-right: 3px;
+      overflow-y: auto;
+      white-space: pre-line;
+    }
+
+    .update-error {
+      gap: 1px;
+      margin-top: 4px;
+      padding: 6px 7px;
+      border-radius: 7px;
+      color: var(--error);
+      background: var(--error-bg);
+    }
+
+    .update-error strong {
+      font-size: 10px;
+    }
+
+    .update-error small {
+      color: var(--error);
+      font-size: 9px;
+      line-height: 12px;
+    }
+
+    .update-progress {
+      height: 4px;
+      margin-top: 4px;
+      overflow: hidden;
+      border-radius: 999px;
+      background: var(--meter-track);
+    }
+
+    .update-progress span {
+      display: block;
+      min-width: 8%;
+      height: 100%;
+      border-radius: inherit;
+      background: var(--meter-fill);
+      transition: width 160ms ease;
+    }
+
+    .detection-card div {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .detection-card strong {
+      font-size: 12px;
+    }
+
+    .detection-card span {
+      color: var(--secondary);
+      font-size: 10px;
+      line-height: 14px;
+    }
+
+    .detection-card button {
+      align-self: center;
+      padding: 4px 8px;
+      border: 0;
+      border-radius: 6px;
+      color: white;
+      background: var(--provider);
+      font-size: 10px;
+      cursor: pointer;
+    }
+
+    .detection-card .dismiss {
+      position: absolute;
+      top: 4px;
+      right: 4px;
+      display: grid;
+      width: 20px;
+      height: 20px;
+      padding: 0;
+      border: 0;
+      border-radius: 5px;
+      color: var(--secondary);
+      background: transparent;
+      cursor: pointer;
+      place-items: center;
+    }
+
+    .empty-dashboard {
+      display: flex;
+      min-height: 0;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+      color: var(--secondary);
+      text-align: center;
+    }
+
+    .empty-dashboard strong {
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    .empty-dashboard span {
+      width: 100%;
+      font-size: 12px;
+    }
+
+    .warning {
+      margin: 9px 2px 0;
+    }
+
+    .provider-header {
+      min-height: 24px;
+      gap: 6px;
+      margin-bottom: 4px;
+      padding: 0 4px 2px 2px;
+      cursor: grab;
+    }
+
+    .provider-header:active {
+      cursor: grabbing;
+    }
+
+    .provider-header h1 {
+      font-size: 14px;
+      font-weight: 600;
+      letter-spacing: 0;
+    }
+
+    .status-badge {
+      padding: 0;
+      color: var(--tertiary);
+      background: transparent;
+      font-size: 11px;
+      font-weight: 400;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .provider-mark {
+      width: 16px;
+      height: 16px;
+      color: var(--text);
+    }
+
+    .drag-grip {
+      width: 7px;
+      grid-template-columns: repeat(2, 1.75px);
+      grid-template-rows: repeat(3, 1.75px);
+      gap: 2px;
+      opacity: 1;
+    }
+
+    .drag-grip i {
+      width: 1.75px;
+      height: 1.75px;
+    }
+
+    .provider-card {
+      padding: 5px 8px;
+      border: 0;
+      border-radius: 12px;
+    }
+
+    .detection-card {
+      margin-bottom: 14px;
+      padding: 10px 30px 10px 12px;
+      border-radius: 12px;
+      background: var(--card);
+    }
+
+    .detection-card button {
+      color: var(--text);
+      background: var(--button-hover);
+    }
+
+    .detection-card .dismiss {
+      color: var(--secondary);
+      background: transparent;
+    }
+
+    .metric-context-target {
+      position: relative;
+      cursor: grab;
+    }
+
+    .metric-context-target:active {
+      cursor: grabbing;
+    }
+
+    .metric-reorder-handle {
+      position: absolute;
+      top: 50%;
+      left: -7px;
+      z-index: 2;
+      display: grid;
+      width: 18px;
+      height: 24px;
+      padding: 0;
+      border: 0;
+      border-radius: 8px;
+      color: var(--tertiary);
+      background: color-mix(in srgb, var(--card) 88%, transparent);
+      opacity: 0;
+      cursor: grab;
+      transform: translateY(-50%);
+      place-items: center;
+      transition: opacity 140ms ease;
+    }
+
+    .metric-context-target:hover > .metric-reorder-handle {
+      opacity: 0.82;
+    }
+
+    .context-menu {
+      position: fixed;
+      z-index: 80;
+      width: 190px;
+      padding: 4px;
+      border: 1px solid var(--separator);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--tray) 97%, transparent);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.3);
+      backdrop-filter: blur(18px);
+      animation: menu-in 180ms ease-out both;
+    }
+
+    .context-menu button {
+      display: flex;
+      width: 100%;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 8px;
+      border: 0;
+      border-radius: 6px;
+      color: var(--text);
+      background: transparent;
+      font-size: 11px;
+      text-align: left;
+    }
+
+    .context-menu button.danger {
+      color: var(--meter-critical);
+    }
+
+    .context-menu button:disabled {
+      opacity: 0.45;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+  }
+</style>
