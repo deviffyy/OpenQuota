@@ -2679,6 +2679,14 @@ input[type='checkbox']:checked::after {
   display: none;
 }
 
+.share-menu > summary .symbol-icon:last-child {
+  transition: transform 140ms ease;
+}
+
+.share-menu[open] > summary .symbol-icon:last-child {
+  transform: translateX(-2px);
+}
+
 .share-menu > div {
   position: absolute;
   right: calc(100% + 7px);

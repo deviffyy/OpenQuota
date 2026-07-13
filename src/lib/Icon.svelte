@@ -5,6 +5,7 @@
     | 'check'
     | 'close'
     | 'chevron-down'
+    | 'chevron-left'
     | 'chevron-up'
     | 'chevron-right'
     | 'gear'
@@ -42,6 +43,8 @@
   aria-hidden="true"
 >
   {#if name === 'back'}
+    <path d="m14.5 5-7 7 7 7" />
+  {:else if name === 'chevron-left'}
     <path d="m14.5 5-7 7 7 7" />
   {:else if name === 'chevron-right'}
     <path d="m9.5 5 7 7-7 7" />
