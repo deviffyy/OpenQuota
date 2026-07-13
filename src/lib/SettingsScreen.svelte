@@ -277,16 +277,6 @@
   </div>
 
   <div class="settings-section">
-    <h2>Privacy</h2>
-    <div class="setting-row">
-      <span><b>Share Anonymous Usage</b></span><strong class="setting-status">Off</strong>
-    </div>
-    <p class="settings-disclosure">
-      OpenQuota sends no analytics. No account details, credentials, or usage values are sent.
-    </p>
-  </div>
-
-  <div class="settings-section">
     <h2>Advanced</h2>
     <div class="setting-row">
       <span><b>Application Data</b></span><button

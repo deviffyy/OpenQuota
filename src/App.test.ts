@@ -472,7 +472,7 @@ describe('OpenQuota dashboard', () => {
     );
   });
 
-  it('surfaces local-only privacy and copies the real application data path', async () => {
+  it('copies the real application data path', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -482,7 +482,6 @@ describe('OpenQuota dashboard', () => {
     await screen.findByText('Plus');
     await fireEvent.click(screen.getByLabelText('Open options'));
     await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    expect(screen.getByText('Share Anonymous Usage')).toBeInTheDocument();
     await fireEvent.click(screen.getByRole('button', { name: 'Copy Path' }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('C:\\OpenQuota\\Data'));
     expect(screen.getByRole('status')).toHaveTextContent('Data path copied');

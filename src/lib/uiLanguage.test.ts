@@ -47,7 +47,6 @@ describe('native UI language contract', () => {
       'Appearance',
       'Usage Display',
       'Notifications',
-      'Privacy',
       'Advanced',
       'Updates',
       'Check for Updates Automatically',

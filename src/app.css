@@ -1376,14 +1376,6 @@ input[type='checkbox'] {
   font-weight: 500;
 }
 
-.setting-status {
-  flex: 0 0 auto;
-  color: var(--secondary);
-  font-size: 10px;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
 .secondary-button:disabled {
   opacity: 0.55;
 }
@@ -2551,16 +2543,6 @@ input[type='checkbox']:checked::after {
   font-size: 12px;
 }
 
-.settings-disclosure {
-  margin: 0;
-  padding: 0 12px 8px;
-  border-radius: 0 0 12px 12px;
-  color: var(--secondary);
-  background: var(--card);
-  font-size: 10px;
-  line-height: 13px;
-}
-
 .settings-note.notice-text {
   border-radius: 0 0 12px 12px;
   background: var(--card);
@@ -2746,7 +2728,8 @@ input[type='checkbox']:checked::after {
 
 .context-menu button:hover,
 .share-menu button:hover,
-.share-menu[open] > summary {
+.share-menu > summary:hover,
+.share-menu > summary:focus-visible {
   background: var(--button-hover);
 }
 
