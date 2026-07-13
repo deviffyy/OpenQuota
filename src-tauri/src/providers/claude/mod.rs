@@ -254,7 +254,7 @@ impl crate::providers::UsageProvider for ClaudeProvider {
 
     fn refresh(&self) -> Result<ProviderSnapshot, crate::providers::ProviderError> {
         self.refresh_inner().map_err(|error| {
-            use crate::providers::ProviderErrorKind as Kind;
+            use crate::models::ProviderErrorKind as Kind;
 
             let kind = match error {
                 ClaudeError::NotLoggedIn

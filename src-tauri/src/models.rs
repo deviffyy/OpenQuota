@@ -90,6 +90,20 @@ pub enum SnapshotSource {
     Live,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ProviderErrorKind {
+    Authentication,
+    Permission,
+    RateLimited,
+    Network,
+    InvalidResponse,
+    CredentialStorage,
+    LocalData,
+    Storage,
+    Internal,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderViewState {
@@ -98,6 +112,7 @@ pub struct ProviderViewState {
     pub refreshing: bool,
     pub stale: bool,
     pub error: Option<String>,
+    pub error_kind: Option<ProviderErrorKind>,
     pub last_attempt_at: Option<DateTime<Utc>>,
 }
 
@@ -109,6 +124,7 @@ impl Default for ProviderViewState {
             refreshing: false,
             stale: false,
             error: None,
+            error_kind: None,
             last_attempt_at: None,
         }
     }
@@ -284,7 +300,7 @@ pub struct SettingsViewState {
 
 #[cfg(test)]
 mod tests {
-    use super::AppSettings;
+    use super::{AppSettings, ProviderErrorKind, ProviderViewState};
 
     #[test]
     fn older_settings_default_new_update_state_fields() {
@@ -296,5 +312,17 @@ mod tests {
         let settings: AppSettings = serde_json::from_value(value).unwrap();
         assert_eq!(settings.dismissed_update_version, None);
         assert_eq!(settings.last_update_check_at, None);
+    }
+
+    #[test]
+    fn provider_error_kind_uses_the_frontend_contract_name() {
+        let state = ProviderViewState {
+            error: Some("Could not connect to the provider.".into()),
+            error_kind: Some(ProviderErrorKind::Network),
+            ..ProviderViewState::default()
+        };
+
+        let value = serde_json::to_value(state).unwrap();
+        assert_eq!(value["errorKind"], "network");
     }
 }

@@ -165,7 +165,7 @@ impl crate::providers::UsageProvider for AntigravityProvider {
 
     fn refresh(&self) -> Result<ProviderSnapshot, crate::providers::ProviderError> {
         self.refresh_inner().map_err(|error| {
-            use crate::providers::ProviderErrorKind as Kind;
+            use crate::models::ProviderErrorKind as Kind;
 
             let kind = match error {
                 AntigravityError::NotSignedIn | AntigravityError::AuthExpired => {

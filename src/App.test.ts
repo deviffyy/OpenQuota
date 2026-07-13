@@ -447,6 +447,7 @@ describe('OpenQuota dashboard', () => {
               source: 'cache',
               stale: true,
               error: 'Could not connect to Codex.',
+              errorKind: 'network',
             },
           },
         });
@@ -608,6 +609,7 @@ describe('OpenQuota dashboard', () => {
       refreshing: true,
       stale: false,
       error: null,
+      errorKind: null,
       lastAttemptAt: null,
       snapshot: null,
     };

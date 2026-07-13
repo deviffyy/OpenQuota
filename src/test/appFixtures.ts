@@ -5,6 +5,7 @@ export const codexState: ProviderViewState = {
   refreshing: false,
   stale: false,
   error: null,
+  errorKind: null,
   lastAttemptAt: null,
   snapshot: {
     providerId: 'codex',
@@ -52,6 +53,7 @@ export const claudeState: ProviderViewState = {
   refreshing: false,
   stale: false,
   error: null,
+  errorKind: null,
   lastAttemptAt: null,
   snapshot: {
     providerId: 'claude',
@@ -89,6 +91,7 @@ export const antigravityState: ProviderViewState = {
   refreshing: false,
   stale: false,
   error: null,
+  errorKind: null,
   lastAttemptAt: null,
   snapshot: {
     providerId: 'antigravity',

@@ -21,6 +21,7 @@
   import CustomizeProviderList from './lib/CustomizeProviderList.svelte';
   import Dashboard from './lib/Dashboard.svelte';
   import Icon from './lib/Icon.svelte';
+  import { createListenerRegistry } from './lib/listenerRegistry';
   import { metricDefinition, providerDisplayName } from './lib/metrics';
   import { springMotion } from './lib/motion';
   import OpenQuotaMark from './lib/OpenQuotaMark.svelte';
@@ -705,21 +706,29 @@
     };
     document.addEventListener('keydown', handleKeydown);
     const clock = window.setInterval(() => (now = Date.now()), 30_000);
-    const cleanup: Array<() => void> = [];
-    void onUsageState((state) => (viewState = state)).then((stop) => cleanup.push(stop));
-    void onSettingsState((state) => {
-      settingsController.acceptExternalState(state);
-    }).then((stop) => cleanup.push(stop));
-    void onOpenScreen((target) => navigate(target === 'settings' ? 'settings' : 'customize')).then(
-      (stop) => cleanup.push(stop),
+    const listeners = createListenerRegistry(() => {
+      settingsError ??= 'OpenQuota event bridge is unavailable.';
+    });
+    listeners.add(onUsageState((state) => (viewState = state)));
+    listeners.add(
+      onSettingsState((state) => {
+        settingsController.acceptExternalState(state);
+      }),
     );
-    void onPopupHidden(() => {
-      resetTransientUi();
-      navigate('dashboard');
-    }).then((stop) => cleanup.push(stop));
-    void onUpdateProgress((progress) => {
-      updates.setProgress(progress);
-    }).then((stop) => cleanup.push(stop));
+    listeners.add(
+      onOpenScreen((target) => navigate(target === 'settings' ? 'settings' : 'customize')),
+    );
+    listeners.add(
+      onPopupHidden(() => {
+        resetTransientUi();
+        navigate('dashboard');
+      }),
+    );
+    listeners.add(
+      onUpdateProgress((progress) => {
+        updates.setProgress(progress);
+      }),
+    );
     void getBootstrapState()
       .then((state) => {
         viewState = state.usage;
@@ -736,7 +745,7 @@
       document.documentElement.removeAttribute('data-reduced-motion');
       mutationObserver.disconnect();
       resizeObserver?.disconnect();
-      cleanup.forEach((stop) => stop());
+      listeners.dispose();
     };
   });
 </script>

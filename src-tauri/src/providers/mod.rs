@@ -5,32 +5,19 @@ pub mod credential_store;
 #[cfg(test)]
 pub mod test_http;
 
-use crate::models::ProviderSnapshot;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ProviderErrorKind {
-    Authentication,
-    Permission,
-    RateLimited,
-    Network,
-    InvalidResponse,
-    CredentialStorage,
-    LocalData,
-    Storage,
-    Internal,
-}
+use crate::models::{ProviderErrorKind, ProviderSnapshot};
 
 #[derive(Debug, thiserror::Error)]
 #[error("{message}")]
 pub struct ProviderError {
-    _kind: ProviderErrorKind,
+    kind: ProviderErrorKind,
     message: String,
 }
 
 impl ProviderError {
     pub fn new(kind: ProviderErrorKind, message: impl Into<String>) -> Self {
         Self {
-            _kind: kind,
+            kind,
             message: message.into(),
         }
     }
@@ -39,9 +26,8 @@ impl ProviderError {
         Self::new(kind, error.to_string())
     }
 
-    #[cfg(test)]
-    fn kind(&self) -> ProviderErrorKind {
-        self._kind
+    pub fn kind(&self) -> ProviderErrorKind {
+        self.kind
     }
 }
 
@@ -53,7 +39,8 @@ pub trait UsageProvider: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::{ProviderError, ProviderErrorKind};
+    use super::ProviderError;
+    use crate::models::ProviderErrorKind;
 
     #[test]
     fn provider_errors_expose_only_the_safe_message() {

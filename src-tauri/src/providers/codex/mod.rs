@@ -146,7 +146,7 @@ impl crate::providers::UsageProvider for CodexProvider {
 
     fn refresh(&self) -> Result<ProviderSnapshot, crate::providers::ProviderError> {
         CodexProvider::refresh(self).map_err(|error| {
-            use crate::providers::ProviderErrorKind as Kind;
+            use crate::models::ProviderErrorKind as Kind;
 
             let kind = match error {
                 CodexError::NotLoggedIn

@@ -52,12 +52,24 @@ export interface ProviderSnapshot {
   refreshedAt: string;
 }
 
+export type ProviderErrorKind =
+  | 'authentication'
+  | 'permission'
+  | 'rateLimited'
+  | 'network'
+  | 'invalidResponse'
+  | 'credentialStorage'
+  | 'localData'
+  | 'storage'
+  | 'internal';
+
 export interface ProviderViewState {
   snapshot: ProviderSnapshot | null;
   source: 'none' | 'cache' | 'live';
   refreshing: boolean;
   stale: boolean;
   error: string | null;
+  errorKind: ProviderErrorKind | null;
   lastAttemptAt: string | null;
 }
 

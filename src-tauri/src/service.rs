@@ -8,9 +8,9 @@ use chrono::Utc;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::{
-    models::{ProviderSnapshot, ProviderViewState, SnapshotSource},
+    models::{ProviderErrorKind, ProviderSnapshot, ProviderViewState, SnapshotSource},
     policy::{REFRESH_INTERVAL, STALE_AFTER},
-    providers::{ProviderError, ProviderErrorKind, UsageProvider},
+    providers::{ProviderError, UsageProvider},
     storage::Storage,
 };
 
@@ -84,6 +84,7 @@ impl ProviderService {
         let Some(provider) = self.providers.get(provider_id).cloned() else {
             return ProviderViewState {
                 error: Some("Unknown provider.".into()),
+                error_kind: Some(ProviderErrorKind::Internal),
                 ..ProviderViewState::default()
             };
         };
@@ -97,6 +98,7 @@ impl ProviderService {
         self.update_state(provider_id, |state| {
             state.refreshing = true;
             state.error = None;
+            state.error_kind = None;
             state.last_attempt_at = Some(Utc::now());
         });
 
@@ -171,6 +173,7 @@ impl ProviderService {
                 state.error = Some(
                     "Usage refreshed, but the last successful snapshot could not be cached.".into(),
                 );
+                state.error_kind = Some(ProviderErrorKind::Storage);
             }
         });
         self.provider_state(provider_id)
@@ -200,9 +203,11 @@ fn merge_refresh_result(
             state.snapshot = Some(snapshot);
             state.source = SnapshotSource::Live;
             state.error = None;
+            state.error_kind = None;
             state.stale = false;
         }
         Err(error) => {
+            state.error_kind = Some(error.kind());
             state.error = Some(error.to_string());
             state.stale = state.snapshot.is_some();
         }
@@ -226,8 +231,9 @@ mod tests {
 
     use super::{merge_refresh_result, ProviderService};
     use crate::{
+        models::ProviderErrorKind,
         models::{ProviderSnapshot, ProviderViewState, UsageHistory},
-        providers::{ProviderError, ProviderErrorKind, UsageProvider},
+        providers::{ProviderError, UsageProvider},
         storage::Storage,
     };
 
@@ -283,6 +289,7 @@ mod tests {
         assert_eq!(state.snapshot, Some(snapshot));
         assert!(state.stale);
         assert_eq!(state.error.as_deref(), Some("offline"));
+        assert_eq!(state.error_kind, Some(ProviderErrorKind::Network));
     }
 
     #[test]
