@@ -28,6 +28,7 @@ jobs:
             libayatana-appindicator3-dev \
             libsecret-tools \
             libwebkit2gtk-4.1-dev \
+            openbox \
             librsvg2-dev \
             patchelf \
             weston \
@@ -93,18 +94,26 @@ jobs:
             export XDG_SESSION_TYPE="x11"
             export OPENQUOTA_LINUX_TRAY_HOST="unavailable"
             mkdir -p "${HOME}"
-            src-tauri/target/release/openquota &
+            openbox >/tmp/openquota-openbox.log 2>&1 &
+            wm_pid=$!
+            src-tauri/target/release/openquota >/tmp/openquota-x11.log 2>&1 &
             app_pid=$!
-            trap "kill ${app_pid} 2>/dev/null || true" EXIT
+            trap "kill ${app_pid} ${wm_pid} 2>/dev/null || true" EXIT
             found=0
             for _ in $(seq 1 30); do
               if xdotool search --name "^OpenQuota$" >/dev/null 2>&1; then
                 found=1
                 break
               fi
-              kill -0 "${app_pid}"
+              if ! kill -0 "${app_pid}" 2>/dev/null; then
+                cat /tmp/openquota-x11.log
+                exit 1
+              fi
               sleep 1
             done
+            if [ "${found}" -ne 1 ]; then
+              cat /tmp/openquota-x11.log
+            fi
             test "${found}" -eq 1
           '
 
