@@ -1,19 +1,24 @@
 <script lang="ts">
+  import { flip } from 'svelte/animate';
   import { metricDefinition, providerDisplayName } from './metrics';
   import type { AppSettings, MetricLayout, MetricSection, ProviderLayout } from './types';
   import Icon from './Icon.svelte';
-  import { beginDrag } from './dragPreview';
+  import { reorderFlip } from './motion';
+  import { pointerReorder } from './pointerReorder';
 
   interface Props {
     settings: AppSettings;
     providerId: string;
     onChange: (settings: AppSettings) => void;
+    onReorderStart: () => void;
+    onReorderEnd: (moved: boolean, cancelled?: boolean) => void;
+    reducedMotion: boolean;
   }
-  let { settings, providerId, onChange }: Props = $props();
+  let { settings, providerId, onChange, onReorderStart, onReorderEnd, reducedMotion }: Props =
+    $props();
   let message = $state('');
   let messageKind = $state<'success' | 'denied'>('success');
   let messageTimer: ReturnType<typeof setTimeout> | undefined;
-  let dragged = $state<string | null>(null);
   const provider = $derived(settings.providers.find((item) => item.id === providerId));
 
   function updateProvider(next: ProviderLayout) {
@@ -44,30 +49,35 @@
     if (messageTimer) clearTimeout(messageTimer);
     messageTimer = setTimeout(() => (message = ''), 1800);
   }
-  function drop(target: MetricLayout, section: MetricSection = target.section) {
-    if (!provider || !dragged) return;
+  function reorder(
+    draggedId: string,
+    target: MetricLayout,
+    section: MetricSection = target.section,
+  ) {
+    if (!provider || draggedId === target.id) return;
     const metrics = [...provider.metrics];
-    const from = metrics.findIndex((metric) => metric.id === dragged);
+    const from = metrics.findIndex((metric) => metric.id === draggedId);
     const to = metrics.findIndex((metric) => metric.id === target.id);
-    const [moved] = metrics.splice(from, 1);
-    moved.section = section;
+    if (from < 0 || to < 0) return;
+    const [source] = metrics.splice(from, 1);
+    const moved = { ...source, section };
     metrics.splice(to, 0, moved);
-    dragged = null;
     updateProvider({ ...provider, metrics });
   }
-  function dropIntoSection(section: MetricSection) {
-    if (!provider || !dragged) return;
+  function moveIntoSection(draggedId: string, section: MetricSection) {
+    if (!provider) return;
     const metrics = [...provider.metrics];
-    const from = metrics.findIndex((metric) => metric.id === dragged);
+    const from = metrics.findIndex((metric) => metric.id === draggedId);
     if (from < 0) return;
-    const [moved] = metrics.splice(from, 1);
-    moved.section = section;
+    const [source] = metrics.splice(from, 1);
+    const moved = { ...source, section };
     const lastInSection = metrics.reduce(
       (last, metric, index) => (metric.section === section ? index : last),
       -1,
     );
-    metrics.splice(lastInSection + 1, 0, moved);
-    dragged = null;
+    const insertAt =
+      lastInSection >= 0 ? lastInSection + 1 : section === 'alwaysVisible' ? 0 : metrics.length;
+    metrics.splice(insertAt, 0, moved);
     updateProvider({ ...provider, metrics });
   }
 </script>
@@ -83,7 +93,6 @@
         class="metric-section"
         role="group"
         aria-label={section === 'alwaysVisible' ? 'Always Visible metrics' : 'On Demand metrics'}
-        ondragover={(event) => event.preventDefault()}
       >
         <h2>{section === 'alwaysVisible' ? 'Always Visible' : 'On Demand'}</h2>
         <div class="metric-list" role="list">
@@ -91,8 +100,8 @@
             <div
               class="empty-drop-zone"
               role="listitem"
-              ondragover={(event) => event.preventDefault()}
-              ondrop={() => dropIntoSection(section as MetricSection)}
+              data-reorder-group={`customize-metrics:${provider.id}`}
+              data-reorder-id={`section:${section}`}
             >
               Drag metrics here
             </div>
@@ -101,22 +110,37 @@
             <div
               role="listitem"
               class:disabled={!metric.enabled}
-              class:dragging={dragged === metric.id}
               class="customize-metric-row"
-              draggable="true"
-              ondragstart={(event) => {
-                dragged = metric.id;
-                beginDrag(
-                  event,
-                  metricDefinition(metric.id)?.label ?? metric.id,
-                  section === 'alwaysVisible' ? 'Always Visible' : 'On Demand',
-                );
+              data-reorder-group={`customize-metrics:${provider.id}`}
+              data-reorder-id={metric.id}
+              use:pointerReorder={{
+                id: metric.id,
+                group: `customize-metrics:${provider.id}`,
+                label: metricDefinition(metric.id)?.label ?? metric.id,
+                gripOnly: true,
+                touchGripOnly: true,
+                onReorder: (targetId) => {
+                  if (targetId.startsWith('section:')) {
+                    moveIntoSection(metric.id, targetId.slice(8) as MetricSection);
+                    return;
+                  }
+                  const target = provider.metrics.find((item) => item.id === targetId);
+                  if (target) reorder(metric.id, target, target.section);
+                },
+                onStart: onReorderStart,
+                onEnd: onReorderEnd,
               }}
-              ondragend={() => (dragged = null)}
-              ondragover={(event) => event.preventDefault()}
-              ondrop={() => drop(metric, section as MetricSection)}
+              animate:flip={reorderFlip(reducedMotion)}
             >
-              <span class="reorder-grip" aria-hidden="true"
+              <span
+                class="reorder-grip"
+                data-reorder-handle
+                data-reorder-touch-handle
+                role="button"
+                tabindex="0"
+                aria-label={`Move ${metricDefinition(metric.id)?.label ?? metric.id}`}
+                aria-describedby="reorder-instructions"
+                aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
                 ><Icon name="grip-lines" size={16} strokeWidth={2} /></span
               >
               <span class="customize-metric-name"

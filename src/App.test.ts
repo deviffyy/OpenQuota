@@ -398,10 +398,13 @@ describe('OpenQuota dashboard', () => {
   it('uses the compact reference caret instead of a labeled On Demand divider', async () => {
     render(App);
     const toggle = await screen.findByRole('button', { name: 'Show more' });
-    expect(screen.getByRole('group', { name: 'Drag Codex to reorder' })).toHaveAttribute(
-      'draggable',
-      'true',
+    const providerHeader = screen.getByRole('group', { name: 'Drag Codex to reorder' });
+    expect(providerHeader).toHaveAttribute('data-reorder-handle');
+    expect(providerHeader.closest('.provider-section')).toHaveAttribute(
+      'data-reorder-group',
+      'dashboard-providers',
     );
+    expect(providerHeader).not.toHaveAttribute('draggable');
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(toggle).not.toHaveTextContent('On Demand');
     await fireEvent.click(toggle);
@@ -1107,6 +1110,22 @@ describe('OpenQuota dashboard', () => {
     expect(document.querySelector('.context-menu')).toBeNull();
   });
 
+  it('lets a dropdown consume Escape without navigating away from Settings', async () => {
+    render(App);
+    await screen.findByText('Plus');
+    await fireEvent.click(screen.getByLabelText('Open options'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    const theme = screen.getByRole('combobox', { name: 'Theme' });
+
+    await fireEvent.keyDown(theme, { key: 'ArrowDown' });
+    expect(screen.getByRole('listbox', { name: 'Theme' })).toBeInTheDocument();
+    await fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
+
+    expect(screen.queryByRole('listbox', { name: 'Theme' })).not.toBeInTheDocument();
+    expect(theme).toHaveFocus();
+    expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+  });
+
   it('undoes the latest customization with Ctrl+Z', async () => {
     render(App);
     await screen.findByText('Plus');
@@ -1170,11 +1189,42 @@ describe('OpenQuota dashboard', () => {
     await screen.findByText('Plus');
     const session = screen.getByRole('group', { name: 'Session options' });
     const weekly = screen.getByRole('group', { name: 'Weekly options' });
-    const dataTransfer = { effectAllowed: 'none', setDragImage: vi.fn() };
-    await fireEvent.dragStart(session, { dataTransfer });
-    await fireEvent.dragOver(weekly, { dataTransfer });
-    await fireEvent.drop(weekly, { dataTransfer });
-    expect(dataTransfer.setDragImage).toHaveBeenCalled();
+    const trend = screen.getByRole('group', { name: 'Usage Trend options' });
+    session.getBoundingClientRect = () =>
+      ({ top: 0, right: 280, bottom: 40, left: 0, width: 280, height: 40 }) as DOMRect;
+    weekly.getBoundingClientRect = () =>
+      ({ top: 40, right: 280, bottom: 80, left: 0, width: 280, height: 40 }) as DOMRect;
+    trend.getBoundingClientRect = () =>
+      ({ top: 80, right: 280, bottom: 120, left: 0, width: 280, height: 40 }) as DOMRect;
+    const savesBeforeDrag = mocks.invoke.mock.calls.filter(
+      ([command]) => command === 'save_app_settings',
+    ).length;
+    await fireEvent.pointerDown(session, {
+      pointerId: 1,
+      pointerType: 'mouse',
+      button: 0,
+      clientX: 20,
+      clientY: 20,
+    });
+    await fireEvent.pointerMove(window, {
+      pointerId: 1,
+      pointerType: 'mouse',
+      clientX: 20,
+      clientY: 52,
+    });
+    expect(document.querySelector('.pointer-reorder-lift')).not.toBeNull();
+    await fireEvent.pointerMove(window, {
+      pointerId: 1,
+      pointerType: 'mouse',
+      clientX: 20,
+      clientY: 92,
+    });
+    await fireEvent.pointerUp(window, {
+      pointerId: 1,
+      pointerType: 'mouse',
+      clientX: 20,
+      clientY: 52,
+    });
     await waitFor(() =>
       expect(mocks.invoke.mock.calls.some(([command]) => command === 'save_app_settings')).toBe(
         true,
@@ -1190,11 +1240,111 @@ describe('OpenQuota dashboard', () => {
         ?.metrics.map((metric) => metric.id),
     ).toEqual([
       'codex.weekly',
+      'codex.trend',
       'codex.session',
+      'codex.today',
+      'codex.yesterday',
+      'codex.last30',
+    ]);
+
+    const savesBeforeUndo = mocks.invoke.mock.calls.filter(
+      ([command]) => command === 'save_app_settings',
+    ).length;
+    expect(savesBeforeUndo).toBe(savesBeforeDrag + 1);
+    await fireEvent.keyDown(document, { key: 'z', ctrlKey: true });
+    await waitFor(() =>
+      expect(
+        mocks.invoke.mock.calls.filter(([command]) => command === 'save_app_settings').length,
+      ).toBeGreaterThan(savesBeforeUndo),
+    );
+    const undoSave = [...mocks.invoke.mock.calls]
+      .reverse()
+      .find(([command]) => command === 'save_app_settings');
+    const restored = undoSave?.[1] as { settings: SettingsViewState['settings'] };
+    expect(
+      restored.settings.providers
+        .find((provider) => provider.id === 'codex')
+        ?.metrics.map((metric) => metric.id),
+    ).toEqual([
+      'codex.session',
+      'codex.weekly',
       'codex.trend',
       'codex.today',
       'codex.yesterday',
       'codex.last30',
     ]);
+  });
+
+  it('describes reorder controls for keyboard and assistive-technology users', async () => {
+    render(App);
+    await screen.findByText('Plus');
+
+    const instructions = screen.getByText(
+      'Drag to reorder. With a keyboard, use Alt plus Up Arrow or Alt plus Down Arrow.',
+    );
+    expect(instructions).toHaveClass('sr-only');
+    expect(instructions).toHaveAttribute('id', 'reorder-instructions');
+    const handles = document.querySelectorAll<HTMLElement>('[data-reorder-touch-handle]');
+    expect(handles.length).toBeGreaterThan(0);
+    handles.forEach((handle) => {
+      expect(handle).toHaveAttribute('aria-describedby', 'reorder-instructions');
+      expect(handle).toHaveAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
+    });
+  });
+
+  it('does not let the global Enter shortcut steal an interactive control keypress', async () => {
+    render(App);
+    await screen.findByText('Plus');
+    const handle = screen.getByRole('button', { name: 'Move Session' });
+
+    handle.focus();
+    await fireEvent.keyDown(handle, { key: 'Enter' });
+    expect(screen.queryByRole('heading', { name: 'Customize' })).not.toBeInTheDocument();
+    expect(screen.getByText('Plus')).toBeInTheDocument();
+
+    handle.blur();
+    await fireEvent.keyDown(document, { key: 'Enter' });
+    expect(await screen.findByRole('heading', { name: 'Customize' })).toBeInTheDocument();
+  });
+
+  it('restores the pre-drag layout when a reorder is cancelled', async () => {
+    render(App);
+    await screen.findByText('Plus');
+    const session = screen.getByRole('group', { name: 'Session options' });
+    const weekly = screen.getByRole('group', { name: 'Weekly options' });
+    session.getBoundingClientRect = () =>
+      ({ top: 0, right: 280, bottom: 40, left: 0, width: 280, height: 40 }) as DOMRect;
+    weekly.getBoundingClientRect = () =>
+      ({ top: 40, right: 280, bottom: 80, left: 0, width: 280, height: 40 }) as DOMRect;
+    const savesBeforeDrag = mocks.invoke.mock.calls.filter(
+      ([command]) => command === 'save_app_settings',
+    ).length;
+
+    await fireEvent.pointerDown(session, {
+      pointerId: 1,
+      pointerType: 'mouse',
+      button: 0,
+      clientX: 20,
+      clientY: 20,
+    });
+    await fireEvent.pointerMove(window, {
+      pointerId: 1,
+      pointerType: 'mouse',
+      clientX: 20,
+      clientY: 52,
+    });
+    await fireEvent.keyDown(window, { key: 'Escape' });
+
+    await waitFor(() => {
+      const metricIds = [...document.querySelectorAll<HTMLElement>('[data-reorder-id]')]
+        .filter((element) => element.dataset.reorderGroup === 'dashboard-metrics:codex')
+        .map((element) => element.dataset.reorderId)
+        .filter((id) => id !== 'section:onDemand');
+      expect(metricIds.slice(0, 3)).toEqual(['codex.session', 'codex.weekly', 'codex.trend']);
+    });
+    expect(
+      mocks.invoke.mock.calls.filter(([command]) => command === 'save_app_settings'),
+    ).toHaveLength(savesBeforeDrag);
+    expect(document.querySelector('.pointer-reorder-lift')).toBeNull();
   });
 });

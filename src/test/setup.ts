@@ -65,3 +65,7 @@ if (!Element.prototype.animate) {
     return animation;
   };
 }
+
+if (!Element.prototype.getAnimations) {
+  Element.prototype.getAnimations = () => [];
+}

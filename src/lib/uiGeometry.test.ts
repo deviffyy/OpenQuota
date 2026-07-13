@@ -32,4 +32,22 @@ describe('popover geometry contract', () => {
     expect(css).toMatch(/\.app-top-bar\s*{[^}]*min-height: 44px;/s);
     expect(css).toMatch(/\.footer\s*{[^}]*min-height: 52px;/s);
   });
+
+  it('keeps reorder handles reachable on touch and hybrid-pointer devices', () => {
+    expect(css).toContain('@media (hover: none), (pointer: coarse), (any-pointer: coarse)');
+    expect(css).toMatch(/\.metric-reorder-handle\s*{[^}]*width: 44px;[^}]*height: 44px;/s);
+    expect(css).toMatch(
+      /\.drag-grip::after,[\s\S]*\.reorder-grip::after\s*{[^}]*width: 44px;[^}]*height: 44px;/,
+    );
+  });
+
+  it('keeps drag depth on painted surfaces instead of darkening transparent headers', () => {
+    const liftRule = css.match(/\.pointer-reorder-lift\s*{([^}]*)}/s)?.[1] ?? '';
+    expect(liftRule).toContain('color: var(--text)');
+    expect(liftRule).toContain('opacity: 1');
+    expect(liftRule).not.toContain('box-shadow');
+    expect(css).toMatch(
+      /\.pointer-reorder-lift\.provider-section > \.provider-card,[\s\S]*box-shadow: 0 8px 28px rgba\(0, 0, 0, 0\.18\);/,
+    );
+  });
 });

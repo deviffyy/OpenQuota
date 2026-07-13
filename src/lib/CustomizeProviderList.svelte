@@ -1,34 +1,48 @@
 <script lang="ts">
+  import { flip } from 'svelte/animate';
   import type { AppSettings, ProviderLayout } from './types';
   import { providerDisplayName } from './metrics';
   import Icon from './Icon.svelte';
   import ProviderIcon from './ProviderIcon.svelte';
-  import { beginDrag } from './dragPreview';
+  import { reorderFlip } from './motion';
+  import { pointerReorder } from './pointerReorder';
 
   interface Props {
     settings: AppSettings;
     onOpen: (providerId: string) => void;
     onChange: (settings: AppSettings) => void;
+    onReorderStart: () => void;
+    onReorderEnd: (moved: boolean, cancelled?: boolean) => void;
     onSettings: () => void;
+    reducedMotion: boolean;
   }
-  let { settings, onOpen, onChange, onSettings }: Props = $props();
-  let dragged = $state<string | null>(null);
-
+  let {
+    settings,
+    onOpen,
+    onChange,
+    onReorderStart,
+    onReorderEnd,
+    onSettings,
+    reducedMotion,
+  }: Props = $props();
   function updateProvider(provider: ProviderLayout) {
     onChange({
       ...settings,
       providers: settings.providers.map((item) => (item.id === provider.id ? provider : item)),
     });
   }
-  function drop(target: string) {
-    if (!dragged || dragged === target) return;
-    const providers = [...settings.providers];
-    const from = providers.findIndex((provider) => provider.id === dragged);
-    const to = providers.findIndex((provider) => provider.id === target);
-    const [provider] = providers.splice(from, 1);
-    providers.splice(to, 0, provider);
-    onChange({ ...settings, providers });
-    dragged = null;
+  function reorder(draggedId: string, targetId: string) {
+    if (draggedId === targetId) return;
+    const enabled = settings.providers.filter((provider) => provider.enabled);
+    const from = enabled.findIndex((provider) => provider.id === draggedId);
+    const to = enabled.findIndex((provider) => provider.id === targetId);
+    if (from < 0 || to < 0) return;
+    const [provider] = enabled.splice(from, 1);
+    enabled.splice(to, 0, provider);
+    onChange({
+      ...settings,
+      providers: [...enabled, ...settings.providers.filter((provider) => !provider.enabled)],
+    });
   }
 </script>
 
@@ -38,23 +52,31 @@
       <div
         role="listitem"
         class:inactive={!provider.enabled}
-        class:dragging={dragged === provider.id}
         class="provider-list-row"
-        draggable={provider.enabled}
-        ondragstart={(event) => {
-          if (!provider.enabled) return;
-          dragged = provider.id;
-          beginDrag(
-            event,
-            providerDisplayName(provider.id),
-            `${provider.metrics.filter((metric) => metric.enabled).length} metrics`,
-          );
+        data-reorder-group={provider.enabled ? 'customize-providers' : undefined}
+        data-reorder-id={provider.enabled ? provider.id : undefined}
+        use:pointerReorder={{
+          id: provider.id,
+          group: 'customize-providers',
+          label: providerDisplayName(provider.id),
+          disabled: !provider.enabled,
+          gripOnly: true,
+          touchGripOnly: true,
+          onReorder: (targetId) => reorder(provider.id, targetId),
+          onStart: onReorderStart,
+          onEnd: onReorderEnd,
         }}
-        ondragend={() => (dragged = null)}
-        ondragover={(event) => event.preventDefault()}
-        ondrop={() => drop(provider.id)}
+        animate:flip={reorderFlip(reducedMotion)}
       >
-        <span class="reorder-grip" aria-hidden="true"
+        <span
+          class="reorder-grip"
+          data-reorder-handle
+          data-reorder-touch-handle
+          role="button"
+          tabindex={provider.enabled ? 0 : undefined}
+          aria-label={`Move ${providerDisplayName(provider.id)}`}
+          aria-describedby="reorder-instructions"
+          aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
           ><Icon name="grip-lines" size={16} strokeWidth={2} /></span
         >
         <button class="provider-list-main" type="button" onclick={() => onOpen(provider.id)}

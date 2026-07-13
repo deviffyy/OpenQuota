@@ -8,6 +8,7 @@
   import Dashboard from './lib/Dashboard.svelte';
   import Icon from './lib/Icon.svelte';
   import { defaultMetricLayout, metricDefinition, providerDisplayName } from './lib/metrics';
+  import { springMotion } from './lib/motion';
   import OpenQuotaMark from './lib/OpenQuotaMark.svelte';
   import { horizontalPageTransition, shouldSlideBetweenScreens } from './lib/pageTransition';
   import { panelTargetHeight, screenPanelHeight, shouldDeferPanelFit } from './lib/panelSizing';
@@ -84,6 +85,8 @@
   let slideDirection = $state(1);
   let slidePageTransition = $state(true);
   let customizationHistory = $state<AppSettings[]>([]);
+  let customizationGestureStart: AppSettings | null = null;
+  let reordering = $state(false);
   let confirmationMessage = $state<string | null>(null);
   let showAbout = $state(false);
   let shareMenuOpen = $state(false);
@@ -123,7 +126,7 @@
       !windowResizeAvailable
     )
       return;
-    if (shouldDeferPanelFit(screen, anyRefreshing)) {
+    if (reordering || shouldDeferPanelFit(screen, anyRefreshing)) {
       window.cancelAnimationFrame(measureFrame);
       window.cancelAnimationFrame(resizeFrame);
       resizeGeneration += 1;
@@ -134,7 +137,7 @@
   }
 
   async function fitWindowToScreen() {
-    if (shouldDeferPanelFit(screen, anyRefreshing)) return;
+    if (reordering || shouldDeferPanelFit(screen, anyRefreshing)) return;
     const page = document.querySelector<HTMLElement>(`.screen-page[data-screen="${screen}"]`);
     const content = document.querySelector<HTMLElement>('.content');
     const stage = document.querySelector<HTMLElement>('.screen-stage');
@@ -220,9 +223,6 @@
     slideDirection = screenRank(next) >= screenRank(screen) ? 1 : -1;
     screen = next;
   }
-  function springOut(progress: number) {
-    return 1 - Math.pow(1 - progress, 3);
-  }
   function back() {
     if (screen.startsWith('provider:')) navigate('customize');
     else if (screen !== 'dashboard') navigate('dashboard');
@@ -261,11 +261,33 @@
     shareTimer = setTimeout(() => (confirmationMessage = null), 1800);
   }
   function saveCustomization(next: AppSettings) {
+    if (customizationGestureStart) {
+      settingsState = { ...settingsState, settings: next };
+      settingsError = null;
+      return;
+    }
     customizationHistory = [
       ...customizationHistory.slice(-19),
       cloneSettings(settingsState.settings),
     ];
     saveSettings(next);
+  }
+  function beginCustomizationGesture() {
+    customizationGestureStart ??= cloneSettings(settingsState.settings);
+    reordering = true;
+    scheduleWindowFit();
+  }
+  function endCustomizationGesture(moved: boolean, cancelled = false) {
+    const start = customizationGestureStart;
+    const final = settingsState.settings;
+    customizationGestureStart = null;
+    reordering = false;
+    if (start && moved && cancelled) settingsState = { ...settingsState, settings: start };
+    else if (start && moved) {
+      customizationHistory = [...customizationHistory.slice(-19), start];
+      saveSettings(final);
+    }
+    queueMicrotask(scheduleWindowFit);
   }
   function undoCustomization() {
     const previous = customizationHistory.at(-1);
@@ -665,6 +687,14 @@
   function closeAboutFromBackdrop(event: MouseEvent) {
     if (event.target === event.currentTarget) showAbout = false;
   }
+  function ownsEnterKey(target: EventTarget | null) {
+    if (!(target instanceof Element)) return false;
+    return (
+      target.closest(
+        'button, a, input, select, textarea, summary, [contenteditable], [role="button"], [role="menuitem"], [role="option"], [role="combobox"]',
+      ) !== null
+    );
+  }
   function handleOptionsKey(event: KeyboardEvent) {
     const menu = (event.currentTarget as HTMLElement).closest<HTMLDetailsElement>(
       'details.options-menu',
@@ -818,6 +848,7 @@
     }
     observePanelParts();
     const handleKeydown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         if (showAbout) {
@@ -825,7 +856,7 @@
           return;
         }
         back();
-      } else if (event.key === 'Enter' && screen === 'dashboard') {
+      } else if (event.key === 'Enter' && screen === 'dashboard' && !ownsEnterKey(event.target)) {
         event.preventDefault();
         navigate('customize');
       } else if ((event.ctrlKey || event.metaKey) && event.key === ',') {
@@ -903,6 +934,9 @@
   aria-label="OpenQuota usage dashboard"
   oncontextmenu={(event) => event.preventDefault()}
 >
+  <p id="reorder-instructions" class="sr-only">
+    Drag to reorder. With a keyboard, use Alt plus Up Arrow or Alt plus Down Arrow.
+  </p>
   {#if screen !== 'dashboard'}
     <header class="screen-header app-top-bar">
       <button type="button" onclick={back} aria-label="Back" data-tooltip="Back">
@@ -941,13 +975,11 @@
           data-screen={screen}
           in:horizontalPageTransition={{
             direction: slideDirection,
-            duration: reducedMotion || !slidePageTransition ? 0 : 420,
-            easing: springOut,
+            ...springMotion(reducedMotion || !slidePageTransition),
           }}
           out:horizontalPageTransition={{
             direction: -slideDirection,
-            duration: reducedMotion || !slidePageTransition ? 0 : 420,
-            easing: springOut,
+            ...springMotion(reducedMotion || !slidePageTransition),
           }}
         >
           {#if screen === 'dashboard'}
@@ -956,6 +988,9 @@
               settings={settingsState.settings}
               {now}
               onSettingsChange={saveSettings}
+              onCustomizationChange={saveCustomization}
+              onReorderStart={beginCustomizationGesture}
+              onReorderEnd={endCustomizationGesture}
               onCustomize={() => navigate('customize')}
               onOpenProviderCustomize={(id) => navigate(`provider:${id}`)}
               onShare={shareProvider}
@@ -986,13 +1021,19 @@
               settings={settingsState.settings}
               onOpen={(id) => navigate(`provider:${id}`)}
               onChange={saveCustomization}
+              onReorderStart={beginCustomizationGesture}
+              onReorderEnd={endCustomizationGesture}
               onSettings={() => navigate('settings')}
+              {reducedMotion}
             />
           {:else if screen.startsWith('provider:')}
             <CustomizeProviderDetail
               settings={settingsState.settings}
               providerId={screen.slice(9)}
               onChange={saveCustomization}
+              onReorderStart={beginCustomizationGesture}
+              onReorderEnd={endCustomizationGesture}
+              {reducedMotion}
             />
           {/if}
         </div>
