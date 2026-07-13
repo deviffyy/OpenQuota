@@ -1,15 +1,20 @@
 export interface UpdaterMetadata {
+  version: string;
+  notes: string;
+  pub_date: string;
   platforms: Record<string, { url: string; signature: string }>;
-  [key: string]: unknown;
 }
 
 export interface GithubReleaseMetadata {
+  body?: string;
+  created_at?: string;
   assets: Array<{ id: number; name: string }>;
 }
 
-export function normalizeUpdaterMetadata<T extends UpdaterMetadata>(
-  update: T,
+export function createUpdaterMetadata(
   release: GithubReleaseMetadata,
+  signatures: Record<string, string>,
   repository: string,
   tag: string,
-): T;
+  version: string,
+): UpdaterMetadata;

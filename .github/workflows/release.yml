@@ -92,24 +92,63 @@ jobs:
       - name: Lint Rust
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
+  prepare-release:
+    name: Prepare draft release
+    needs: validate
+    if: ${{ !inputs.verify_only && needs.validate.result == 'success' }}
+    runs-on: ubuntu-22.04
+    outputs:
+      release_id: ${{ steps.release.outputs.release_id }}
+    steps:
+      - name: Create or reuse draft release
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            is_draft="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')"
+            test "$is_draft" = true || {
+              echo "Release $RELEASE_TAG already exists and is not a draft." >&2
+              exit 1
+            }
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --draft \
+              --verify-tag \
+              --title "OpenQuota ${RELEASE_TAG#v}" \
+              --generate-notes \
+              --notes $'OpenQuota desktop release for Windows and Linux on x64/ARM64, plus a macOS Universal build.\n\nAutomatic updates are cryptographically signed. Linux in-app updates are supported by AppImage builds; Debian packages update through the package installer.'
+          fi
+          release_id="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq '.databaseId')"
+          test -n "$release_id"
+          echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
+
   publish-artifacts:
     name: Build ${{ matrix.name }}
-    needs: validate
-    if: ${{ always() && !inputs.verify_only && needs.validate.result == 'success' }}
+    needs: [validate, prepare-release]
+    if: ${{ always() && !inputs.verify_only && needs.validate.result == 'success' && needs.prepare-release.result == 'success' }}
     runs-on: ${{ matrix.platform }}
     strategy:
       fail-fast: false
-      max-parallel: 1
       matrix:
         include:
           - name: Windows x64
             platform: windows-latest
             args: --bundles nsis --config src-tauri/tauri.release.conf.json
             rust-targets: ''
+          - name: Windows ARM64
+            platform: windows-11-arm
+            args: --target aarch64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.release.conf.json
+            rust-targets: aarch64-pc-windows-msvc
           - name: Linux x64
             platform: ubuntu-22.04
             args: --bundles deb,appimage --config src-tauri/tauri.release.conf.json
             rust-targets: ''
+          - name: Linux ARM64
+            platform: ubuntu-22.04-arm
+            args: --target aarch64-unknown-linux-gnu --bundles deb,appimage --config src-tauri/tauri.release.conf.json
+            rust-targets: aarch64-unknown-linux-gnu
           - name: macOS Universal
             platform: macos-latest
             args: --target universal-apple-darwin --bundles app,dmg --config src-tauri/tauri.release.conf.json
@@ -150,7 +189,7 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build, sign, and upload release artifacts
+      - name: Build, sign, and upload platform artifacts
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -158,16 +197,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
         with:
-          tagName: ${{ env.RELEASE_TAG }}
-          releaseName: OpenQuota __VERSION__
-          releaseBody: |
-            OpenQuota desktop release for Windows, macOS, and Linux.
-
-            Automatic updates are cryptographically signed. Linux in-app updates are supported by the AppImage build; Debian packages update through the package installer.
+          releaseId: ${{ needs.prepare-release.outputs.release_id }}
           releaseDraft: true
-          prerelease: false
-          generateReleaseNotes: true
-          uploadUpdaterJson: true
+          uploadUpdaterJson: false
           updaterJsonPreferNsis: true
           uploadUpdaterSignatures: true
           retryAttempts: 2
@@ -175,8 +207,8 @@ jobs:
 
   publish-release:
     name: Verify and publish release
-    needs: [validate, publish-artifacts]
-    if: ${{ always() && (inputs.verify_only || needs.publish-artifacts.result == 'success') }}
+    needs: [validate, prepare-release, publish-artifacts]
+    if: ${{ always() && (inputs.verify_only || (needs.validate.result == 'success' && needs.prepare-release.result == 'success' && needs.publish-artifacts.result == 'success')) }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
@@ -188,20 +220,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir release-check
-          release_id="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
-            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .id" | head -n 1)"
+          release_id="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq '.databaseId')"
           test -n "$release_id" || {
             echo "Draft release not found for $RELEASE_TAG" >&2
             exit 1
           }
           gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" \
             > release-check/release.json
-          jq -r '.assets[].name' release-check/release.json \
-            > release-check/assets.txt
           jq -r '.assets[]
             | select(
-                .name == "latest.json"
-                or (.name | test("(-setup\\.exe|\\.AppImage|\\.deb|\\.app\\.tar\\.gz)(\\.sig)?$"))
+                .name | test("(-setup\\.exe|\\.AppImage|\\.deb|\\.app\\.tar\\.gz)(\\.sig)?$")
               )
             | [.id, .name]
             | @tsv' release-check/release.json |
@@ -210,48 +238,18 @@ jobs:
               -H 'Accept: application/octet-stream' \
               > "release-check/$asset_name"
           done
-          node .github/scripts/normalize-updater-json.mjs \
-            release-check/latest.json \
+          node .github/scripts/create-updater-json.mjs \
             release-check/release.json \
+            release-check \
             "$GITHUB_REPOSITORY" \
-            "$RELEASE_TAG"
+            "$RELEASE_TAG" \
+            "${RELEASE_TAG#v}" \
+            release-check/latest.json
           gh release upload "$RELEASE_TAG" release-check/latest.json --clobber
-          node <<'NODE'
-          const fs = require('node:fs');
-          const update = JSON.parse(fs.readFileSync('release-check/latest.json', 'utf8'));
-          const release = JSON.parse(fs.readFileSync('release-check/release.json', 'utf8'));
-          const assetNames = new Set(release.assets.map((asset) => asset.name));
-          const prefix = `https://github.com/${process.env.GITHUB_REPOSITORY}/releases/download/${encodeURIComponent(process.env.RELEASE_TAG)}/`;
-          const keys = Object.keys(update.platforms ?? {});
-          for (const prefix of ['windows-', 'linux-', 'darwin-']) {
-            if (!keys.some((key) => key.startsWith(prefix))) {
-              throw new Error(`latest.json is missing a ${prefix} platform: ${keys.join(', ')}`);
-            }
-          }
-          for (const [platform, entry] of Object.entries(update.platforms)) {
-            if (!entry.url || !entry.signature) {
-              throw new Error(`Incomplete updater entry: ${platform}`);
-            }
-            if (!entry.url.startsWith(prefix)) {
-              throw new Error(`Updater URL is not a public release download for ${platform}: ${entry.url}`);
-            }
-            const asset = decodeURIComponent(entry.url.slice(prefix.length));
-            if (!assetNames.has(asset)) {
-              throw new Error(`Unknown updater asset for ${platform}: ${entry.url}`);
-            }
-            const publishedSignature = fs
-              .readFileSync(`release-check/${asset}.sig`, 'utf8')
-              .trim();
-            if (publishedSignature !== entry.signature.trim()) {
-              throw new Error(`latest.json signature mismatch for ${platform}`);
-            }
-          }
-          NODE
-          grep -Eiq '\.exe$' release-check/assets.txt
-          grep -Eiq '\.AppImage$' release-check/assets.txt
-          grep -Eiq '\.deb$' release-check/assets.txt
-          grep -Eiq '\.dmg$' release-check/assets.txt
-          grep -Eiq '\.sig$' release-check/assets.txt
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            > release-check/release.json
+          jq -r '.assets[].name' release-check/release.json \
+            > release-check/assets.txt
           grep -Fxq 'latest.json' release-check/assets.txt
 
       - name: Verify updater signatures with the bundled public key
@@ -282,22 +280,21 @@ jobs:
               -x "$signature.minisig"
             verified=$((verified + 1))
           done
-          test "$verified" -eq 4
+          test "$verified" -eq 7
 
       - name: Publish verified release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          release_id="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases" \
-            --jq ".[] | select(.tag_name == \"$RELEASE_TAG\") | .id" | head -n 1)"
+          release_id="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq '.databaseId')"
           test -n "$release_id"
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \
             -F draft=false \
             -f make_latest=true
 
-      - name: Verify public updater downloads
+      - name: Verify public release downloads
         run: |
-          urls="$(jq -r '.platforms[].url' release-check/latest.json | sort -u)"
+          urls="$(jq -r '.assets[].browser_download_url' release-check/release.json | sort -u)"
           while IFS= read -r url; do
             downloaded=false
             for attempt in 1 2 3 4 5; do
