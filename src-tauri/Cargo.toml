@@ -1,6 +1,6 @@
 [package]
 name = "openquota"
-version = "0.1.4"
+version = "0.1.5"
 description = "Cross-platform AI quota tracker"
 authors = ["OpenQuota contributors"]
 edition = "2021"
