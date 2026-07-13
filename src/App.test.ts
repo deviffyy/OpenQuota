@@ -208,6 +208,7 @@ describe('OpenQuota dashboard', () => {
             });
           if (command === 'request_notification_permission')
             return Promise.resolve({ ...settingsState, notificationPermission: 'granted' });
+          if (command === 'open_notification_settings') return Promise.resolve();
           if (command === 'reset_customization') return Promise.resolve(settingsState);
           if (command === 'resize_main_window') return Promise.resolve();
           if (command === 'get_app_data_path') return Promise.resolve('C:\\OpenQuota\\Data');
@@ -716,6 +717,41 @@ describe('OpenQuota dashboard', () => {
       );
       expect(mocks.invoke).toHaveBeenCalledWith('request_notification_permission');
     });
+    expect(screen.getByRole('checkbox', { name: /Almost Out/ })).toBeChecked();
+  });
+
+  it('offers system settings only when enabled notifications are blocked', async () => {
+    mocks.invoke.mockImplementation(
+      (command: string, args?: { settings?: SettingsViewState['settings'] }) => {
+        if (command === 'get_usage_state') return Promise.resolve(liveState);
+        if (command === 'get_app_settings')
+          return Promise.resolve({
+            ...settingsState,
+            notificationPermission: 'denied',
+            settings: {
+              ...settingsState.settings,
+              notifications: { ...settingsState.settings.notifications, almostOut: true },
+            },
+          });
+        if (command === 'save_app_settings')
+          return Promise.resolve({
+            ...settingsState,
+            notificationPermission: 'denied',
+            settings: args?.settings ?? settingsState.settings,
+          });
+        if (command === 'open_notification_settings') return Promise.resolve();
+        if (command === 'resize_main_window') return Promise.resolve();
+        return Promise.reject(new Error(`unexpected command ${command}`));
+      },
+    );
+
+    render(App);
+    await screen.findByText('Plus');
+    await fireEvent.click(screen.getByLabelText('Open options'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(screen.getByText('Notifications are blocked')).toBeInTheDocument();
+    await fireEvent.click(screen.getByRole('button', { name: 'Open Settings' }));
+    expect(mocks.invoke).toHaveBeenCalledWith('open_notification_settings');
   });
 
   it('preserves cached values and exposes a stale refresh error', async () => {

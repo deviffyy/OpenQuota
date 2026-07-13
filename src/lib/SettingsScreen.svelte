@@ -13,6 +13,7 @@
     settingsView: SettingsViewState;
     onChange: (settings: AppSettings) => void;
     onRequestNotifications: () => void;
+    onOpenNotificationSettings: () => void;
     updateError: UpdateFailure | null;
     checkingUpdate: boolean;
     updateStatus: UpdateStatus | null;
@@ -24,6 +25,7 @@
     settingsView,
     onChange,
     onRequestNotifications,
+    onOpenNotificationSettings,
     updateError,
     checkingUpdate,
     updateStatus,
@@ -33,13 +35,21 @@
   }: Props = $props();
   let recording = $state(false);
   const settings = $derived(settingsView.settings);
+  const anyNotificationEnabled = $derived(
+    settings.notifications.almostOut ||
+      settings.notifications.cuttingItClose ||
+      settings.notifications.willRunOut,
+  );
+  const notificationsNeedAttention = $derived(
+    anyNotificationEnabled && settingsView.notificationPermission !== 'granted',
+  );
 
   function patch(value: Partial<AppSettings>) {
     onChange({ ...settings, ...value });
   }
   function patchNotification(key: keyof NotificationPreferences, enabled: boolean) {
-    if (enabled && settingsView.notificationPermission === 'prompt') onRequestNotifications();
     patch({ notifications: { ...settings.notifications, [key]: enabled } });
+    if (enabled && settingsView.notificationPermission === 'prompt') onRequestNotifications();
   }
   function lastChecked(value: string) {
     const date = new Date(value);
@@ -225,9 +235,7 @@
 
   <div class="settings-section">
     <h2>
-      Notifications {#if settingsView.notificationPermission === 'denied'}<span
-          class="permission-warning">!</span
-        >{/if}
+      Notifications {#if notificationsNeedAttention}<span class="permission-warning">!</span>{/if}
     </h2>
     <label class="setting-row"
       ><span
@@ -271,9 +279,31 @@
         onchange={(event) => patchNotification('willRunOut', event.currentTarget.checked)}
       /></label
     >
-    {#if settingsView.notificationPermission === 'denied'}<p class="settings-note">
-        Notifications are blocked in system settings.
-      </p>{/if}
+    {#if notificationsNeedAttention}
+      <div class="notification-actions">
+        <div class="notification-attention" role="status">
+          <span
+            ><b
+              >{settingsView.notificationPermission === 'denied'
+                ? 'Notifications are blocked'
+                : 'Permission is required'}</b
+            ><small
+              >{settingsView.notificationPermission === 'denied'
+                ? 'Enable OpenQuota notifications in system settings.'
+                : 'Allow notifications to receive the alerts selected above.'}</small
+            ></span
+          >
+          <button
+            class="secondary-button"
+            type="button"
+            onclick={settingsView.notificationPermission === 'denied'
+              ? onOpenNotificationSettings
+              : onRequestNotifications}
+            >{settingsView.notificationPermission === 'denied' ? 'Open Settings' : 'Allow'}</button
+          >
+        </div>
+      </div>
+    {/if}
   </div>
 
   <div class="settings-section">

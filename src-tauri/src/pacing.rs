@@ -146,6 +146,9 @@ pub struct PaceAlert {
     pub milestone: Milestone,
     pub provider: String,
     pub metric: String,
+    metric_id: String,
+    previous_severity: Option<PaceSeverity>,
+    previous_was_under_ten: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -163,6 +166,41 @@ pub struct NotificationEvaluator {
 }
 
 impl NotificationEvaluator {
+    pub fn prune(&self, settings: &AppSettings) {
+        let active = settings
+            .providers
+            .iter()
+            .filter(|provider| provider.enabled)
+            .flat_map(|provider| {
+                provider
+                    .metrics
+                    .iter()
+                    .filter(|metric| metric.enabled)
+                    .map(|metric| metric.id.clone())
+            })
+            .collect::<HashSet<_>>();
+        if let Ok(mut states) = self.states.lock() {
+            states.retain(|metric_id, _| active.contains(metric_id));
+        }
+    }
+
+    pub fn rollback(&self, alerts: &[PaceAlert]) {
+        let Ok(mut states) = self.states.lock() else {
+            return;
+        };
+        for alert in alerts {
+            let Some(state) = states.get_mut(&alert.metric_id) else {
+                continue;
+            };
+            state.fired.remove(&alert.milestone);
+            if alert.milestone == Milestone::AlmostOut {
+                state.was_under_ten = alert.previous_was_under_ten;
+            } else {
+                state.previous = alert.previous_severity;
+            }
+        }
+    }
+
     pub fn evaluate(
         &self,
         snapshot: &ProviderSnapshot,
@@ -197,7 +235,9 @@ impl NotificationEvaluator {
                 _ => false,
             };
             let projection = project(window, now, is_session_window);
-            let state = states.entry(metric_id).or_default();
+            let state = states.entry(metric_id.clone()).or_default();
+            let previous_severity = state.previous;
+            let previous_was_under_ten = state.was_under_ten;
             let mut new_alerts = transition(
                 state,
                 projection.severity,
@@ -208,6 +248,9 @@ impl NotificationEvaluator {
             );
             for alert in &mut new_alerts {
                 alert.provider = provider_display_name(&snapshot.provider_id).into();
+                alert.metric_id.clone_from(&metric_id);
+                alert.previous_severity = previous_severity;
+                alert.previous_was_under_ten = previous_was_under_ten;
             }
             alerts.extend(new_alerts);
         }
@@ -293,6 +336,9 @@ fn transition(
             milestone,
             provider: String::new(),
             metric: metric.into(),
+            metric_id: String::new(),
+            previous_severity: None,
+            previous_was_under_ten: false,
         })
         .collect()
 }
@@ -319,8 +365,14 @@ fn reset_advanced(current: Option<DateTime<Utc>>, previous: Option<DateTime<Utc>
 mod tests {
     use chrono::{Duration, TimeZone, Utc};
 
-    use super::{project, transition, NotificationState, PaceSeverity};
-    use crate::models::{NotificationPreferences, QuotaWindow};
+    use super::{
+        project, transition, Milestone, NotificationEvaluator, NotificationState, PaceAlert,
+        PaceSeverity,
+    };
+    use crate::models::{
+        AppSettings, MetricLayout, MetricSection, NotificationPreferences, ProviderLayout,
+        QuotaWindow,
+    };
 
     fn window(used: f64, elapsed_fraction: f64) -> QuotaWindow {
         let now = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
@@ -550,5 +602,84 @@ mod tests {
             .len(),
             1
         );
+    }
+
+    #[test]
+    fn failed_delivery_rolls_back_the_consumed_transition() {
+        let evaluator = NotificationEvaluator::default();
+        evaluator.states.lock().unwrap().insert(
+            "codex.weekly".into(),
+            NotificationState {
+                fired: [Milestone::WillRunOut].into_iter().collect(),
+                previous: Some(PaceSeverity::RunningOut),
+                was_under_ten: true,
+                primed: true,
+                ..NotificationState::default()
+            },
+        );
+        evaluator.rollback(&[
+            PaceAlert {
+                milestone: Milestone::WillRunOut,
+                provider: "Codex".into(),
+                metric: "Weekly".into(),
+                metric_id: "codex.weekly".into(),
+                previous_severity: Some(PaceSeverity::Healthy),
+                previous_was_under_ten: false,
+            },
+            PaceAlert {
+                milestone: Milestone::AlmostOut,
+                provider: "Codex".into(),
+                metric: "Weekly".into(),
+                metric_id: "codex.weekly".into(),
+                previous_severity: Some(PaceSeverity::Healthy),
+                previous_was_under_ten: false,
+            },
+        ]);
+
+        let states = evaluator.states.lock().unwrap();
+        let state = states.get("codex.weekly").unwrap();
+        assert!(state.fired.is_empty());
+        assert_eq!(state.previous, Some(PaceSeverity::Healthy));
+        assert!(!state.was_under_ten);
+    }
+
+    #[test]
+    fn pruning_drops_disabled_and_removed_metric_state() {
+        let evaluator = NotificationEvaluator::default();
+        let mut settings = AppSettings {
+            providers: vec![ProviderLayout {
+                id: "codex".into(),
+                enabled: true,
+                detected: true,
+                expanded: false,
+                metrics: vec![MetricLayout {
+                    id: "codex.weekly".into(),
+                    enabled: true,
+                    section: MetricSection::AlwaysVisible,
+                    pinned: false,
+                }],
+            }],
+            ..AppSettings::default()
+        };
+        evaluator.states.lock().unwrap().extend([
+            ("codex.weekly".into(), NotificationState::default()),
+            ("codex.session".into(), NotificationState::default()),
+        ]);
+
+        evaluator.prune(&settings);
+        assert_eq!(
+            evaluator
+                .states
+                .lock()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec!["codex.weekly"]
+        );
+
+        settings.providers[0].enabled = false;
+        evaluator.prune(&settings);
+        assert!(evaluator.states.lock().unwrap().is_empty());
     }
 }

@@ -674,9 +674,18 @@
   }
   async function requestNotifications() {
     try {
-      settingsState = await invoke<SettingsViewState>('request_notification_permission');
+      const currentSettings = settingsState.settings;
+      const permissionState = await invoke<SettingsViewState>('request_notification_permission');
+      settingsState = { ...permissionState, settings: currentSettings };
     } catch {
       settingsError = 'Notification permission could not be requested.';
+    }
+  }
+  async function openNotificationSettings() {
+    try {
+      await invoke('open_notification_settings');
+    } catch {
+      settingsError = 'Notification settings could not be opened on this system.';
     }
   }
   async function checkForUpdates(manual = false) {
@@ -759,6 +768,15 @@
     };
     updateMotionPreference();
     motionQuery.addEventListener('change', updateMotionPreference);
+    const refreshPermissionState = () => {
+      if (pendingSettingsSaves !== 0) return;
+      void invoke<SettingsViewState>('get_app_settings')
+        .then((state) => {
+          if (pendingSettingsSaves === 0) settingsState = state;
+        })
+        .catch(() => undefined);
+    };
+    window.addEventListener('focus', refreshPermissionState);
 
     const popover = document.querySelector<HTMLElement>('.popover');
     const resizeObserver =
@@ -844,6 +862,7 @@
       window.cancelAnimationFrame(measureFrame);
       window.cancelAnimationFrame(resizeFrame);
       motionQuery.removeEventListener('change', updateMotionPreference);
+      window.removeEventListener('focus', refreshPermissionState);
       document.documentElement.removeAttribute('data-reduced-motion');
       mutationObserver.disconnect();
       resizeObserver?.disconnect();
@@ -931,6 +950,7 @@
               settingsView={settingsState}
               onChange={saveSettings}
               onRequestNotifications={requestNotifications}
+              onOpenNotificationSettings={openNotificationSettings}
               {updateError}
               {checkingUpdate}
               {updateStatus}

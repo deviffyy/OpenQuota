@@ -2677,6 +2677,7 @@ version = "0.1.3"
 dependencies = [
  "base64 0.22.1",
  "chrono",
+ "notify-rust",
  "reqwest",
  "rusqlite",
  "secret-service",

@@ -185,6 +185,36 @@ fn request_notification_permission(
     )
 }
 
+#[tauri::command]
+fn open_notification_settings() -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let result = child_process::background_command("explorer.exe")
+        .arg("ms-settings:notifications")
+        .spawn();
+    #[cfg(target_os = "macos")]
+    let result = child_process::background_command("open")
+        .arg("x-apple.systempreferences:com.apple.Notifications-Settings.extension")
+        .spawn();
+    #[cfg(target_os = "linux")]
+    let result = [
+        ("gnome-control-center", "notifications"),
+        ("systemsettings", "kcm_notifications"),
+        ("systemsettings5", "kcm_notifications"),
+    ]
+    .into_iter()
+    .find_map(|(program, argument)| {
+        child_process::background_command(program)
+            .arg(argument)
+            .spawn()
+            .ok()
+    })
+    .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "settings unavailable"));
+
+    result
+        .map(|_| ())
+        .map_err(|_| "Notification settings could not be opened on this system.".to_owned())
+}
+
 fn show_popup(window: &WebviewWindow) {
     let standalone = window
         .app_handle()
@@ -263,7 +293,21 @@ fn anchored_vertical_frame(
 
 #[cfg(test)]
 mod window_geometry_tests {
-    use super::{anchored_vertical_frame, VerticalFrame};
+    use super::{anchored_vertical_frame, notification_response_opens_window, VerticalFrame};
+    use notify_rust::{CloseReason, NotificationResponse};
+
+    #[test]
+    fn notification_clicks_open_the_window_but_dismissals_do_not() {
+        assert!(notification_response_opens_window(
+            &NotificationResponse::Default
+        ));
+        assert!(notification_response_opens_window(
+            &NotificationResponse::Action("open".into())
+        ));
+        assert!(!notification_response_opens_window(
+            &NotificationResponse::Closed(CloseReason::Dismissed)
+        ));
+    }
 
     #[test]
     fn shrinking_bottom_anchored_popup_preserves_its_bottom_edge() {
@@ -507,6 +551,48 @@ fn notification_permission(app: &AppHandle) -> &'static str {
     }
 }
 
+fn show_system_notification(app: &AppHandle, title: &str, body: &str) -> Result<(), String> {
+    let mut notification = notify_rust::Notification::new();
+    notification.summary(title).body(body).appname("OpenQuota");
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    notification.action("default", "Open OpenQuota");
+    #[cfg(target_os = "windows")]
+    notification.app_id(&app.config().identifier);
+    #[cfg(target_os = "macos")]
+    let _ = notify_rust::set_application(if tauri::is_dev() {
+        "com.apple.Terminal"
+    } else {
+        &app.config().identifier
+    });
+
+    let handle = notification
+        .show()
+        .map_err(|_| "The notification could not be delivered.".to_owned())?;
+    let app = app.clone();
+    thread::spawn(move || {
+        let _ = handle.wait_for_response(move |response: &notify_rust::NotificationResponse| {
+            if !notification_response_opens_window(response) {
+                return;
+            }
+            let app_for_window = app.clone();
+            let _ = app.run_on_main_thread(move || {
+                app_for_window.state::<PopupDismissGuard>().cancel_pending();
+                if let Some(window) = app_for_window.get_webview_window(MAIN_WINDOW) {
+                    show_popup(&window);
+                }
+            });
+        });
+    });
+    Ok(())
+}
+
+fn notification_response_opens_window(response: &notify_rust::NotificationResponse) -> bool {
+    matches!(
+        response,
+        notify_rust::NotificationResponse::Default | notify_rust::NotificationResponse::Action(_)
+    )
+}
+
 fn settings_view_state(app: &AppHandle, service: &SettingsService) -> SettingsViewState {
     let mut settings = service.get();
     let mut integration_error = match autostart_is_enabled(app) {
@@ -541,11 +627,15 @@ fn finish_refresh(
 ) {
     let preferences = settings.get();
     tray_presentation::update(app, state, &preferences);
+    notifications.prune(&preferences);
     for provider_state in state.providers.values() {
         if provider_state.error.is_none() {
             if let Some(snapshot) = provider_state.snapshot.as_ref() {
                 let alerts = notifications.evaluate(snapshot, &preferences, chrono::Utc::now());
-                deliver_notifications(app, &alerts);
+                let failed = deliver_notifications(app, &alerts);
+                if !failed.is_empty() {
+                    notifications.rollback(&failed);
+                }
             }
         }
     }
@@ -560,43 +650,27 @@ fn enabled_provider_ids(settings: &AppSettings) -> Vec<String> {
         .collect()
 }
 
-fn deliver_notifications(app: &AppHandle, alerts: &[PaceAlert]) {
-    if alerts.is_empty() || notification_permission(app) != "granted" {
-        return;
+fn deliver_notifications(app: &AppHandle, alerts: &[PaceAlert]) -> Vec<PaceAlert> {
+    if notification_permission(app) != "granted" {
+        return alerts.to_vec();
     }
-    if alerts.len() == 1 {
-        let alert = &alerts[0];
-        let _ = app
-            .notification()
-            .builder()
-            .title(alert.milestone.title())
-            .body(format!(
-                "{} · {}\n{}",
-                alert.provider,
-                alert.metric,
-                alert.milestone.body()
-            ))
-            .show();
-        return;
-    }
-    let body = alerts
+    alerts
         .iter()
-        .map(|alert| {
-            format!(
-                "{} · {}: {}",
-                alert.provider,
-                alert.metric,
-                alert.milestone.title()
+        .filter_map(|alert| {
+            show_system_notification(
+                app,
+                alert.milestone.title(),
+                &format!(
+                    "{} · {}\n{}",
+                    alert.provider,
+                    alert.metric,
+                    alert.milestone.body()
+                ),
             )
+            .is_err()
+            .then_some(alert.clone())
         })
-        .collect::<Vec<_>>()
-        .join("\n");
-    let _ = app
-        .notification()
-        .builder()
-        .title("OpenQuota Quota Alerts")
-        .body(body)
-        .show();
+        .collect()
 }
 
 fn schedule_outside_click_dismiss(window: Window) {
@@ -782,6 +856,7 @@ pub fn run() {
             save_app_settings,
             reset_customization,
             request_notification_permission,
+            open_notification_settings,
             get_app_data_path,
             dismiss_main_window,
             resize_main_window,
