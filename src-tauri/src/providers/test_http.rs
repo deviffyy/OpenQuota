@@ -5,6 +5,9 @@ use std::{
     time::Duration,
 };
 
+pub const TIMEOUT_TEST_CLIENT_LIMIT: Duration = Duration::from_millis(100);
+pub const TIMEOUT_TEST_RESPONSE_DELAY: Duration = Duration::from_secs(1);
+
 pub fn serve_once(status: u16, headers: &[(&str, &str)], body: &str) -> String {
     serve_once_after(Duration::ZERO, status, headers, body)
 }

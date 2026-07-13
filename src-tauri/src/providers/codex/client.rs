@@ -203,12 +203,16 @@ mod tests {
 
     #[test]
     fn request_timeout_becomes_a_safe_connection_error() {
-        let base =
-            test_http::serve_once_after(Duration::from_millis(80), 200, &[], r#"{"plan":"plus"}"#);
+        let base = test_http::serve_once_after(
+            test_http::TIMEOUT_TEST_RESPONSE_DELAY,
+            200,
+            &[],
+            r#"{"plan":"plus"}"#,
+        );
         let client = CodexClient::with_endpoints(
             &format!("{base}/usage"),
             &format!("{base}/token"),
-            Duration::from_millis(10),
+            test_http::TIMEOUT_TEST_CLIENT_LIMIT,
         )
         .unwrap();
         let error = client.fetch_usage("secret-token", None).unwrap_err();

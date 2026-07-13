@@ -238,7 +238,7 @@ mod tests {
         ));
 
         let timeout = test_http::serve_once_after(
-            Duration::from_millis(80),
+            test_http::TIMEOUT_TEST_RESPONSE_DELAY,
             200,
             &[],
             r#"{"access_token":"fresh-token"}"#,
@@ -246,7 +246,7 @@ mod tests {
         let timeout_client = AntigravityClient::with_endpoints(
             vec![timeout.clone()],
             format!("{timeout}/token"),
-            Duration::from_millis(10),
+            test_http::TIMEOUT_TEST_CLIENT_LIMIT,
         )
         .unwrap();
         assert!(matches!(

@@ -90,8 +90,6 @@ impl ClaudeClient {
 
 #[cfg(test)]
 mod tests {
-    use std::time::Duration;
-
     use reqwest::StatusCode;
 
     use super::ClaudeClient;
@@ -131,9 +129,13 @@ mod tests {
         assert!(matches!(error, ClaudeError::InvalidResponse));
         assert!(!error.to_string().contains("secret-token"));
 
-        let timeout =
-            test_http::serve_once_after(Duration::from_millis(80), 200, &[], r#"{"plan":"max"}"#);
-        let error = ClaudeClient::with_timeout(Duration::from_millis(10))
+        let timeout = test_http::serve_once_after(
+            test_http::TIMEOUT_TEST_RESPONSE_DELAY,
+            200,
+            &[],
+            r#"{"plan":"max"}"#,
+        );
+        let error = ClaudeClient::with_timeout(test_http::TIMEOUT_TEST_CLIENT_LIMIT)
             .unwrap()
             .fetch_usage("secret-token", &config(&timeout))
             .unwrap_err();
