@@ -1,12 +1,14 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import type {
-  ProviderViewState,
-  SettingsViewState,
-  UpdateProgress,
-  UsageViewState,
-} from './lib/types';
+import type { ProviderViewState, SettingsViewState, UsageViewState } from './lib/types';
+import {
+  antigravityState,
+  claudeState,
+  codexState,
+  liveState,
+  settingsState,
+} from './test/appFixtures';
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -23,169 +25,20 @@ vi.mock('@tauri-apps/api/window', () => ({
   }),
 }));
 
-const codexState: ProviderViewState = {
-  source: 'live',
-  refreshing: false,
-  stale: false,
-  error: null,
-  lastAttemptAt: null,
-  snapshot: {
-    providerId: 'codex',
-    plan: 'Plus',
-    refreshedAt: '2026-07-10T10:00:00Z',
-    warnings: [],
-    quotas: [
-      {
-        id: 'session',
-        label: 'Session',
-        usedPercent: 32,
-        resetsAt: '2099-01-01T00:00:00Z',
-        periodSeconds: 18000,
-        format: 'percent',
-        usedValue: null,
-        limitValue: null,
-      },
-      {
-        id: 'weekly',
-        label: 'Weekly',
-        usedPercent: 59,
-        resetsAt: '2099-01-07T00:00:00Z',
-        periodSeconds: 604800,
-        format: 'percent',
-        usedValue: null,
-        limitValue: null,
-      },
-    ],
-    usage: {
-      today: { tokens: 2100000, estimatedCostUsd: 3.84, estimateComplete: true },
-      yesterday: { tokens: 684000, estimatedCostUsd: 1.27, estimateComplete: true },
-      last30Days: { tokens: 3000000, estimatedCostUsd: 5.11, estimateComplete: true },
-      daily: [
-        { date: '2026-07-10', tokens: 2100000, estimatedCostUsd: 3.84, estimateComplete: true },
-      ],
-      unknownModels: [],
-    },
-  },
-};
-const liveState: UsageViewState = { providers: { codex: codexState } };
+type InvokeArgs = { settings?: SettingsViewState['settings'] };
+type InvokeImplementation = (command: string, args?: InvokeArgs) => unknown;
 
-const claudeState: ProviderViewState = {
-  source: 'live',
-  refreshing: false,
-  stale: false,
-  error: null,
-  lastAttemptAt: null,
-  snapshot: {
-    providerId: 'claude',
-    plan: 'Max',
-    refreshedAt: '2026-07-11T10:00:00Z',
-    warnings: [],
-    quotas: [
-      {
-        id: 'session',
-        label: 'Session',
-        usedPercent: 20,
-        resetsAt: '2099-01-01T00:00:00Z',
-        periodSeconds: 18000,
-        format: 'percent',
-        usedValue: null,
-        limitValue: null,
-      },
-      {
-        id: 'extra',
-        label: 'Extra Usage',
-        usedPercent: 25,
-        resetsAt: null,
-        periodSeconds: 0,
-        format: 'dollars',
-        usedValue: 12.5,
-        limitValue: 50,
-      },
-    ],
-    usage: { today: null, yesterday: null, last30Days: null, daily: [], unknownModels: [] },
-  },
-};
-
-const antigravityState: ProviderViewState = {
-  source: 'live',
-  refreshing: false,
-  stale: false,
-  error: null,
-  lastAttemptAt: null,
-  snapshot: {
-    providerId: 'antigravity',
-    plan: 'Pro',
-    refreshedAt: '2026-07-11T10:00:00Z',
-    warnings: [],
-    quotas: [
-      {
-        id: 'geminiPro',
-        label: 'Session',
-        usedPercent: 0,
-        resetsAt: '2099-01-01T00:00:00Z',
-        periodSeconds: 18000,
-        format: 'percent',
-        usedValue: null,
-        limitValue: null,
-      },
-      {
-        id: 'geminiWeekly',
-        label: 'Weekly',
-        usedPercent: 13,
-        resetsAt: '2099-01-07T00:00:00Z',
-        periodSeconds: 604800,
-        format: 'percent',
-        usedValue: null,
-        limitValue: null,
-      },
-    ],
-    usage: { today: null, yesterday: null, last30Days: null, daily: [], unknownModels: [] },
-  },
-};
-
-const settingsState: SettingsViewState = {
-  notificationPermission: 'prompt',
-  integrationError: null,
-  standaloneWindow: false,
-  platformSummary: null,
-  settings: {
-    schemaVersion: 4,
-    knownProviderIds: ['claude', 'codex', 'antigravity'],
-    showTotalSpend: true,
-    theme: 'system',
-    density: 'default',
-    menuBarStyle: 'text',
-    usageDisplay: 'left',
-    resetDisplay: 'countdown',
-    timeFormat: 'system',
-    alwaysShowPacing: false,
-    launchAtLogin: false,
-    autoCheckUpdates: true,
-    dismissedUpdateVersion: null,
-    lastUpdateCheckAt: null,
-    globalShortcut: null,
-    notifications: { almostOut: false, cuttingItClose: false, willRunOut: false },
-    totalSpendMetric: 'cost',
-    totalSpendPeriod: 'today',
-    detectionNoticeDismissed: true,
-    providers: [
-      {
-        id: 'codex',
-        enabled: true,
-        detected: true,
-        expanded: false,
-        metrics: [
-          { id: 'codex.session', enabled: true, section: 'alwaysVisible', pinned: true },
-          { id: 'codex.weekly', enabled: true, section: 'alwaysVisible', pinned: true },
-          { id: 'codex.trend', enabled: true, section: 'alwaysVisible', pinned: false },
-          { id: 'codex.today', enabled: true, section: 'onDemand', pinned: false },
-          { id: 'codex.yesterday', enabled: true, section: 'onDemand', pinned: false },
-          { id: 'codex.last30', enabled: true, section: 'onDemand', pinned: false },
-        ],
-      },
-    ],
-  },
-};
+function mockInvoke(implementation: InvokeImplementation) {
+  mocks.invoke.mockImplementation((command: string, args?: InvokeArgs) => {
+    if (command === 'get_bootstrap_state') {
+      return Promise.all([
+        implementation('get_usage_state', args),
+        implementation('get_app_settings', args),
+      ]).then(([usage, settings]) => ({ usage, settings }));
+    }
+    return implementation(command, args);
+  });
+}
 
 describe('OpenQuota dashboard', () => {
   beforeEach(() => {
@@ -194,41 +47,39 @@ describe('OpenQuota dashboard', () => {
       workArea: { size: { width: 1280, height: 700 } },
     });
     mocks.listen.mockReset().mockResolvedValue(vi.fn());
-    mocks.invoke
-      .mockReset()
-      .mockImplementation(
-        (command: string, args?: { settings?: SettingsViewState['settings'] }) => {
-          if (
-            command === 'get_usage_state' ||
-            command === 'refresh_usage' ||
-            command === 'refresh_provider_usage'
-          )
-            return Promise.resolve(liveState);
-          if (command === 'get_app_settings') return Promise.resolve(settingsState);
-          if (command === 'save_app_settings')
-            return Promise.resolve({
-              ...settingsState,
-              settings: args?.settings ?? settingsState.settings,
-            });
-          if (command === 'request_notification_permission')
-            return Promise.resolve({ ...settingsState, notificationPermission: 'granted' });
-          if (command === 'open_notification_settings') return Promise.resolve();
-          if (command === 'reset_customization') return Promise.resolve(settingsState);
-          if (command === 'resize_main_window') return Promise.resolve();
-          if (command === 'get_app_data_path') return Promise.resolve('C:\\OpenQuota\\Data');
-          if (command === 'dismiss_main_window') return Promise.resolve();
-          if (command === 'check_for_updates')
-            return Promise.resolve({
-              available: false,
-              currentVersion: '0.1.0',
-              version: null,
-              body: null,
-              installable: true,
-              releaseUrl: 'https://github.com/deviffyy/OpenQuota/releases/latest',
-            });
-          return Promise.reject(new Error(`unexpected command ${command}`));
-        },
-      );
+    mocks.invoke.mockReset();
+    mockInvoke((command: string, args?: InvokeArgs) => {
+      if (
+        command === 'get_usage_state' ||
+        command === 'refresh_usage' ||
+        command === 'refresh_provider_usage'
+      )
+        return Promise.resolve(liveState);
+      if (command === 'get_app_settings') return Promise.resolve(settingsState);
+      if (command === 'save_app_settings')
+        return Promise.resolve({
+          ...settingsState,
+          settings: args?.settings ?? settingsState.settings,
+        });
+      if (command === 'request_notification_permission')
+        return Promise.resolve({ ...settingsState, notificationPermission: 'granted' });
+      if (command === 'open_notification_settings') return Promise.resolve();
+      if (command === 'reset_customization') return Promise.resolve(settingsState);
+      if (command === 'reset_provider_customization') return Promise.resolve(settingsState);
+      if (command === 'resize_main_window') return Promise.resolve();
+      if (command === 'get_app_data_path') return Promise.resolve('C:\\OpenQuota\\Data');
+      if (command === 'dismiss_main_window') return Promise.resolve();
+      if (command === 'check_for_updates')
+        return Promise.resolve({
+          available: false,
+          currentVersion: '0.1.0',
+          version: null,
+          body: null,
+          installable: true,
+          releaseUrl: 'https://github.com/deviffyy/OpenQuota/releases/latest',
+        });
+      return Promise.reject(new Error(`unexpected command ${command}`));
+    });
   });
   afterEach(cleanup);
 
@@ -295,7 +146,7 @@ describe('OpenQuota dashboard', () => {
         ],
       },
     };
-    mocks.invoke.mockImplementation((command: string) => {
+    mockInvoke((command: string) => {
       if (command === 'get_usage_state')
         return Promise.resolve({
           providers: { claude: claudeState, codex: codexState, antigravity: antigravityState },
@@ -342,36 +193,34 @@ describe('OpenQuota dashboard', () => {
   });
 
   it('explains unavailable cost and reveals measured tokens for the same period', async () => {
-    mocks.invoke.mockImplementation(
-      (command: string, args?: { settings?: SettingsViewState['settings'] }) => {
-        if (command === 'get_usage_state')
-          return Promise.resolve({
-            providers: {
-              codex: {
-                ...codexState,
-                snapshot: {
-                  ...codexState.snapshot!,
-                  usage: {
-                    ...codexState.snapshot!.usage,
-                    today: {
-                      tokens: 2_100_000,
-                      estimatedCostUsd: null,
-                      estimateComplete: false,
-                    },
+    mockInvoke((command: string, args?: { settings?: SettingsViewState['settings'] }) => {
+      if (command === 'get_usage_state')
+        return Promise.resolve({
+          providers: {
+            codex: {
+              ...codexState,
+              snapshot: {
+                ...codexState.snapshot!,
+                usage: {
+                  ...codexState.snapshot!.usage,
+                  today: {
+                    tokens: 2_100_000,
+                    estimatedCostUsd: null,
+                    estimateComplete: false,
                   },
                 },
               },
             },
-          });
-        if (command === 'get_app_settings') return Promise.resolve(settingsState);
-        if (command === 'save_app_settings')
-          return Promise.resolve({
-            ...settingsState,
-            settings: args?.settings ?? settingsState.settings,
-          });
-        return Promise.resolve(liveState);
-      },
-    );
+          },
+        });
+      if (command === 'get_app_settings') return Promise.resolve(settingsState);
+      if (command === 'save_app_settings')
+        return Promise.resolve({
+          ...settingsState,
+          settings: args?.settings ?? settingsState.settings,
+        });
+      return Promise.resolve(liveState);
+    });
     render(App);
     const totalSpend = await screen.findByRole('region', { name: 'Total Spend' });
     expect(within(totalSpend).getByText('No cost data for this period')).toBeInTheDocument();
@@ -431,6 +280,19 @@ describe('OpenQuota dashboard', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Customize codex' }));
     expect(screen.getByRole('group', { name: 'Always Visible metrics' })).toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'On Demand metrics' })).toBeInTheDocument();
+  });
+
+  it('resets one provider through the backend metric catalog', async () => {
+    render(App);
+    await screen.findByText('Plus');
+    await fireEvent.click(screen.getByLabelText('Open options'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Customize codex' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Reset Codex' }));
+
+    expect(mocks.invoke).toHaveBeenCalledWith('reset_provider_customization', {
+      providerId: 'codex',
+    });
   });
 
   it('enforces the two-pinned-metrics limit in Customize', async () => {
@@ -496,7 +358,7 @@ describe('OpenQuota dashboard', () => {
   });
 
   it('shows the detected Linux fallback mode in Settings', async () => {
-    mocks.invoke.mockImplementation((command: string) => {
+    mockInvoke((command: string) => {
       if (command === 'get_usage_state') return Promise.resolve(liveState);
       if (command === 'get_app_settings')
         return Promise.resolve({
@@ -522,190 +384,6 @@ describe('OpenQuota dashboard', () => {
     expect(screen.getByText('GNOME · Wayland · standalone window')).toBeInTheDocument();
   });
 
-  it('checks for updates manually and persists the macOS menu bar style', async () => {
-    render(App);
-    await screen.findByText('Plus');
-    await fireEvent.click(screen.getByLabelText('Open options'));
-    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    await fireEvent.click(screen.getByRole('button', { name: 'Check for Updates…' }));
-    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith('check_for_updates'));
-    expect(await screen.findByText('OpenQuota 0.1.0 is up to date.')).toBeInTheDocument();
-    expect(document.querySelector('.settings-update-status')).toBeNull();
-    expect(mocks.invoke).toHaveBeenCalledWith(
-      'save_app_settings',
-      expect.objectContaining({
-        settings: expect.objectContaining({ lastUpdateCheckAt: expect.any(String) }),
-      }),
-    );
-    await fireEvent.click(screen.getByRole('combobox', { name: 'Icon Style' }));
-    await fireEvent.click(screen.getByRole('option', { name: 'Bars' }));
-    await waitFor(() =>
-      expect(mocks.invoke).toHaveBeenCalledWith(
-        'save_app_settings',
-        expect.objectContaining({ settings: expect.objectContaining({ menuBarStyle: 'bars' }) }),
-      ),
-    );
-  });
-
-  it('surfaces an available update on the dashboard and allows it to be dismissed', async () => {
-    mocks.invoke.mockImplementation(
-      (command: string, args?: { settings?: SettingsViewState['settings'] }) => {
-        if (command === 'get_usage_state') return Promise.resolve(liveState);
-        if (command === 'get_app_settings') return Promise.resolve(settingsState);
-        if (command === 'save_app_settings')
-          return Promise.resolve({
-            ...settingsState,
-            settings: args?.settings ?? settingsState.settings,
-          });
-        if (command === 'check_for_updates')
-          return Promise.resolve({
-            available: true,
-            currentVersion: '0.1.0',
-            version: '0.2.0',
-            body: 'New release',
-            installable: true,
-            releaseUrl: 'https://github.com/deviffyy/OpenQuota/releases/latest',
-          });
-        return Promise.resolve();
-      },
-    );
-    render(App);
-    await screen.findByText('Plus');
-    await fireEvent.click(screen.getByLabelText('Open options'));
-    await fireEvent.click(screen.getByRole('button', { name: 'Check for Updates…' }));
-    expect(await screen.findByRole('region', { name: 'Update Available' })).toHaveTextContent(
-      'OpenQuota 0.2.0 is ready to download.',
-    );
-    expect(screen.getByText('New release')).toBeInTheDocument();
-    await fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
-    expect(screen.queryByRole('region', { name: 'Update Available' })).not.toBeInTheDocument();
-    expect(mocks.invoke).toHaveBeenCalledWith(
-      'save_app_settings',
-      expect.objectContaining({
-        settings: expect.objectContaining({ dismissedUpdateVersion: '0.2.0' }),
-      }),
-    );
-  });
-
-  it('opens the package download page when in-app installation is unavailable', async () => {
-    mocks.invoke.mockImplementation((command: string) => {
-      if (command === 'get_usage_state') return Promise.resolve(liveState);
-      if (command === 'get_app_settings') return Promise.resolve(settingsState);
-      if (command === 'save_app_settings') return Promise.resolve(settingsState);
-      if (command === 'check_for_updates')
-        return Promise.resolve({
-          available: true,
-          currentVersion: '0.1.0',
-          version: '0.2.0',
-          body: null,
-          installable: false,
-          releaseUrl: 'https://github.com/deviffyy/OpenQuota/releases/latest',
-        });
-      if (command === 'open_update_page') return Promise.resolve();
-      return Promise.resolve();
-    });
-    render(App);
-    await screen.findByText('Plus');
-    await fireEvent.click(screen.getByLabelText('Open options'));
-    await fireEvent.click(screen.getByRole('button', { name: 'Check for Updates…' }));
-    await fireEvent.click(await screen.findByRole('button', { name: 'Download from GitHub' }));
-    expect(mocks.invoke).toHaveBeenCalledWith('open_update_page');
-  });
-
-  it('installs supported updates and renders native download progress', async () => {
-    let progressListener: ((event: { payload: UpdateProgress }) => void) | undefined;
-    mocks.listen.mockImplementation(
-      (event: string, callback: (event: { payload: UpdateProgress }) => void) => {
-        if (event === 'update-progress') progressListener = callback;
-        return Promise.resolve(vi.fn());
-      },
-    );
-    mocks.invoke.mockImplementation((command: string) => {
-      if (command === 'get_usage_state') return Promise.resolve(liveState);
-      if (command === 'get_app_settings') return Promise.resolve(settingsState);
-      if (command === 'save_app_settings') return Promise.resolve(settingsState);
-      if (command === 'check_for_updates')
-        return Promise.resolve({
-          available: true,
-          currentVersion: '0.1.0',
-          version: '0.2.0',
-          body: 'Safer updates',
-          installable: true,
-          releaseUrl: 'https://github.com/deviffyy/OpenQuota/releases/latest',
-        });
-      if (command === 'install_update') return Promise.resolve();
-      return Promise.resolve();
-    });
-
-    render(App);
-    await screen.findByText('Plus');
-    await fireEvent.click(screen.getByLabelText('Open options'));
-    await fireEvent.click(screen.getByRole('button', { name: 'Check for Updates…' }));
-    await fireEvent.click(await screen.findByRole('button', { name: 'Install Update' }));
-    expect(mocks.invoke).toHaveBeenCalledWith('install_update');
-
-    progressListener?.({
-      payload: { phase: 'downloading', downloaded: 42, total: 100, percent: 42 },
-    });
-    expect(await screen.findByText('Downloading update… 42%')).toBeInTheDocument();
-    expect(screen.getByRole('progressbar', { name: 'Update download' })).toHaveAttribute(
-      'aria-valuenow',
-      '42',
-    );
-
-    progressListener?.({
-      payload: { phase: 'retrying', downloaded: 42, total: 100, percent: 42 },
-    });
-    expect(await screen.findByText('Download interrupted. Retrying…')).toBeInTheDocument();
-
-    progressListener?.({
-      payload: { phase: 'installing', downloaded: 100, total: 100, percent: 100 },
-    });
-    expect(await screen.findByText('Installing update…')).toBeInTheDocument();
-  });
-
-  it('explains recoverable update failures and offers safe fallback actions', async () => {
-    mocks.invoke.mockImplementation((command: string) => {
-      if (command === 'get_usage_state') return Promise.resolve(liveState);
-      if (command === 'get_app_settings') return Promise.resolve(settingsState);
-      if (command === 'save_app_settings') return Promise.resolve(settingsState);
-      if (command === 'check_for_updates')
-        return Promise.resolve({
-          available: true,
-          currentVersion: '0.1.0',
-          version: '0.2.0',
-          body: null,
-          installable: true,
-          releaseUrl: 'https://github.com/deviffyy/OpenQuota/releases/latest',
-        });
-      if (command === 'install_update')
-        return Promise.reject({
-          code: 'download_forbidden',
-          message: 'GitHub refused the update download.',
-          action: 'Try again or download it from the release page.',
-          retryable: true,
-        });
-      if (command === 'open_update_page') return Promise.resolve();
-      return Promise.resolve();
-    });
-
-    render(App);
-    await screen.findByText('Plus');
-    await fireEvent.click(screen.getByLabelText('Open options'));
-    await fireEvent.click(screen.getByRole('button', { name: 'Check for Updates…' }));
-    await fireEvent.click(await screen.findByRole('button', { name: 'Install Update' }));
-
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'GitHub refused the update download.',
-    );
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'Try again or download it from the release page.',
-    );
-    expect(screen.getByRole('button', { name: 'Try Again' })).toBeInTheDocument();
-    await fireEvent.click(screen.getByRole('button', { name: 'View Release' }));
-    expect(mocks.invoke).toHaveBeenCalledWith('open_update_page');
-  });
-
   it('records a global shortcut and requests notification permission', async () => {
     render(App);
     await screen.findByText('Plus');
@@ -728,29 +406,27 @@ describe('OpenQuota dashboard', () => {
   });
 
   it('offers system settings only when enabled notifications are blocked', async () => {
-    mocks.invoke.mockImplementation(
-      (command: string, args?: { settings?: SettingsViewState['settings'] }) => {
-        if (command === 'get_usage_state') return Promise.resolve(liveState);
-        if (command === 'get_app_settings')
-          return Promise.resolve({
-            ...settingsState,
-            notificationPermission: 'denied',
-            settings: {
-              ...settingsState.settings,
-              notifications: { ...settingsState.settings.notifications, almostOut: true },
-            },
-          });
-        if (command === 'save_app_settings')
-          return Promise.resolve({
-            ...settingsState,
-            notificationPermission: 'denied',
-            settings: args?.settings ?? settingsState.settings,
-          });
-        if (command === 'open_notification_settings') return Promise.resolve();
-        if (command === 'resize_main_window') return Promise.resolve();
-        return Promise.reject(new Error(`unexpected command ${command}`));
-      },
-    );
+    mockInvoke((command: string, args?: { settings?: SettingsViewState['settings'] }) => {
+      if (command === 'get_usage_state') return Promise.resolve(liveState);
+      if (command === 'get_app_settings')
+        return Promise.resolve({
+          ...settingsState,
+          notificationPermission: 'denied',
+          settings: {
+            ...settingsState.settings,
+            notifications: { ...settingsState.settings.notifications, almostOut: true },
+          },
+        });
+      if (command === 'save_app_settings')
+        return Promise.resolve({
+          ...settingsState,
+          notificationPermission: 'denied',
+          settings: args?.settings ?? settingsState.settings,
+        });
+      if (command === 'open_notification_settings') return Promise.resolve();
+      if (command === 'resize_main_window') return Promise.resolve();
+      return Promise.reject(new Error(`unexpected command ${command}`));
+    });
 
     render(App);
     await screen.findByText('Plus');
@@ -762,7 +438,7 @@ describe('OpenQuota dashboard', () => {
   });
 
   it('preserves cached values and exposes a stale refresh error', async () => {
-    mocks.invoke.mockImplementation((command: string) => {
+    mockInvoke((command: string) => {
       if (command === 'get_usage_state')
         return Promise.resolve({
           providers: {
@@ -825,7 +501,7 @@ describe('OpenQuota dashboard', () => {
         ],
       },
     };
-    mocks.invoke.mockImplementation((command: string) => {
+    mockInvoke((command: string) => {
       if (command === 'get_usage_state') return Promise.resolve(multiProviderState);
       if (command === 'get_app_settings') return Promise.resolve(multiProviderSettings);
       if (command === 'refresh_provider_usage') return refreshResult;
@@ -897,7 +573,7 @@ describe('OpenQuota dashboard', () => {
         ],
       },
     };
-    mocks.invoke.mockImplementation((command: string) => {
+    mockInvoke((command: string) => {
       if (command === 'get_usage_state') return Promise.resolve(initialState);
       if (command === 'get_app_settings') return Promise.resolve(claudeSettings);
       if (command === 'refresh_usage') return refreshResult;
@@ -964,7 +640,7 @@ describe('OpenQuota dashboard', () => {
         ],
       },
     };
-    mocks.invoke.mockImplementation((command: string) => {
+    mockInvoke((command: string) => {
       if (command === 'get_usage_state')
         return Promise.resolve({ providers: { claude: pendingClaude } });
       if (command === 'get_app_settings') return Promise.resolve(claudeSettings);
@@ -984,7 +660,7 @@ describe('OpenQuota dashboard', () => {
   });
 
   it('restores stable provider chrome when a refresh request fails to start', async () => {
-    mocks.invoke.mockImplementation((command: string) => {
+    mockInvoke((command: string) => {
       if (command === 'get_usage_state') return Promise.resolve(liveState);
       if (command === 'get_app_settings') return Promise.resolve(settingsState);
       if (command === 'refresh_usage') return Promise.reject(new Error('offline'));
@@ -1124,227 +800,5 @@ describe('OpenQuota dashboard', () => {
     expect(screen.queryByRole('listbox', { name: 'Theme' })).not.toBeInTheDocument();
     expect(theme).toHaveFocus();
     expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
-  });
-
-  it('undoes the latest customization with Ctrl+Z', async () => {
-    render(App);
-    await screen.findByText('Plus');
-    await fireEvent.click(screen.getByLabelText('Open options'));
-    await fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
-    const toggle = screen.getByRole('checkbox', { name: 'Enable codex' });
-    await fireEvent.click(toggle);
-    await waitFor(() =>
-      expect(mocks.invoke).toHaveBeenCalledWith(
-        'save_app_settings',
-        expect.objectContaining({
-          settings: expect.objectContaining({
-            providers: expect.arrayContaining([
-              expect.objectContaining({ id: 'codex', enabled: false }),
-            ]),
-          }),
-        }),
-      ),
-    );
-    await fireEvent.keyDown(document, { key: 'z', ctrlKey: true });
-    await waitFor(() =>
-      expect(mocks.invoke).toHaveBeenLastCalledWith(
-        'save_app_settings',
-        expect.objectContaining({
-          settings: expect.objectContaining({
-            providers: expect.arrayContaining([
-              expect.objectContaining({ id: 'codex', enabled: true }),
-            ]),
-          }),
-        }),
-      ),
-    );
-  });
-
-  it('reloads persisted settings when a settings save fails', async () => {
-    mocks.invoke.mockImplementation(
-      (command: string, args?: { settings?: SettingsViewState['settings'] }) => {
-        if (command === 'get_usage_state') return Promise.resolve(liveState);
-        if (command === 'get_app_settings') return Promise.resolve(settingsState);
-        if (command === 'save_app_settings')
-          return Promise.reject('Launch at login is unavailable.');
-        if (command === 'resize_main_window') return Promise.resolve();
-        return Promise.reject(new Error(`unexpected command ${command} ${String(args)}`));
-      },
-    );
-    render(App);
-    await screen.findByText('Plus');
-    await fireEvent.click(screen.getByLabelText('Open options'));
-    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    const launchAtLogin = screen.getByRole('checkbox', { name: 'Launch at Login' });
-
-    await fireEvent.click(launchAtLogin);
-
-    await waitFor(() => expect(launchAtLogin).not.toBeChecked());
-    expect(screen.getByRole('alert')).toHaveTextContent('Launch at login is unavailable.');
-    expect(mocks.invoke).toHaveBeenCalledWith('get_app_settings');
-  });
-
-  it('reorders dashboard metrics directly with a custom drag lift', async () => {
-    render(App);
-    await screen.findByText('Plus');
-    const session = screen.getByRole('group', { name: 'Session options' });
-    const weekly = screen.getByRole('group', { name: 'Weekly options' });
-    const trend = screen.getByRole('group', { name: 'Usage Trend options' });
-    session.getBoundingClientRect = () =>
-      ({ top: 0, right: 280, bottom: 40, left: 0, width: 280, height: 40 }) as DOMRect;
-    weekly.getBoundingClientRect = () =>
-      ({ top: 40, right: 280, bottom: 80, left: 0, width: 280, height: 40 }) as DOMRect;
-    trend.getBoundingClientRect = () =>
-      ({ top: 80, right: 280, bottom: 120, left: 0, width: 280, height: 40 }) as DOMRect;
-    const savesBeforeDrag = mocks.invoke.mock.calls.filter(
-      ([command]) => command === 'save_app_settings',
-    ).length;
-    await fireEvent.pointerDown(session, {
-      pointerId: 1,
-      pointerType: 'mouse',
-      button: 0,
-      clientX: 20,
-      clientY: 20,
-    });
-    await fireEvent.pointerMove(window, {
-      pointerId: 1,
-      pointerType: 'mouse',
-      clientX: 20,
-      clientY: 52,
-    });
-    expect(document.querySelector('.pointer-reorder-lift')).not.toBeNull();
-    await fireEvent.pointerMove(window, {
-      pointerId: 1,
-      pointerType: 'mouse',
-      clientX: 20,
-      clientY: 92,
-    });
-    await fireEvent.pointerUp(window, {
-      pointerId: 1,
-      pointerType: 'mouse',
-      clientX: 20,
-      clientY: 52,
-    });
-    await waitFor(() =>
-      expect(mocks.invoke.mock.calls.some(([command]) => command === 'save_app_settings')).toBe(
-        true,
-      ),
-    );
-    const saveCall = [...mocks.invoke.mock.calls]
-      .reverse()
-      .find(([command]) => command === 'save_app_settings');
-    const saved = saveCall?.[1] as { settings: SettingsViewState['settings'] };
-    expect(
-      saved.settings.providers
-        .find((provider) => provider.id === 'codex')
-        ?.metrics.map((metric) => metric.id),
-    ).toEqual([
-      'codex.weekly',
-      'codex.trend',
-      'codex.session',
-      'codex.today',
-      'codex.yesterday',
-      'codex.last30',
-    ]);
-
-    const savesBeforeUndo = mocks.invoke.mock.calls.filter(
-      ([command]) => command === 'save_app_settings',
-    ).length;
-    expect(savesBeforeUndo).toBe(savesBeforeDrag + 1);
-    await fireEvent.keyDown(document, { key: 'z', ctrlKey: true });
-    await waitFor(() =>
-      expect(
-        mocks.invoke.mock.calls.filter(([command]) => command === 'save_app_settings').length,
-      ).toBeGreaterThan(savesBeforeUndo),
-    );
-    const undoSave = [...mocks.invoke.mock.calls]
-      .reverse()
-      .find(([command]) => command === 'save_app_settings');
-    const restored = undoSave?.[1] as { settings: SettingsViewState['settings'] };
-    expect(
-      restored.settings.providers
-        .find((provider) => provider.id === 'codex')
-        ?.metrics.map((metric) => metric.id),
-    ).toEqual([
-      'codex.session',
-      'codex.weekly',
-      'codex.trend',
-      'codex.today',
-      'codex.yesterday',
-      'codex.last30',
-    ]);
-  });
-
-  it('describes reorder controls for keyboard and assistive-technology users', async () => {
-    render(App);
-    await screen.findByText('Plus');
-
-    const instructions = screen.getByText(
-      'Drag to reorder. With a keyboard, use Alt plus Up Arrow or Alt plus Down Arrow.',
-    );
-    expect(instructions).toHaveClass('sr-only');
-    expect(instructions).toHaveAttribute('id', 'reorder-instructions');
-    const handles = document.querySelectorAll<HTMLElement>('[data-reorder-touch-handle]');
-    expect(handles.length).toBeGreaterThan(0);
-    handles.forEach((handle) => {
-      expect(handle).toHaveAttribute('aria-describedby', 'reorder-instructions');
-      expect(handle).toHaveAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
-    });
-  });
-
-  it('does not let the global Enter shortcut steal an interactive control keypress', async () => {
-    render(App);
-    await screen.findByText('Plus');
-    const handle = screen.getByRole('button', { name: 'Move Session' });
-
-    handle.focus();
-    await fireEvent.keyDown(handle, { key: 'Enter' });
-    expect(screen.queryByRole('heading', { name: 'Customize' })).not.toBeInTheDocument();
-    expect(screen.getByText('Plus')).toBeInTheDocument();
-
-    handle.blur();
-    await fireEvent.keyDown(document, { key: 'Enter' });
-    expect(await screen.findByRole('heading', { name: 'Customize' })).toBeInTheDocument();
-  });
-
-  it('restores the pre-drag layout when a reorder is cancelled', async () => {
-    render(App);
-    await screen.findByText('Plus');
-    const session = screen.getByRole('group', { name: 'Session options' });
-    const weekly = screen.getByRole('group', { name: 'Weekly options' });
-    session.getBoundingClientRect = () =>
-      ({ top: 0, right: 280, bottom: 40, left: 0, width: 280, height: 40 }) as DOMRect;
-    weekly.getBoundingClientRect = () =>
-      ({ top: 40, right: 280, bottom: 80, left: 0, width: 280, height: 40 }) as DOMRect;
-    const savesBeforeDrag = mocks.invoke.mock.calls.filter(
-      ([command]) => command === 'save_app_settings',
-    ).length;
-
-    await fireEvent.pointerDown(session, {
-      pointerId: 1,
-      pointerType: 'mouse',
-      button: 0,
-      clientX: 20,
-      clientY: 20,
-    });
-    await fireEvent.pointerMove(window, {
-      pointerId: 1,
-      pointerType: 'mouse',
-      clientX: 20,
-      clientY: 52,
-    });
-    await fireEvent.keyDown(window, { key: 'Escape' });
-
-    await waitFor(() => {
-      const metricIds = [...document.querySelectorAll<HTMLElement>('[data-reorder-id]')]
-        .filter((element) => element.dataset.reorderGroup === 'dashboard-metrics:codex')
-        .map((element) => element.dataset.reorderId)
-        .filter((id) => id !== 'section:onDemand');
-      expect(metricIds.slice(0, 3)).toEqual(['codex.session', 'codex.weekly', 'codex.trend']);
-    });
-    expect(
-      mocks.invoke.mock.calls.filter(([command]) => command === 'save_app_settings'),
-    ).toHaveLength(savesBeforeDrag);
-    expect(document.querySelector('.pointer-reorder-lift')).toBeNull();
   });
 });

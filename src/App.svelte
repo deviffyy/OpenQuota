@@ -1,86 +1,52 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { invoke } from '@tauri-apps/api/core';
-  import { listen } from '@tauri-apps/api/event';
-  import { currentMonitor, getCurrentWindow } from '@tauri-apps/api/window';
+  import {
+    dismissMainWindow,
+    getAppDataPath,
+    getBootstrapState,
+    onOpenScreen,
+    onPopupHidden,
+    onSettingsState,
+    onUpdateProgress,
+    onUsageState,
+    openNotificationSettings as openSystemNotificationSettings,
+    quitApplication,
+    refreshProviderUsage,
+    refreshUsage,
+    requestNotificationPermission,
+    resetCustomization as resetCustomizationCommand,
+    resetProviderCustomization as resetProviderCustomizationCommand,
+  } from './lib/backend';
   import CustomizeProviderDetail from './lib/CustomizeProviderDetail.svelte';
   import CustomizeProviderList from './lib/CustomizeProviderList.svelte';
   import Dashboard from './lib/Dashboard.svelte';
   import Icon from './lib/Icon.svelte';
-  import { defaultMetricLayout, metricDefinition, providerDisplayName } from './lib/metrics';
+  import { metricDefinition, providerDisplayName } from './lib/metrics';
   import { springMotion } from './lib/motion';
   import OpenQuotaMark from './lib/OpenQuotaMark.svelte';
   import { horizontalPageTransition, shouldSlideBetweenScreens } from './lib/pageTransition';
-  import { panelTargetHeight, screenPanelHeight, shouldDeferPanelFit } from './lib/panelSizing';
   import { desktopPlatform, shortcutLabels } from './lib/platform';
   import { providerIconPath } from './lib/providerIconPaths';
   import SettingsScreen from './lib/SettingsScreen.svelte';
+  import { SettingsController } from './lib/settingsController.svelte';
   import type { SpendProjection } from './lib/totalSpend';
-  import type {
-    AppSettings,
-    QuotaWindow,
-    SettingsViewState,
-    UpdateProgress,
-    UpdateFailure,
-    UpdateStatus,
-    UsageViewState,
-  } from './lib/types';
+  import type { AppSettings, QuotaWindow, UsageViewState } from './lib/types';
+  import { nextUpdateLabel, UpdateController } from './lib/updateController.svelte';
   import { automaticUpdateDelay, UPDATE_CHECK_INTERVAL_MS } from './lib/updateSchedule';
+  import { createWindowController, type AppScreen } from './lib/windowController';
 
-  type Screen = 'dashboard' | 'customize' | 'settings' | `provider:${string}`;
+  type Screen = AppScreen;
   const appVersion = import.meta.env.APP_VERSION;
   type ShareRow =
     | { kind: 'quota'; label: string; quota: QuotaWindow }
     | { kind: 'text'; label: string; value: string };
   const emptyView: UsageViewState = { providers: {} };
-  const emptySettings: SettingsViewState = {
-    notificationPermission: 'prompt',
-    integrationError: null,
-    standaloneWindow: false,
-    platformSummary: null,
-    settings: {
-      schemaVersion: 4,
-      knownProviderIds: ['claude', 'codex', 'antigravity'],
-      showTotalSpend: true,
-      theme: 'system',
-      density: 'default',
-      menuBarStyle: 'text',
-      usageDisplay: 'left',
-      resetDisplay: 'countdown',
-      timeFormat: 'system',
-      alwaysShowPacing: false,
-      launchAtLogin: false,
-      autoCheckUpdates: true,
-      dismissedUpdateVersion: null,
-      lastUpdateCheckAt: null,
-      globalShortcut: null,
-      notifications: { almostOut: false, cuttingItClose: false, willRunOut: false },
-      totalSpendMetric: 'cost',
-      totalSpendPeriod: 'today',
-      detectionNoticeDismissed: false,
-      providers: [{ id: 'codex', enabled: true, detected: false, expanded: false, metrics: [] }],
-    },
-  };
 
   let viewState = $state<UsageViewState>(emptyView);
-  let settingsState = $state<SettingsViewState>(emptySettings);
   let screen = $state<Screen>('dashboard');
   let now = $state(Date.now());
   let settingsError = $state<string | null>(null);
-  let updateStatus = $state<UpdateStatus | null>(null);
-  let updateError = $state<UpdateFailure | null>(null);
-  let checkingUpdate = $state(false);
-  let installingUpdate = $state(false);
-  let updateProgress = $state<UpdateProgress | null>(null);
   let automaticUpdatesReady = $state(false);
-  let saveQueue: Promise<void> = Promise.resolve();
-  let settingsRevision = 0;
-  let pendingSettingsSaves = 0;
-  let measureFrame = 0;
-  let resizeFrame = 0;
-  let resizeGeneration = 0;
-  let windowResizeAvailable = true;
-  let dashboardPanelHeight: number | null = null;
   let reducedMotion = $state(false);
   let slideDirection = $state(1);
   let slidePageTransition = $state(true);
@@ -97,8 +63,19 @@
   const lastFullRefresh = $derived(viewState.lastFullRefreshAt ?? undefined);
   const platform = desktopPlatform();
   const shortcuts = shortcutLabels(platform);
+  const settingsController = new SettingsController((message) => (settingsError = message));
+  const settingsState = $derived(settingsController.state);
+  const updates = new UpdateController();
+  const windowController = createWindowController({
+    screen: () => screen,
+    refreshing: () => anyRefreshing,
+    reordering: () => reordering,
+    reducedMotion: () => reducedMotion,
+    onError: (message) => (settingsError = message),
+  });
 
   $effect(() => {
+    if (!settingsState) return;
     const root = document.documentElement;
     if (settingsState.settings.theme === 'system') delete root.dataset.theme;
     else root.dataset.theme = settingsState.settings.theme;
@@ -106,7 +83,7 @@
   });
 
   $effect(() => {
-    if (!automaticUpdatesReady || !settingsState.settings.autoCheckUpdates) return;
+    if (!automaticUpdatesReady || !settingsState?.settings.autoCheckUpdates) return;
     const delay = automaticUpdateDelay(settingsState.settings.lastUpdateCheckAt);
     let interval: ReturnType<typeof setInterval> | undefined;
     const timer = setTimeout(() => {
@@ -120,87 +97,13 @@
   });
 
   function scheduleWindowFit() {
-    if (
-      typeof window === 'undefined' ||
-      !('__TAURI_INTERNALS__' in window) ||
-      !windowResizeAvailable
-    )
-      return;
-    if (reordering || shouldDeferPanelFit(screen, anyRefreshing)) {
-      window.cancelAnimationFrame(measureFrame);
-      window.cancelAnimationFrame(resizeFrame);
-      resizeGeneration += 1;
-      return;
-    }
-    window.cancelAnimationFrame(measureFrame);
-    measureFrame = window.requestAnimationFrame(() => void fitWindowToScreen());
-  }
-
-  async function fitWindowToScreen() {
-    if (reordering || shouldDeferPanelFit(screen, anyRefreshing)) return;
-    const page = document.querySelector<HTMLElement>(`.screen-page[data-screen="${screen}"]`);
-    const content = document.querySelector<HTMLElement>('.content');
-    const stage = document.querySelector<HTMLElement>('.screen-stage');
-    const header = document.querySelector<HTMLElement>('.screen-header');
-    const footer = document.querySelector<HTMLElement>('.footer');
-    if (!page || !content || !stage) return;
-    const pageHeight = page.scrollHeight;
-    stage.style.height = `${pageHeight}px`;
-    const contentStyle = window.getComputedStyle(content);
-    const contentPadding =
-      Number.parseFloat(contentStyle.paddingTop) + Number.parseFloat(contentStyle.paddingBottom);
-    const idealHeight =
-      pageHeight + contentPadding + (header?.offsetHeight ?? 0) + (footer?.offsetHeight ?? 0);
-    const appWindow = getCurrentWindow();
-    const monitor = await currentMonitor().catch(() => null);
-    const workAreaHeight = monitor
-      ? monitor.workArea.size.height / monitor.scaleFactor
-      : window.screen.availHeight;
-    const scale = await appWindow.scaleFactor();
-    const current = (await appWindow.innerSize()).height / scale;
-    const contentTarget = panelTargetHeight(idealHeight, workAreaHeight);
-    const target = screenPanelHeight(
-      screen,
-      contentTarget,
-      dashboardPanelHeight ?? Math.round(current),
-    );
-    if (screen === 'dashboard') dashboardPanelHeight = target;
-    const generation = ++resizeGeneration;
-    window.cancelAnimationFrame(resizeFrame);
-    if (reducedMotion) {
-      await resizeWindow(target);
-      return;
-    }
-    if (Math.abs(current - target) < 1) return;
-    const started = performance.now();
-    const duration = 420;
-    const animate = (time: number) => {
-      if (generation !== resizeGeneration) return;
-      const progress = Math.min(1, (time - started) / duration);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      void resizeWindow(Math.round(current + (target - current) * eased));
-      if (progress < 1) {
-        resizeFrame = window.requestAnimationFrame(animate);
-      }
-    };
-    resizeFrame = window.requestAnimationFrame(animate);
-  }
-
-  async function resizeWindow(height: number) {
-    try {
-      await invoke('resize_main_window', { height });
-      return true;
-    } catch {
-      windowResizeAvailable = false;
-      settingsError = 'OpenQuota window could not adapt to its content.';
-      return false;
-    }
+    windowController.scheduleFit();
   }
 
   function closePopup() {
     resetTransientUi();
     navigate('dashboard');
-    void invoke('dismiss_main_window');
+    void dismissMainWindow();
   }
   function resetTransientUi() {
     showAbout = false;
@@ -211,7 +114,7 @@
     else if (content) content.scrollTop = 0;
   }
   function quitApp() {
-    void invoke('quit_app');
+    void quitApplication();
   }
   function screenRank(value: Screen) {
     if (value.startsWith('provider:')) return 2;
@@ -229,28 +132,8 @@
     else closePopup();
   }
   function saveSettings(next: AppSettings) {
-    const revision = ++settingsRevision;
-    pendingSettingsSaves += 1;
-    settingsState = { ...settingsState, settings: next };
     settingsError = null;
-    saveQueue = saveQueue
-      .then(async () => {
-        const saved = await invoke<SettingsViewState>('save_app_settings', { settings: next });
-        if (revision === settingsRevision) settingsState = saved;
-      })
-      .catch(async (error: unknown) => {
-        if (revision === settingsRevision) {
-          settingsError = typeof error === 'string' ? error : 'Settings could not be saved.';
-          try {
-            settingsState = await invoke<SettingsViewState>('get_app_settings');
-          } catch {
-            settingsError = 'Settings could not be saved or reloaded.';
-          }
-        }
-      })
-      .finally(() => {
-        pendingSettingsSaves -= 1;
-      });
+    settingsController.save(next);
   }
   function cloneSettings(value: AppSettings): AppSettings {
     return JSON.parse(JSON.stringify(value)) as AppSettings;
@@ -261,28 +144,30 @@
     shareTimer = setTimeout(() => (confirmationMessage = null), 1800);
   }
   function saveCustomization(next: AppSettings) {
+    const current = settingsState;
+    if (!current) return;
     if (customizationGestureStart) {
-      settingsState = { ...settingsState, settings: next };
+      settingsController.setState({ ...current, settings: next });
       settingsError = null;
       return;
     }
-    customizationHistory = [
-      ...customizationHistory.slice(-19),
-      cloneSettings(settingsState.settings),
-    ];
+    customizationHistory = [...customizationHistory.slice(-19), cloneSettings(current.settings)];
     saveSettings(next);
   }
   function beginCustomizationGesture() {
+    if (!settingsState) return;
     customizationGestureStart ??= cloneSettings(settingsState.settings);
     reordering = true;
     scheduleWindowFit();
   }
   function endCustomizationGesture(moved: boolean, cancelled = false) {
+    const current = settingsState;
+    if (!current) return;
     const start = customizationGestureStart;
-    const final = settingsState.settings;
+    const final = current.settings;
     customizationGestureStart = null;
     reordering = false;
-    if (start && moved && cancelled) settingsState = { ...settingsState, settings: start };
+    if (start && moved && cancelled) settingsController.setState({ ...current, settings: start });
     else if (start && moved) {
       customizationHistory = [...customizationHistory.slice(-19), start];
       saveSettings(final);
@@ -306,7 +191,7 @@
       ),
     };
     try {
-      viewState = await invoke<UsageViewState>('refresh_usage');
+      viewState = await refreshUsage();
     } catch {
       viewState = {
         providers: Object.fromEntries(
@@ -329,7 +214,7 @@
       },
     };
     try {
-      viewState = await invoke<UsageViewState>('refresh_provider_usage', { providerId });
+      viewState = await refreshProviderUsage(providerId);
     } catch {
       const failed = viewState.providers[providerId];
       if (failed) {
@@ -344,33 +229,32 @@
     }
   }
   async function resetCustomization() {
+    const current = settingsState;
+    if (!current) return;
     if (
       !window.confirm(
         "Turns providers back on for the tools you have installed and resets every provider's metrics and order. Are you sure?",
       )
     )
       return;
-    customizationHistory = [
-      ...customizationHistory.slice(-19),
-      cloneSettings(settingsState.settings),
-    ];
+    customizationHistory = [...customizationHistory.slice(-19), cloneSettings(current.settings)];
     try {
-      settingsState = await invoke<SettingsViewState>('reset_customization');
+      settingsController.setState(await resetCustomizationCommand());
     } catch {
       settingsError = 'Customization could not be reset.';
     }
   }
-  function resetProviderCustomization(providerId: string) {
-    const provider = settingsState.settings.providers.find((item) => item.id === providerId);
+  async function resetProviderCustomization(providerId: string) {
+    const current = settingsState;
+    if (!current) return;
+    const provider = current.settings.providers.find((item) => item.id === providerId);
     if (!provider) return;
-    saveCustomization({
-      ...settingsState.settings,
-      providers: settingsState.settings.providers.map((item) =>
-        item.id === providerId
-          ? { ...item, expanded: false, metrics: defaultMetricLayout(providerId) }
-          : item,
-      ),
-    });
+    customizationHistory = [...customizationHistory.slice(-19), cloneSettings(current.settings)];
+    try {
+      settingsController.setState(await resetProviderCustomizationCommand(providerId));
+    } catch {
+      settingsError = `${providerDisplayName(providerId)} customization could not be reset.`;
+    }
   }
   function canvasPalette() {
     const styles = getComputedStyle(document.documentElement);
@@ -418,12 +302,14 @@
     showConfirmation('Copied to clipboard');
   }
   async function shareProvider(providerId: string) {
+    const current = settingsState;
+    if (!current) return;
     const card = document.querySelector<HTMLElement>(`[data-provider-id="${providerId}"]`);
     if (!card) return;
     const provider = viewState.providers[providerId]?.snapshot;
     const snapshot = [providerDisplayName(providerId), card.innerText.trim()].join('\n');
     try {
-      const layout = settingsState.settings.providers.find((item) => item.id === providerId);
+      const layout = current.settings.providers.find((item) => item.id === providerId);
       const visible =
         layout?.metrics.filter(
           (metric) =>
@@ -545,6 +431,8 @@
     }
   }
   async function shareTotalSpend(projection: SpendProjection) {
+    const current = settingsState;
+    if (!current) return false;
     const card = document.querySelector<HTMLElement>('[data-total-spend]');
     if (!card) return false;
     try {
@@ -554,8 +442,8 @@
       const context = canvas.getContext('2d');
       if (!context) throw new Error('Canvas unavailable');
       const palette = canvasPalette();
-      const metric = settingsState.settings.totalSpendMetric;
-      const period = settingsState.settings.totalSpendPeriod;
+      const metric = current.settings.totalSpendMetric;
+      const period = current.settings.totalSpendPeriod;
       const display = (value: number | null) => {
         if (value === null) return '—';
         if (metric === 'tokens')
@@ -673,7 +561,7 @@
   }
   async function copyDataPath() {
     try {
-      const path = await invoke<string>('get_app_data_path');
+      const path = await getAppDataPath();
       await navigator.clipboard.writeText(path);
       showConfirmation('Data path copied');
     } catch {
@@ -721,96 +609,33 @@
     }
   }
   async function requestNotifications() {
+    const current = settingsState;
+    if (!current) return;
     try {
-      const currentSettings = settingsState.settings;
-      const permissionState = await invoke<SettingsViewState>('request_notification_permission');
-      settingsState = { ...permissionState, settings: currentSettings };
+      const currentSettings = current.settings;
+      const permissionState = await requestNotificationPermission();
+      settingsController.setState({ ...permissionState, settings: currentSettings });
     } catch {
       settingsError = 'Notification permission could not be requested.';
     }
   }
   async function openNotificationSettings() {
     try {
-      await invoke('open_notification_settings');
+      await openSystemNotificationSettings();
     } catch {
       settingsError = 'Notification settings could not be opened on this system.';
     }
   }
   async function checkForUpdates(manual = false) {
-    if (checkingUpdate || installingUpdate) return;
-    checkingUpdate = true;
-    if (manual) updateError = null;
-    try {
-      const status = await invoke<UpdateStatus>('check_for_updates');
-      updateStatus = status;
-      saveSettings({
-        ...settingsState.settings,
-        lastUpdateCheckAt: new Date().toISOString(),
-      });
-      if (manual) {
-        showConfirmation(
-          status.available
-            ? status.version
-              ? `OpenQuota ${status.version} is available.`
-              : 'An OpenQuota update is available.'
-            : `OpenQuota ${status.currentVersion} is up to date.`,
-        );
-      }
-    } catch (error) {
-      if (manual) {
-        updateError = updateFailure(error, 'Updates could not be checked.');
-      }
-    } finally {
-      checkingUpdate = false;
-    }
-  }
-  async function installUpdate() {
-    if (installingUpdate || checkingUpdate) return;
-    installingUpdate = true;
-    updateProgress = { phase: 'downloading', downloaded: 0, total: null, percent: null };
-    updateError = null;
-    try {
-      await invoke('install_update');
-    } catch (error) {
-      updateError = updateFailure(error, 'The update could not be installed.');
-      installingUpdate = false;
-      updateProgress = null;
-    }
-  }
-  async function openUpdatePage() {
-    try {
-      await invoke('open_update_page');
-    } catch (error) {
-      updateError = updateFailure(error, 'The OpenQuota download page could not be opened.');
-    }
-  }
-  function updateFailure(error: unknown, fallback: string): UpdateFailure {
-    if (error && typeof error === 'object') {
-      const candidate = error as Partial<UpdateFailure>;
-      if (typeof candidate.message === 'string') {
-        return {
-          code: typeof candidate.code === 'string' ? candidate.code : 'update_failed',
-          message: candidate.message,
-          action: typeof candidate.action === 'string' ? candidate.action : 'Try again later.',
-          retryable: candidate.retryable !== false,
-        };
-      }
-    }
-    return {
-      code: 'update_failed',
-      message: typeof error === 'string' ? error : fallback,
-      action: 'Try again or download the installer from the release page.',
-      retryable: true,
-    };
-  }
-  function nextUpdateLabel(value: string | undefined) {
-    if (!value) return 'Waiting for first update';
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return 'Next update unavailable';
-    const seconds = Math.max(0, Math.ceil((date.getTime() + 300_000 - now) / 1000));
-    return seconds >= 60
-      ? `Next update in ${Math.ceil(seconds / 60)}m`
-      : `Next update in ${seconds}s`;
+    if (!settingsState) return;
+    await updates.check(
+      manual,
+      (checkedAt) => {
+        if (!settingsState) return;
+        saveSettings({ ...settingsState.settings, lastUpdateCheckAt: checkedAt });
+      },
+      showConfirmation,
+    );
   }
 
   onMount(() => {
@@ -823,12 +648,7 @@
     updateMotionPreference();
     motionQuery.addEventListener('change', updateMotionPreference);
     const refreshPermissionState = () => {
-      if (pendingSettingsSaves !== 0) return;
-      void invoke<SettingsViewState>('get_app_settings')
-        .then((state) => {
-          if (pendingSettingsSaves === 0) settingsState = state;
-        })
-        .catch(() => undefined);
+      void settingsController.refreshIfIdle();
     };
     window.addEventListener('focus', refreshPermissionState);
 
@@ -886,36 +706,31 @@
     document.addEventListener('keydown', handleKeydown);
     const clock = window.setInterval(() => (now = Date.now()), 30_000);
     const cleanup: Array<() => void> = [];
-    void listen<UsageViewState>('usage-state', (event) => (viewState = event.payload)).then(
+    void onUsageState((state) => (viewState = state)).then((stop) => cleanup.push(stop));
+    void onSettingsState((state) => {
+      settingsController.acceptExternalState(state);
+    }).then((stop) => cleanup.push(stop));
+    void onOpenScreen((target) => navigate(target === 'settings' ? 'settings' : 'customize')).then(
       (stop) => cleanup.push(stop),
     );
-    void listen<SettingsViewState>('settings-state', (event) => {
-      if (pendingSettingsSaves === 0) settingsState = event.payload;
-    }).then((stop) => cleanup.push(stop));
-    void listen<string>('open-screen', (event) =>
-      navigate(event.payload === 'settings' ? 'settings' : 'customize'),
-    ).then((stop) => cleanup.push(stop));
-    void listen('popup-hidden', () => {
+    void onPopupHidden(() => {
       resetTransientUi();
       navigate('dashboard');
     }).then((stop) => cleanup.push(stop));
-    void listen<UpdateProgress>('update-progress', (event) => {
-      updateProgress = event.payload;
+    void onUpdateProgress((progress) => {
+      updates.setProgress(progress);
     }).then((stop) => cleanup.push(stop));
-    void invoke<UsageViewState>('get_usage_state')
-      .then((state) => (viewState = state))
-      .catch(() => (settingsError = 'OpenQuota backend is unavailable.'));
-    void invoke<SettingsViewState>('get_app_settings')
+    void getBootstrapState()
       .then((state) => {
-        settingsState = state;
+        viewState = state.usage;
+        settingsController.setState(state.settings);
         automaticUpdatesReady = true;
       })
-      .catch(() => (settingsError = 'Settings are unavailable.'));
+      .catch(() => (settingsError = 'OpenQuota backend is unavailable.'));
     return () => {
       document.removeEventListener('keydown', handleKeydown);
       window.clearInterval(clock);
-      window.cancelAnimationFrame(measureFrame);
-      window.cancelAnimationFrame(resizeFrame);
+      windowController.dispose();
       motionQuery.removeEventListener('change', updateMotionPreference);
       window.removeEventListener('focus', refreshPermissionState);
       document.documentElement.removeAttribute('data-reduced-motion');
@@ -937,220 +752,232 @@
   <p id="reorder-instructions" class="sr-only">
     Drag to reorder. With a keyboard, use Alt plus Up Arrow or Alt plus Down Arrow.
   </p>
-  {#if screen !== 'dashboard'}
-    <header class="screen-header app-top-bar">
-      <button type="button" onclick={back} aria-label="Back" data-tooltip="Back">
-        <Icon name="back" size={16} strokeWidth={2.2} />
-      </button>
-      <h1>{topBarTitle()}</h1>
-      {#if screen === 'customize'}
-        <button
-          class="text-button"
-          type="button"
-          onclick={resetCustomization}
-          aria-label="Reset all customization"
-          data-tooltip="Reset All Customization"
-          ><Icon name="reset" size={15} strokeWidth={2} /></button
-        >
-      {:else if screen.startsWith('provider:')}
-        <button
-          class="text-button"
-          type="button"
-          onclick={() => resetProviderCustomization(screen.slice(9))}
-          aria-label={`Reset ${topBarTitle()}`}
-          data-tooltip={`Reset ${topBarTitle()}`}
-          ><Icon name="reset" size={15} strokeWidth={2} /></button
-        >
-      {:else}
-        <span></span>
-      {/if}
-    </header>
-  {/if}
-  <div class="content" class:content--chrome={screen !== 'dashboard'}>
-    {#if settingsError}<div class="notice notice--blocking" role="alert">{settingsError}</div>{/if}
-    <div class="screen-stage">
-      {#key screen}
-        <div
-          class="screen-page"
-          data-screen={screen}
-          in:horizontalPageTransition={{
-            direction: slideDirection,
-            ...springMotion(reducedMotion || !slidePageTransition),
-          }}
-          out:horizontalPageTransition={{
-            direction: -slideDirection,
-            ...springMotion(reducedMotion || !slidePageTransition),
-          }}
-        >
-          {#if screen === 'dashboard'}
-            <Dashboard
-              {viewState}
-              settings={settingsState.settings}
-              {now}
-              onSettingsChange={saveSettings}
-              onCustomizationChange={saveCustomization}
-              onReorderStart={beginCustomizationGesture}
-              onReorderEnd={endCustomizationGesture}
-              onCustomize={() => navigate('customize')}
-              onOpenProviderCustomize={(id) => navigate(`provider:${id}`)}
-              onShare={shareProvider}
-              onShareTotal={shareTotalSpend}
-              onRefresh={refreshProvider}
-              {reducedMotion}
-              {updateStatus}
-              {installingUpdate}
-              {updateProgress}
-              {updateError}
-              onInstallUpdate={installUpdate}
-              onOpenUpdatePage={openUpdatePage}
-            />
-          {:else if screen === 'settings'}
-            <SettingsScreen
-              settingsView={settingsState}
-              onChange={saveSettings}
-              onRequestNotifications={requestNotifications}
-              onOpenNotificationSettings={openNotificationSettings}
-              {updateError}
-              {checkingUpdate}
-              onCheckForUpdates={() => void checkForUpdates(true)}
-              onCustomize={() => navigate('customize')}
-              onCopyDataPath={copyDataPath}
-            />
-          {:else if screen === 'customize'}
-            <CustomizeProviderList
-              settings={settingsState.settings}
-              onOpen={(id) => navigate(`provider:${id}`)}
-              onChange={saveCustomization}
-              onReorderStart={beginCustomizationGesture}
-              onReorderEnd={endCustomizationGesture}
-              onSettings={() => navigate('settings')}
-              {reducedMotion}
-            />
-          {:else if screen.startsWith('provider:')}
-            <CustomizeProviderDetail
-              settings={settingsState.settings}
-              providerId={screen.slice(9)}
-              onChange={saveCustomization}
-              onReorderStart={beginCustomizationGesture}
-              onReorderEnd={endCustomizationGesture}
-              {reducedMotion}
-            />
-          {/if}
-        </div>
-      {/key}
-    </div>
-  </div>
-
-  {#if screen === 'dashboard' || screen === 'settings'}
-    <footer class="footer">
-      <button
-        class="identity"
-        type="button"
-        onclick={refresh}
-        disabled={anyRefreshing}
-        aria-label="Refresh all provider usage"
-      >
-        <span>OpenQuota {appVersion}</span><small
-          >{anyRefreshing ? 'Updating…' : nextUpdateLabel(lastFullRefresh)}</small
-        >
-      </button>
-      {#if screen === 'dashboard'}
-        <details class="options-menu" bind:this={optionsMenuElement}>
-          <summary aria-label="Open options" onkeydown={handleOptionsKey}
-            ><span>Options</span><Icon name="chevron-down" size={11} strokeWidth={2.2} /></summary
+  {#if settingsState}
+    {#if screen !== 'dashboard'}
+      <header class="screen-header app-top-bar">
+        <button type="button" onclick={back} aria-label="Back" data-tooltip="Back">
+          <Icon name="back" size={16} strokeWidth={2.2} />
+        </button>
+        <h1>{topBarTitle()}</h1>
+        {#if screen === 'customize'}
+          <button
+            class="text-button"
+            type="button"
+            onclick={resetCustomization}
+            aria-label="Reset all customization"
+            data-tooltip="Reset All Customization"
+            ><Icon name="reset" size={15} strokeWidth={2} /></button
           >
+        {:else if screen.startsWith('provider:')}
+          <button
+            class="text-button"
+            type="button"
+            onclick={() => resetProviderCustomization(screen.slice(9))}
+            aria-label={`Reset ${topBarTitle()}`}
+            data-tooltip={`Reset ${topBarTitle()}`}
+            ><Icon name="reset" size={15} strokeWidth={2} /></button
+          >
+        {:else}
+          <span></span>
+        {/if}
+      </header>
+    {/if}
+    <div class="content" class:content--chrome={screen !== 'dashboard'}>
+      {#if settingsError}<div class="notice notice--blocking" role="alert">
+          {settingsError}
+        </div>{/if}
+      <div class="screen-stage">
+        {#key screen}
           <div
-            class="options-menu__panel"
-            role="menu"
-            aria-label="Options menu"
-            tabindex="-1"
-            onkeydown={handleOptionsKey}
-            onclick={(event) => {
-              if (event.target instanceof Element && event.target.closest('button')) {
-                closeOptionsMenu();
-              }
+            class="screen-page"
+            data-screen={screen}
+            in:horizontalPageTransition={{
+              direction: slideDirection,
+              ...springMotion(reducedMotion || !slidePageTransition),
+            }}
+            out:horizontalPageTransition={{
+              direction: -slideDirection,
+              ...springMotion(reducedMotion || !slidePageTransition),
             }}
           >
-            <button
-              class="menu-item"
-              type="button"
-              aria-label="Customize"
-              onclick={() => navigate('customize')}
-              ><Icon name="sliders" /><span>Customize</span><kbd>↩</kbd></button
-            >
-            <button
-              class="menu-item"
-              type="button"
-              aria-label="Settings"
-              onclick={() => navigate('settings')}
-              ><Icon name="gear" /><span>Settings</span><kbd>{shortcuts.settings}</kbd></button
-            >
-            <hr />
-            <details
-              class="share-menu"
-              ontoggle={(event) => (shareMenuOpen = event.currentTarget.open)}
-            >
-              <summary
-                ><span class="share-menu__direction"><Icon name="chevron-left" size={12} /></span
-                ><span>Share Screenshot</span></summary
-              >
-              <div>
-                {#if shareMenuOpen}
-                  {#each settingsState.settings.providers.filter((provider) => provider.enabled) as provider (provider.id)}
-                    <button type="button" onclick={() => shareProvider(provider.id)}
-                      >{providerDisplayName(provider.id)}</button
-                    >
-                  {/each}
-                {/if}
-              </div>
-            </details>
-            <button class="menu-item" type="button" onclick={() => void checkForUpdates(true)}
-              ><Icon name="refresh" /><span>Check for Updates…</span></button
-            >
-            <hr />
-            <button class="menu-item" type="button" onclick={() => (showAbout = true)}
-              ><Icon name="about" /><span>About OpenQuota</span></button
-            >
-            <button
-              class="menu-item menu-item--danger"
-              type="button"
-              aria-label="Quit OpenQuota"
-              onclick={quitApp}
-              ><Icon name="power" /><span>Quit OpenQuota</span><kbd>{shortcuts.quit}</kbd></button
-            >
+            {#if screen === 'dashboard'}
+              <Dashboard
+                {viewState}
+                settings={settingsState.settings}
+                {now}
+                onSettingsChange={saveSettings}
+                onCustomizationChange={saveCustomization}
+                onReorderStart={beginCustomizationGesture}
+                onReorderEnd={endCustomizationGesture}
+                onCustomize={() => navigate('customize')}
+                onOpenProviderCustomize={(id) => navigate(`provider:${id}`)}
+                onShare={shareProvider}
+                onShareTotal={shareTotalSpend}
+                onRefresh={refreshProvider}
+                {reducedMotion}
+                updateStatus={updates.status}
+                installingUpdate={updates.installing}
+                updateProgress={updates.progress}
+                updateError={updates.error}
+                onInstallUpdate={() => updates.install()}
+                onOpenUpdatePage={() => updates.openDownloadPage()}
+              />
+            {:else if screen === 'settings'}
+              <SettingsScreen
+                settingsView={settingsState}
+                onChange={saveSettings}
+                onRequestNotifications={requestNotifications}
+                onOpenNotificationSettings={openNotificationSettings}
+                updateError={updates.error}
+                checkingUpdate={updates.checking}
+                onCheckForUpdates={() => void checkForUpdates(true)}
+                onCustomize={() => navigate('customize')}
+                onCopyDataPath={copyDataPath}
+              />
+            {:else if screen === 'customize'}
+              <CustomizeProviderList
+                settings={settingsState.settings}
+                onOpen={(id) => navigate(`provider:${id}`)}
+                onChange={saveCustomization}
+                onReorderStart={beginCustomizationGesture}
+                onReorderEnd={endCustomizationGesture}
+                onSettings={() => navigate('settings')}
+                {reducedMotion}
+              />
+            {:else if screen.startsWith('provider:')}
+              <CustomizeProviderDetail
+                settings={settingsState.settings}
+                providerId={screen.slice(9)}
+                onChange={saveCustomization}
+                onReorderStart={beginCustomizationGesture}
+                onReorderEnd={endCustomizationGesture}
+                {reducedMotion}
+              />
+            {/if}
           </div>
-        </details>
-      {/if}
-    </footer>
-  {/if}
-
-  {#if confirmationMessage}
-    <div class="transient-pill" role="status">
-      <Icon name="check" size={15} strokeWidth={2.4} />{confirmationMessage}
-    </div>
-  {/if}
-
-  {#if showAbout}
-    <div class="about-backdrop" role="presentation" onclick={closeAboutFromBackdrop}>
-      <div
-        class="about-card"
-        role="dialog"
-        tabindex="-1"
-        aria-modal="true"
-        aria-label="About OpenQuota"
-      >
-        <button
-          class="about-card__close"
-          type="button"
-          aria-label="Close About"
-          onclick={() => (showAbout = false)}
-          ><Icon name="close" size={11} strokeWidth={2.3} /></button
-        >
-        <OpenQuotaMark size={44} />
-        <h1>OpenQuota</h1>
-        <p>Version {appVersion}</p>
-        <small>Private, local usage monitoring for your AI coding tools.</small>
+        {/key}
       </div>
+    </div>
+
+    {#if screen === 'dashboard' || screen === 'settings'}
+      <footer class="footer">
+        <button
+          class="identity"
+          type="button"
+          onclick={refresh}
+          disabled={anyRefreshing}
+          aria-label="Refresh all provider usage"
+        >
+          <span>OpenQuota {appVersion}</span><small
+            >{anyRefreshing ? 'Updating…' : nextUpdateLabel(lastFullRefresh, now)}</small
+          >
+        </button>
+        {#if screen === 'dashboard'}
+          <details class="options-menu" bind:this={optionsMenuElement}>
+            <summary aria-label="Open options" onkeydown={handleOptionsKey}
+              ><span>Options</span><Icon name="chevron-down" size={11} strokeWidth={2.2} /></summary
+            >
+            <div
+              class="options-menu__panel"
+              role="menu"
+              aria-label="Options menu"
+              tabindex="-1"
+              onkeydown={handleOptionsKey}
+              onclick={(event) => {
+                if (event.target instanceof Element && event.target.closest('button')) {
+                  closeOptionsMenu();
+                }
+              }}
+            >
+              <button
+                class="menu-item"
+                type="button"
+                aria-label="Customize"
+                onclick={() => navigate('customize')}
+                ><Icon name="sliders" /><span>Customize</span><kbd>↩</kbd></button
+              >
+              <button
+                class="menu-item"
+                type="button"
+                aria-label="Settings"
+                onclick={() => navigate('settings')}
+                ><Icon name="gear" /><span>Settings</span><kbd>{shortcuts.settings}</kbd></button
+              >
+              <hr />
+              <details
+                class="share-menu"
+                ontoggle={(event) => (shareMenuOpen = event.currentTarget.open)}
+              >
+                <summary
+                  ><span class="share-menu__direction"><Icon name="chevron-left" size={12} /></span
+                  ><span>Share Screenshot</span></summary
+                >
+                <div>
+                  {#if shareMenuOpen}
+                    {#each settingsState.settings.providers.filter((provider) => provider.enabled) as provider (provider.id)}
+                      <button type="button" onclick={() => shareProvider(provider.id)}
+                        >{providerDisplayName(provider.id)}</button
+                      >
+                    {/each}
+                  {/if}
+                </div>
+              </details>
+              <button class="menu-item" type="button" onclick={() => void checkForUpdates(true)}
+                ><Icon name="refresh" /><span>Check for Updates…</span></button
+              >
+              <hr />
+              <button class="menu-item" type="button" onclick={() => (showAbout = true)}
+                ><Icon name="about" /><span>About OpenQuota</span></button
+              >
+              <button
+                class="menu-item menu-item--danger"
+                type="button"
+                aria-label="Quit OpenQuota"
+                onclick={quitApp}
+                ><Icon name="power" /><span>Quit OpenQuota</span><kbd>{shortcuts.quit}</kbd></button
+              >
+            </div>
+          </details>
+        {/if}
+      </footer>
+    {/if}
+
+    {#if confirmationMessage}
+      <div class="transient-pill" role="status">
+        <Icon name="check" size={15} strokeWidth={2.4} />{confirmationMessage}
+      </div>
+    {/if}
+
+    {#if showAbout}
+      <div class="about-backdrop" role="presentation" onclick={closeAboutFromBackdrop}>
+        <div
+          class="about-card"
+          role="dialog"
+          tabindex="-1"
+          aria-modal="true"
+          aria-label="About OpenQuota"
+        >
+          <button
+            class="about-card__close"
+            type="button"
+            aria-label="Close About"
+            onclick={() => (showAbout = false)}
+            ><Icon name="close" size={11} strokeWidth={2.3} /></button
+          >
+          <OpenQuotaMark size={44} />
+          <h1>OpenQuota</h1>
+          <p>Version {appVersion}</p>
+          <small>Private, local usage monitoring for your AI coding tools.</small>
+        </div>
+      </div>
+    {/if}
+  {:else}
+    <div class="content">
+      {#if settingsError}
+        <div class="notice notice--blocking" role="alert">{settingsError}</div>
+      {:else}
+        <p class="empty-row">Loading OpenQuota…</p>
+      {/if}
     </div>
   {/if}
 </main>

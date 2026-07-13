@@ -163,7 +163,18 @@ impl crate::providers::UsageProvider for AntigravityProvider {
         auth::has_local_credentials()
     }
 
-    fn refresh(&self) -> Result<ProviderSnapshot, String> {
-        self.refresh_inner().map_err(|error| error.to_string())
+    fn refresh(&self) -> Result<ProviderSnapshot, crate::providers::ProviderError> {
+        self.refresh_inner().map_err(|error| {
+            use crate::providers::ProviderErrorKind as Kind;
+
+            let kind = match error {
+                AntigravityError::NotSignedIn | AntigravityError::AuthExpired => {
+                    Kind::Authentication
+                }
+                AntigravityError::Unavailable => Kind::Network,
+                AntigravityError::InvalidResponse => Kind::InvalidResponse,
+            };
+            crate::providers::ProviderError::from_display(kind, error)
+        })
     }
 }

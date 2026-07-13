@@ -79,34 +79,6 @@ export function providerDisplayName(id: string) {
   return id;
 }
 
-export function defaultMetricLayout(providerId: string) {
-  const ids = metricDefinitions.filter((metric) => metric.id.startsWith(`${providerId}.`));
-  return ids.map((definition) => {
-    const secondary =
-      providerId === 'claude'
-        ? ['sonnet', 'fable', 'today', 'yesterday', 'last30'].some((suffix) =>
-            definition.id.endsWith(`.${suffix}`),
-          )
-        : providerId === 'antigravity'
-          ? definition.id.endsWith('.claude') || definition.id.endsWith('.claudeWeekly')
-          : ['today', 'yesterday', 'last30'].some((suffix) => definition.id.endsWith(`.${suffix}`));
-    const disabled =
-      providerId === 'claude' &&
-      (definition.id.endsWith('.sonnet') || definition.id.endsWith('.fable'));
-    const pinned =
-      definition.id.endsWith('.session') ||
-      definition.id.endsWith('.weekly') ||
-      definition.id.endsWith('.geminiPro') ||
-      definition.id.endsWith('.geminiWeekly');
-    return {
-      id: definition.id,
-      enabled: !disabled,
-      section: secondary ? ('onDemand' as const) : ('alwaysVisible' as const),
-      pinned,
-    };
-  });
-}
-
 export function metricDefinition(id: string) {
   return metricDefinitions.find((metric) => metric.id === id);
 }

@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import css from '../app.css?raw';
+import layoutCss from '../styles/layout.css?raw';
+import componentCss from '../styles/components.css?raw';
 import tauriConfigSource from '../../src-tauri/tauri.conf.json?raw';
 import { PANEL_MIN_HEIGHT, PANEL_SCREEN_FRACTION } from './panelSizing';
+
+const css = `${layoutCss}\n${componentCss}`;
 
 const tauriConfig = JSON.parse(tauriConfigSource) as {
   app: { windows: Array<{ width: number; minHeight: number }> };

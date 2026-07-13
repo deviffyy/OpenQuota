@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, HashMap},
     sync::{Arc, Mutex, RwLock},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use chrono::Utc;
@@ -9,12 +9,10 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use crate::{
     models::{ProviderSnapshot, ProviderViewState, SnapshotSource},
-    providers::UsageProvider,
+    policy::{REFRESH_INTERVAL, STALE_AFTER},
+    providers::{ProviderError, ProviderErrorKind, UsageProvider},
     storage::Storage,
 };
-
-const REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
-const STALE_AFTER: chrono::Duration = chrono::Duration::minutes(10);
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -105,7 +103,10 @@ impl ProviderService {
         let result = tauri::async_runtime::spawn_blocking(move || provider.refresh()).await;
         let refresh_result = match result {
             Ok(result) => result,
-            Err(_) => Err("Provider refresh stopped unexpectedly.".to_owned()),
+            Err(_) => Err(ProviderError::new(
+                ProviderErrorKind::Internal,
+                "Provider refresh stopped unexpectedly.",
+            )),
         };
         let state = self.apply_refresh_result(provider_id, refresh_result);
         if state.error.is_none() {
@@ -158,7 +159,7 @@ impl ProviderService {
     fn apply_refresh_result(
         &self,
         provider_id: &str,
-        result: Result<ProviderSnapshot, String>,
+        result: Result<ProviderSnapshot, ProviderError>,
     ) -> ProviderViewState {
         let cache_error = result
             .as_ref()
@@ -190,7 +191,10 @@ impl ProviderService {
     }
 }
 
-fn merge_refresh_result(state: &mut ProviderViewState, result: Result<ProviderSnapshot, String>) {
+fn merge_refresh_result(
+    state: &mut ProviderViewState,
+    result: Result<ProviderSnapshot, ProviderError>,
+) {
     match result {
         Ok(snapshot) => {
             state.snapshot = Some(snapshot);
@@ -199,7 +203,7 @@ fn merge_refresh_result(state: &mut ProviderViewState, result: Result<ProviderSn
             state.stale = false;
         }
         Err(error) => {
-            state.error = Some(error);
+            state.error = Some(error.to_string());
             state.stale = state.snapshot.is_some();
         }
     }
@@ -223,7 +227,7 @@ mod tests {
     use super::{merge_refresh_result, ProviderService};
     use crate::{
         models::{ProviderSnapshot, ProviderViewState, UsageHistory},
-        providers::UsageProvider,
+        providers::{ProviderError, ProviderErrorKind, UsageProvider},
         storage::Storage,
     };
 
@@ -242,7 +246,7 @@ mod tests {
             true
         }
 
-        fn refresh(&self) -> Result<ProviderSnapshot, String> {
+        fn refresh(&self) -> Result<ProviderSnapshot, ProviderError> {
             let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
             self.maximum.fetch_max(active, Ordering::SeqCst);
             thread::sleep(Duration::from_millis(75));
@@ -272,7 +276,10 @@ mod tests {
             snapshot: Some(snapshot.clone()),
             ..ProviderViewState::default()
         };
-        merge_refresh_result(&mut state, Err("offline".into()));
+        merge_refresh_result(
+            &mut state,
+            Err(ProviderError::new(ProviderErrorKind::Network, "offline")),
+        );
         assert_eq!(state.snapshot, Some(snapshot));
         assert!(state.stale);
         assert_eq!(state.error.as_deref(), Some("offline"));

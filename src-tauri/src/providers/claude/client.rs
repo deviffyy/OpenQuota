@@ -20,9 +20,13 @@ pub struct ClaudeClient {
 
 impl ClaudeClient {
     pub fn new() -> Result<Self, ClaudeError> {
+        Self::with_timeout(std::time::Duration::from_secs(15))
+    }
+
+    fn with_timeout(timeout: std::time::Duration) -> Result<Self, ClaudeError> {
         Ok(Self {
             client: Client::builder()
-                .timeout(std::time::Duration::from_secs(15))
+                .timeout(timeout)
                 .build()
                 .map_err(|_| ClaudeError::ConnectionFailed)?,
         })
@@ -81,5 +85,78 @@ impl ClaudeClient {
             );
         }
         response.json().map_err(|_| ClaudeError::InvalidResponse)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use reqwest::StatusCode;
+
+    use super::ClaudeClient;
+    use crate::providers::{
+        claude::{auth::ClaudeOAuthConfig, ClaudeError},
+        test_http,
+    };
+
+    fn config(base: &str) -> ClaudeOAuthConfig {
+        ClaudeOAuthConfig {
+            usage_url: format!("{base}/usage"),
+            refresh_url: format!("{base}/token"),
+            client_id: "test-client".into(),
+        }
+    }
+
+    #[test]
+    fn usage_success_reads_json_and_retry_after() {
+        let base = test_http::serve_once(200, &[("retry-after", "120")], r#"{"plan":"max"}"#);
+        let (status, body, retry_after) = ClaudeClient::new()
+            .unwrap()
+            .fetch_usage("secret-token", &config(&base))
+            .unwrap();
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["plan"], "max");
+        assert_eq!(retry_after, Some(120));
+    }
+
+    #[test]
+    fn malformed_usage_and_timeout_return_safe_errors() {
+        let malformed = test_http::serve_once(200, &[], "secret-token: not-json");
+        let error = ClaudeClient::new()
+            .unwrap()
+            .fetch_usage("secret-token", &config(&malformed))
+            .unwrap_err();
+        assert!(matches!(error, ClaudeError::InvalidResponse));
+        assert!(!error.to_string().contains("secret-token"));
+
+        let timeout =
+            test_http::serve_once_after(Duration::from_millis(80), 200, &[], r#"{"plan":"max"}"#);
+        let error = ClaudeClient::with_timeout(Duration::from_millis(10))
+            .unwrap()
+            .fetch_usage("secret-token", &config(&timeout))
+            .unwrap_err();
+        assert!(matches!(error, ClaudeError::ConnectionFailed));
+        assert!(!error.to_string().contains("secret-token"));
+    }
+
+    #[test]
+    fn refresh_distinguishes_auth_failures_and_rate_limits() {
+        let forbidden = test_http::serve_once(403, &[], r#"{"error":"forbidden"}"#);
+        assert!(matches!(
+            ClaudeClient::new()
+                .unwrap()
+                .refresh_token("secret-refresh", &config(&forbidden)),
+            Err(ClaudeError::SessionExpired)
+        ));
+
+        let limited = test_http::serve_once(429, &[], r#"{"error":"slow_down"}"#);
+        assert!(matches!(
+            ClaudeClient::new()
+                .unwrap()
+                .refresh_token("secret-refresh", &config(&limited)),
+            Err(ClaudeError::RequestFailed(429))
+        ));
     }
 }

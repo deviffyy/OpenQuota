@@ -69,15 +69,7 @@ jobs:
             echo 'Missing required secret: TAURI_SIGNING_PRIVATE_KEY' >&2
             exit 1
           }
-          app_version="$(node -p "require('./src-tauri/tauri.conf.json').version")"
-          package_version="$(node -p "require('./package.json').version")"
-          cargo_version="$(sed -n '/^\[package\]/,/^\[/s/^version = "\([^"]*\)"/\1/p' src-tauri/Cargo.toml)"
-          test "$RELEASE_TAG" = "v$app_version" || {
-            echo "Tag $RELEASE_TAG does not match app version $app_version" >&2
-            exit 1
-          }
-          test "$package_version" = "$app_version"
-          test "$cargo_version" = "$app_version"
+          node verify-versions.js "$RELEASE_TAG"
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile

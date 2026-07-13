@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import css from '../app.css?raw';
+import layoutCss from '../styles/layout.css?raw';
+import sharedComponentCss from '../styles/components.css?raw';
+import tokensCss from '../styles/tokens.css?raw';
 import customizeDetail from './CustomizeProviderDetail.svelte?raw';
 import customizeList from './CustomizeProviderList.svelte?raw';
 import dashboard from './Dashboard.svelte?raw';
 import settings from './SettingsScreen.svelte?raw';
+
+const css = `${tokensCss}\n${layoutCss}\n${sharedComponentCss}`;
 
 describe('native UI language contract', () => {
   it('uses the platform system font and reference type sizes', () => {

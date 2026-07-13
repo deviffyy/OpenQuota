@@ -9,8 +9,3 @@ src-tauri/gen/
 Thumbs.db
 .idea/
 .vscode/
-
-# Local-only project material
-README.md
-docs/
-Example/

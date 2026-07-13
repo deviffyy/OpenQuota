@@ -139,6 +139,32 @@ impl SettingsService {
             .collect()
     }
 
+    pub fn enabled_provider_ids(&self) -> Vec<String> {
+        self.get()
+            .providers
+            .into_iter()
+            .filter(|provider| provider.enabled)
+            .map(|provider| provider.id)
+            .collect()
+    }
+
+    pub fn reset_provider(&self, provider_id: &str) -> Result<AppSettings, String> {
+        let mut settings = self.get();
+        let specs = provider_specs();
+        let (_, metric_specs) = specs
+            .iter()
+            .find(|(id, _)| *id == provider_id)
+            .ok_or_else(|| "Unknown provider.".to_owned())?;
+        let provider = settings
+            .providers
+            .iter_mut()
+            .find(|provider| provider.id == provider_id)
+            .ok_or_else(|| "Provider settings are unavailable.".to_owned())?;
+        provider.expanded = false;
+        provider.metrics = default_provider(provider_id, metric_specs, provider.detected).metrics;
+        self.update(settings)
+    }
+
     pub fn view_state(
         &self,
         notification_permission: impl Into<String>,
@@ -446,5 +472,42 @@ mod tests {
             })
             .unwrap();
         assert_eq!(payload, "{not-valid-json");
+    }
+
+    #[test]
+    fn provider_reset_uses_the_backend_catalog_and_preserves_provider_state() {
+        let directory = tempdir().unwrap();
+        let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
+        let detected = HashSet::from(["codex".to_owned()]);
+        let service = SettingsService::new(storage, &detected).unwrap();
+        let mut settings = service.get();
+        let codex = settings
+            .providers
+            .iter_mut()
+            .find(|provider| provider.id == "codex")
+            .unwrap();
+        codex.enabled = false;
+        codex.expanded = true;
+        codex.metrics.reverse();
+        codex.metrics[0].pinned = true;
+        service.update(settings).unwrap();
+
+        let reset = service.reset_provider("codex").unwrap();
+        let codex = reset
+            .providers
+            .iter()
+            .find(|provider| provider.id == "codex")
+            .unwrap();
+        let defaults = default_settings(&detected);
+        let default_codex = defaults
+            .providers
+            .iter()
+            .find(|provider| provider.id == "codex")
+            .unwrap();
+
+        assert!(!codex.enabled);
+        assert!(codex.detected);
+        assert!(!codex.expanded);
+        assert_eq!(codex.metrics, default_codex.metrics);
     }
 }

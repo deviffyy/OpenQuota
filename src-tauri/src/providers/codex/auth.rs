@@ -301,15 +301,18 @@ fn set_string(document: &mut Value, pointer: &str, value: &str) -> Result<(), Co
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::{fs, path::Path};
 
     use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
     use chrono::{Duration, TimeZone, Utc};
     use serde_json::json;
+    use tempfile::tempdir;
 
     use super::{
-        auth_document_has_credentials, candidate_paths, parse_auth_document, CodexAuthState,
+        auth_document_has_credentials, candidate_paths, parse_auth_document, AuthSource,
+        CodexAuthState,
     };
+    use crate::providers::codex::CodexError;
 
     #[test]
     fn codex_home_replaces_default_candidates() {
@@ -363,5 +366,33 @@ mod tests {
         assert!(!auth_document_has_credentials(
             &json!({"tokens":{"access_token":""}})
         ));
+    }
+
+    #[test]
+    fn credential_write_failures_are_typed_and_do_not_expose_tokens() {
+        let directory = tempdir().unwrap();
+        let blocked_parent = directory.path().join("not-a-directory");
+        fs::write(&blocked_parent, b"block directory creation").unwrap();
+        let mut state = CodexAuthState {
+            source: AuthSource::File(blocked_parent.join("auth.json")),
+            document: json!({"tokens": {}}),
+            access_token: "old-access".into(),
+            refresh_token: Some("old-refresh".into()),
+            account_id: None,
+            last_refresh: None,
+        };
+
+        let error = state
+            .update_and_save(
+                "secret-access".into(),
+                Some("secret-refresh".into()),
+                None,
+                Utc::now(),
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, CodexError::AuthWrite));
+        assert!(!error.to_string().contains("secret-access"));
+        assert!(!error.to_string().contains("secret-refresh"));
     }
 }

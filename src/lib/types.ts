@@ -28,8 +28,11 @@ export interface ModelUsageBreakdown {
   sourceNote: string;
 }
 
-export interface DailyUsage extends UsagePeriod {
+export interface DailyUsage {
   date: string;
+  tokens: number;
+  estimatedCostUsd: number | null;
+  estimateComplete: boolean;
 }
 
 export interface UsageHistory {
@@ -138,4 +141,9 @@ export interface SettingsViewState {
   integrationError: string | null;
   standaloneWindow: boolean;
   platformSummary: string | null;
+}
+
+export interface BootstrapState {
+  usage: UsageViewState;
+  settings: SettingsViewState;
 }

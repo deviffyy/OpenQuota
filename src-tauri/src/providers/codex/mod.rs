@@ -144,7 +144,26 @@ impl crate::providers::UsageProvider for CodexProvider {
         CodexAuthState::has_local_credentials()
     }
 
-    fn refresh(&self) -> Result<ProviderSnapshot, String> {
-        CodexProvider::refresh(self).map_err(|error| error.to_string())
+    fn refresh(&self) -> Result<ProviderSnapshot, crate::providers::ProviderError> {
+        CodexProvider::refresh(self).map_err(|error| {
+            use crate::providers::ProviderErrorKind as Kind;
+
+            let kind = match error {
+                CodexError::NotLoggedIn
+                | CodexError::SessionExpired
+                | CodexError::TokenConflict
+                | CodexError::TokenRevoked
+                | CodexError::TokenExpired
+                | CodexError::InvalidAuth => Kind::Authentication,
+                CodexError::ApiKeyOnly => Kind::Permission,
+                CodexError::AuthWrite => Kind::CredentialStorage,
+                CodexError::RequestFailed(429) => Kind::RateLimited,
+                CodexError::RequestFailed(_) | CodexError::ConnectionFailed => Kind::Network,
+                CodexError::InvalidResponse => Kind::InvalidResponse,
+                CodexError::LocalUsage => Kind::LocalData,
+                CodexError::Storage => Kind::Storage,
+            };
+            crate::providers::ProviderError::from_display(kind, error)
+        })
     }
 }

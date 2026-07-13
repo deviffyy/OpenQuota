@@ -32,4 +32,15 @@ export default [
       },
     },
   },
+  {
+    files: ['**/*.svelte.ts'],
+    languageOptions: {
+      parser: tseslint.parser,
+      globals: {
+        $state: 'readonly',
+        $derived: 'readonly',
+        $effect: 'readonly',
+      },
+    },
+  },
 ];

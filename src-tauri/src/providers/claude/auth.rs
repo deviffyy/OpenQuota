@@ -265,7 +265,15 @@ fn home_directory() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_credentials, ClaudeCredentialsFile};
+    use std::fs;
+
+    use chrono::Utc;
+    use tempfile::tempdir;
+
+    use super::{
+        parse_credentials, ClaudeCredential, ClaudeCredentialsFile, ClaudeOAuth, CredentialSource,
+    };
+    use crate::providers::claude::ClaudeError;
 
     #[test]
     fn parses_claude_credentials_and_hex_fallback() {
@@ -280,5 +288,31 @@ mod tests {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         let _: ClaudeCredentialsFile = parse_credentials(hex.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn credential_write_failures_are_typed_and_do_not_expose_tokens() {
+        let directory = tempdir().unwrap();
+        let blocked_parent = directory.path().join("not-a-directory");
+        fs::write(&blocked_parent, b"block directory creation").unwrap();
+        let mut credential = ClaudeCredential {
+            oauth: ClaudeOAuth::default(),
+            source: CredentialSource::File(blocked_parent.join("credentials.json")),
+            document: ClaudeCredentialsFile::default(),
+            inference_only: false,
+        };
+
+        let error = credential
+            .update_and_save(
+                "secret-access".into(),
+                Some("secret-refresh".into()),
+                Some(3600.0),
+                Utc::now().timestamp_millis(),
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, ClaudeError::AuthWrite));
+        assert!(!error.to_string().contains("secret-access"));
+        assert!(!error.to_string().contains("secret-refresh"));
     }
 }

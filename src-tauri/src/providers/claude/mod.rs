@@ -252,7 +252,23 @@ impl crate::providers::UsageProvider for ClaudeProvider {
         auth::has_local_credentials()
     }
 
-    fn refresh(&self) -> Result<ProviderSnapshot, String> {
-        self.refresh_inner().map_err(|error| error.to_string())
+    fn refresh(&self) -> Result<ProviderSnapshot, crate::providers::ProviderError> {
+        self.refresh_inner().map_err(|error| {
+            use crate::providers::ProviderErrorKind as Kind;
+
+            let kind = match error {
+                ClaudeError::NotLoggedIn
+                | ClaudeError::SessionExpired
+                | ClaudeError::TokenExpired => Kind::Authentication,
+                ClaudeError::InvalidOAuthUrl | ClaudeError::InvalidResponse => {
+                    Kind::InvalidResponse
+                }
+                ClaudeError::AuthWrite => Kind::CredentialStorage,
+                ClaudeError::RequestFailed(429) => Kind::RateLimited,
+                ClaudeError::RequestFailed(_) | ClaudeError::ConnectionFailed => Kind::Network,
+                ClaudeError::LocalUsage => Kind::LocalData,
+            };
+            crate::providers::ProviderError::from_display(kind, error)
+        })
     }
 }

@@ -19,6 +19,8 @@ const GOOGLE_CLIENT_SECRET_PARTS: [&str; 2] = ["GOCSPX-", "K58FWR486LdLJ1mLB8sXC
 pub struct AntigravityClient {
     local: Client,
     remote: Client,
+    cloud_bases: Vec<String>,
+    google_token_url: String,
 }
 
 pub enum CloudOutcome {
@@ -40,6 +42,21 @@ struct GoogleTokenResponse {
 
 impl AntigravityClient {
     pub fn new() -> Result<Self, AntigravityError> {
+        Self::with_endpoints(
+            CLOUD_BASES
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect(),
+            GOOGLE_TOKEN_URL.to_owned(),
+            std::time::Duration::from_secs(15),
+        )
+    }
+
+    fn with_endpoints(
+        cloud_bases: Vec<String>,
+        google_token_url: String,
+        remote_timeout: std::time::Duration,
+    ) -> Result<Self, AntigravityError> {
         Ok(Self {
             local: Client::builder()
                 .danger_accept_invalid_certs(true)
@@ -47,9 +64,11 @@ impl AntigravityClient {
                 .build()
                 .map_err(|_| AntigravityError::Unavailable)?,
             remote: Client::builder()
-                .timeout(std::time::Duration::from_secs(15))
+                .timeout(remote_timeout)
                 .build()
                 .map_err(|_| AntigravityError::Unavailable)?,
+            cloud_bases,
+            google_token_url,
         })
     }
 
@@ -90,7 +109,7 @@ impl AntigravityClient {
     }
 
     pub fn cloud_code(&self, path: &str, token: &str, body: Value) -> CloudOutcome {
-        for base in CLOUD_BASES {
+        for base in &self.cloud_bases {
             let response = self
                 .remote
                 .post(format!("{base}{path}"))
@@ -121,7 +140,7 @@ impl AntigravityClient {
         let client_secret = GOOGLE_CLIENT_SECRET_PARTS.concat();
         let response = self
             .remote
-            .post(GOOGLE_TOKEN_URL)
+            .post(&self.google_token_url)
             .form(&[
                 ("client_id", GOOGLE_CLIENT_ID),
                 ("client_secret", client_secret.as_str()),
@@ -151,5 +170,88 @@ impl AntigravityClient {
         } else {
             RefreshOutcome::Unavailable
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use serde_json::json;
+
+    use super::{AntigravityClient, CloudOutcome, RefreshOutcome};
+    use crate::providers::test_http;
+
+    fn client(base: &str) -> AntigravityClient {
+        AntigravityClient::with_endpoints(
+            vec![base.to_owned()],
+            format!("{base}/token"),
+            Duration::from_secs(1),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn cloud_success_and_auth_failures_are_distinct() {
+        let success = test_http::serve_once(200, &[], r#"{"quota":"available"}"#);
+        match client(&success).cloud_code("/quota", "secret-token", json!({})) {
+            CloudOutcome::Ok(body) => assert_eq!(body["quota"], "available"),
+            _ => panic!("successful cloud response should be returned"),
+        }
+
+        for status in [401, 403] {
+            let base = test_http::serve_once(status, &[], r#"{"token":"secret-token"}"#);
+            assert!(matches!(
+                client(&base).cloud_code("/quota", "secret-token", json!({})),
+                CloudOutcome::AuthFailed
+            ));
+        }
+    }
+
+    #[test]
+    fn cloud_rate_limits_and_malformed_json_are_unavailable() {
+        let limited = test_http::serve_once(429, &[], r#"{"error":"slow_down"}"#);
+        assert!(matches!(
+            client(&limited).cloud_code("/quota", "secret-token", json!({})),
+            CloudOutcome::Unavailable
+        ));
+
+        let malformed = test_http::serve_once(200, &[], "secret-token: not-json");
+        assert!(matches!(
+            client(&malformed).cloud_code("/quota", "secret-token", json!({})),
+            CloudOutcome::Unavailable
+        ));
+    }
+
+    #[test]
+    fn token_refresh_maps_success_auth_failure_and_timeout() {
+        let success = test_http::serve_once(200, &[], r#"{"access_token":"fresh-token"}"#);
+        assert!(matches!(
+            client(&success).refresh_google_token("secret-refresh"),
+            RefreshOutcome::Refreshed { access_token } if access_token == "fresh-token"
+        ));
+
+        let forbidden = test_http::serve_once(403, &[], r#"{"error":"forbidden"}"#);
+        assert!(matches!(
+            client(&forbidden).refresh_google_token("secret-refresh"),
+            RefreshOutcome::AuthFailed
+        ));
+
+        let timeout = test_http::serve_once_after(
+            Duration::from_millis(80),
+            200,
+            &[],
+            r#"{"access_token":"fresh-token"}"#,
+        );
+        let timeout_client = AntigravityClient::with_endpoints(
+            vec![timeout.clone()],
+            format!("{timeout}/token"),
+            Duration::from_millis(10),
+        )
+        .unwrap();
+        assert!(matches!(
+            timeout_client.refresh_google_token("secret-refresh"),
+            RefreshOutcome::Unavailable
+        ));
     }
 }
