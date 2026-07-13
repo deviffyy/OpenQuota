@@ -1169,7 +1169,7 @@ select {
   position: relative;
 }
 
-.options-menu summary {
+.options-menu > summary {
   display: grid;
   width: 30px;
   height: 30px;
@@ -1181,12 +1181,12 @@ select {
   place-items: center;
 }
 
-.options-menu summary::-webkit-details-marker {
+.options-menu > summary::-webkit-details-marker {
   display: none;
 }
 
-.options-menu[open] summary,
-.options-menu summary:hover {
+.options-menu[open] > summary,
+.options-menu > summary:hover {
   color: var(--text);
   background: var(--button-hover);
 }
@@ -2081,29 +2081,39 @@ body,
   margin-left: auto;
 }
 
-.options-menu summary {
+.options-menu > summary {
   display: flex;
   width: auto;
-  height: 28px;
+  height: 26px;
   align-items: center;
-  gap: 5px;
-  padding: 0 12px 0 14px;
-  border-radius: 14px;
+  gap: 4px;
+  padding: 0 9px 0 10px;
+  border: 1px solid var(--separator);
+  border-radius: 8px;
   color: var(--text);
-  background: var(--button-hover);
-  font-size: 13px;
-  font-weight: 600;
+  background: color-mix(in srgb, var(--card) 72%, transparent);
+  font-size: 11px;
+  font-weight: 550;
 }
 
-.options-menu summary i {
+.options-menu > summary i {
   margin-top: -2px;
   font-size: 11px;
   font-style: normal;
 }
 
+.options-menu > summary .symbol-icon {
+  transition: transform 160ms ease;
+}
+
+.options-menu[open] > summary .symbol-icon {
+  transform: rotate(180deg);
+}
+
 .options-menu > div {
   bottom: 34px;
-  width: 164px;
+  width: 172px;
+  padding: 6px;
   border: 0;
   border-radius: 10px;
   box-shadow: 0 10px 32px rgba(0, 0, 0, 0.28);
@@ -2112,7 +2122,7 @@ body,
 }
 
 .options-menu button {
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .screen-header {
@@ -2650,7 +2660,7 @@ input[type='checkbox']:checked::after {
 .options-menu__panel hr,
 .context-menu hr {
   height: 1px;
-  margin: 4px 5px;
+  margin: 5px 4px;
   border: 0;
   background: var(--separator);
 }
@@ -2659,10 +2669,10 @@ input[type='checkbox']:checked::after {
 .share-menu > summary {
   display: flex;
   width: 100%;
-  min-height: 28px;
+  min-height: 32px;
   align-items: center;
   gap: 8px;
-  padding: 5px 8px;
+  padding: 7px 9px;
   border: 0;
   border-radius: 6px;
   color: var(--text);
@@ -2716,19 +2726,23 @@ input[type='checkbox']:checked::after {
 
 .share-menu > div {
   position: absolute;
-  right: calc(100% + 7px);
-  bottom: -4px;
-  width: 138px;
-  padding: 4px;
+  right: calc(100% - 2px);
+  bottom: -5px;
+  width: 130px;
+  max-width: calc(100vw - 16px);
+  padding: 5px;
   border: 1px solid var(--separator);
   border-radius: 9px;
   background: var(--tray);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  transform-origin: bottom right;
+  animation: menu-in 160ms ease-out both;
 }
 
 .share-menu button {
   width: 100%;
-  padding: 6px 8px;
+  min-height: 30px;
+  padding: 7px 9px;
   border: 0;
   border-radius: 5px;
   color: var(--text);
@@ -2766,9 +2780,13 @@ input[type='checkbox']:checked::after {
 
 .context-menu button:hover,
 .share-menu button:hover,
-.share-menu > summary:hover,
-.share-menu > summary:focus-visible {
+.share-menu > summary:hover {
   background: var(--button-hover);
+}
+
+.share-menu > summary:focus,
+.share-menu > summary:focus-visible {
+  outline: none;
 }
 
 .context-menu button.danger {
