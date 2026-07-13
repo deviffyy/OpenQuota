@@ -293,7 +293,12 @@ jobs:
             -f make_latest=true
 
       - name: Verify public release downloads
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          release_id="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq '.databaseId')"
+          gh api "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            > release-check/release.json
           urls="$(jq -r '.assets[].browser_download_url' release-check/release.json | sort -u)"
           while IFS= read -r url; do
             downloaded=false
