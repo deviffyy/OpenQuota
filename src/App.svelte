@@ -1008,7 +1008,7 @@
             >
               <summary
                 ><Icon name="share" /><span>Share Screenshot</span><Icon
-                  name="chevron-right"
+                  name="chevron-left"
                   size={12}
                 /></summary
               >
