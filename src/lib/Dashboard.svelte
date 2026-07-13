@@ -27,7 +27,7 @@
     onOpenProviderCustomize: (providerId: string) => void;
     onShare: (providerId: string) => void;
     onShareTotal: (projection: SpendProjection) => boolean | Promise<boolean>;
-    onRefresh: () => void;
+    onRefresh: (providerId: string) => void;
     reducedMotion: boolean;
     updateStatus: UpdateStatus | null;
     installingUpdate: boolean;
@@ -546,7 +546,7 @@
         ><Icon name="power" size={15} />Hide {providerDisplayName(menuProvider.id)}</button
       >
       <hr />
-      <button type="button" role="menuitem" onclick={onRefresh}
+      <button type="button" role="menuitem" onclick={() => onRefresh(menuProvider.id)}
         ><Icon name="refresh" size={15} />Refresh {providerDisplayName(menuProvider.id)}</button
       >
       <button type="button" role="menuitem" onclick={() => onOpenProviderCustomize(menuProvider.id)}
@@ -598,7 +598,7 @@
         >
       {/if}
       <hr />
-      <button type="button" role="menuitem" onclick={onRefresh}
+      <button type="button" role="menuitem" onclick={() => onRefresh(metricProvider.id)}
         ><Icon name="refresh" size={15} />Refresh {providerDisplayName(metricProvider.id)}</button
       >
       <button

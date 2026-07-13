@@ -198,7 +198,11 @@ describe('OpenQuota dashboard', () => {
       .mockReset()
       .mockImplementation(
         (command: string, args?: { settings?: SettingsViewState['settings'] }) => {
-          if (command === 'get_usage_state' || command === 'refresh_usage')
+          if (
+            command === 'get_usage_state' ||
+            command === 'refresh_usage' ||
+            command === 'refresh_provider_usage'
+          )
             return Promise.resolve(liveState);
           if (command === 'get_app_settings') return Promise.resolve(settingsState);
           if (command === 'save_app_settings')
@@ -781,10 +785,72 @@ describe('OpenQuota dashboard', () => {
   it('supports manual refresh and popup close shortcuts', async () => {
     render(App);
     await screen.findByText('Plus');
-    await fireEvent.click(screen.getByRole('button', { name: 'Refresh provider usage' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh all provider usage' }));
     await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith('refresh_usage'));
     await fireEvent.keyDown(document, { key: 'Escape' });
     expect(mocks.invoke).toHaveBeenCalledWith('dismiss_main_window');
+  });
+
+  it('refreshes only the provider selected in a context menu', async () => {
+    let finishRefresh: ((state: UsageViewState) => void) | undefined;
+    const refreshResult = new Promise<UsageViewState>((resolve) => (finishRefresh = resolve));
+    const multiProviderState: UsageViewState = {
+      providers: { codex: codexState, claude: claudeState },
+      lastFullRefreshAt: new Date(Date.now() - 240_000).toISOString(),
+    };
+    const multiProviderSettings: SettingsViewState = {
+      ...settingsState,
+      settings: {
+        ...settingsState.settings,
+        showTotalSpend: false,
+        providers: [
+          ...settingsState.settings.providers,
+          {
+            id: 'claude',
+            enabled: true,
+            detected: true,
+            expanded: false,
+            metrics: [
+              {
+                id: 'claude.session',
+                enabled: true,
+                section: 'alwaysVisible' as const,
+                pinned: true,
+              },
+            ],
+          },
+        ],
+      },
+    };
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === 'get_usage_state') return Promise.resolve(multiProviderState);
+      if (command === 'get_app_settings') return Promise.resolve(multiProviderSettings);
+      if (command === 'refresh_provider_usage') return refreshResult;
+      if (command === 'resize_main_window') return Promise.resolve();
+      return Promise.resolve();
+    });
+
+    render(App);
+    await screen.findByRole('group', { name: 'Claude provider' });
+    const codex = screen.getByRole('group', { name: 'Codex provider' });
+    const claude = screen.getByRole('group', { name: 'Claude provider' });
+    expect(screen.getByText('Next update in 1m')).toBeInTheDocument();
+    await fireEvent.contextMenu(codex, {
+      clientX: 120,
+      clientY: 180,
+    });
+    await fireEvent.click(await screen.findByRole('menuitem', { name: 'Refresh Codex' }));
+
+    expect(mocks.invoke).toHaveBeenCalledWith('refresh_provider_usage', { providerId: 'codex' });
+    expect(within(codex).getByLabelText('Refreshing')).toBeInTheDocument();
+    expect(within(claude).queryByLabelText('Refreshing')).not.toBeInTheDocument();
+    expect(screen.getByText('Updating…')).toBeInTheDocument();
+
+    finishRefresh?.(multiProviderState);
+    await waitFor(() =>
+      expect(within(codex).queryByLabelText('Refreshing')).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText('Next update in 1m')).toBeInTheDocument();
   });
 
   it('keeps the Claude card structure stable while optional quota data refreshes', async () => {
@@ -844,7 +910,7 @@ describe('OpenQuota dashboard', () => {
     expect(statusSlot).toBeInTheDocument();
     expect(statusSlot).not.toHaveClass('active');
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Refresh provider usage' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh all provider usage' }));
     expect(await within(provider).findByLabelText('Refreshing')).toBeInTheDocument();
     expect(statusSlot).toHaveClass('active');
     expect(within(provider).getByRole('region', { name: 'Claude usage' })).toBe(card);
@@ -924,7 +990,7 @@ describe('OpenQuota dashboard', () => {
     render(App);
     const provider = await screen.findByRole('group', { name: 'Codex provider' });
     const card = within(provider).getByRole('region', { name: 'Codex usage' });
-    await fireEvent.click(screen.getByRole('button', { name: 'Refresh provider usage' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Refresh all provider usage' }));
     await waitFor(() =>
       expect(within(provider).queryByLabelText('Refreshing')).not.toBeInTheDocument(),
     );

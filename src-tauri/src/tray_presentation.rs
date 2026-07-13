@@ -291,6 +291,7 @@ mod tests {
         };
         let state = UsageViewState {
             providers: [("codex".into(), provider_state)].into_iter().collect(),
+            last_full_refresh_at: None,
         };
         let metrics = resolved_metrics(
             &state,

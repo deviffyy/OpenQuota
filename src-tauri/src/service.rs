@@ -20,6 +20,7 @@ const STALE_AFTER: chrono::Duration = chrono::Duration::minutes(10);
 #[serde(rename_all = "camelCase")]
 pub struct UsageViewState {
     pub providers: BTreeMap<String, ProviderViewState>,
+    pub last_full_refresh_at: Option<chrono::DateTime<Utc>>,
 }
 
 pub struct ProviderService {
@@ -28,6 +29,7 @@ pub struct ProviderService {
     states: RwLock<BTreeMap<String, ProviderViewState>>,
     refresh_gates: HashMap<String, Arc<AsyncMutex<()>>>,
     last_live_refresh: Mutex<HashMap<String, Instant>>,
+    last_full_refresh_at: RwLock<Option<chrono::DateTime<Utc>>>,
 }
 
 impl ProviderService {
@@ -53,6 +55,7 @@ impl ProviderService {
             states: RwLock::new(states),
             refresh_gates,
             last_live_refresh: Mutex::new(HashMap::new()),
+            last_full_refresh_at: RwLock::new(None),
         }
     }
 
@@ -68,7 +71,15 @@ impl ProviderService {
                     Utc::now().signed_duration_since(snapshot.refreshed_at) >= STALE_AFTER;
             }
         }
-        UsageViewState { providers }
+        let last_full_refresh_at = self
+            .last_full_refresh_at
+            .read()
+            .ok()
+            .and_then(|value| value.to_owned());
+        UsageViewState {
+            providers,
+            last_full_refresh_at,
+        }
     }
 
     pub async fn refresh(&self, provider_id: &str, force: bool) -> ProviderViewState {
@@ -120,6 +131,18 @@ impl ProviderService {
         }
         for task in tasks {
             let _ = task.await;
+        }
+        self.state()
+    }
+
+    pub async fn refresh_all(
+        self: &Arc<Self>,
+        provider_ids: &[String],
+        force: bool,
+    ) -> UsageViewState {
+        self.refresh_enabled(provider_ids, force).await;
+        if let Ok(mut completed_at) = self.last_full_refresh_at.write() {
+            *completed_at = Some(Utc::now());
         }
         self.state()
     }
@@ -278,5 +301,11 @@ mod tests {
         );
 
         assert_eq!(maximum.load(Ordering::SeqCst), 2);
+        assert!(service.state().last_full_refresh_at.is_none());
+
+        let completed = tauri::async_runtime::block_on(
+            service.refresh_all(&["claude".into(), "antigravity".into()], true),
+        );
+        assert!(completed.last_full_refresh_at.is_some());
     }
 }

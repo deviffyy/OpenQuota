@@ -91,13 +91,7 @@
   let shareTimer: ReturnType<typeof setTimeout> | undefined;
   const providerStates = $derived(Object.values(viewState.providers));
   const anyRefreshing = $derived(providerStates.some((state) => state.refreshing));
-  const latestRefresh = $derived.by(() =>
-    providerStates
-      .map((state) => state.snapshot?.refreshedAt)
-      .filter((value): value is string => value !== undefined)
-      .sort()
-      .at(-1),
-  );
+  const lastFullRefresh = $derived(viewState.lastFullRefreshAt ?? undefined);
   const platform = desktopPlatform();
   const shortcuts = shortcutLabels(platform);
 
@@ -301,6 +295,30 @@
         ),
       };
       settingsError = 'OpenQuota could not start a provider refresh.';
+    }
+  }
+  async function refreshProvider(providerId: string) {
+    const current = viewState.providers[providerId];
+    if (!current || current.refreshing) return;
+    viewState = {
+      providers: {
+        ...viewState.providers,
+        [providerId]: { ...current, refreshing: true, error: null },
+      },
+    };
+    try {
+      viewState = await invoke<UsageViewState>('refresh_provider_usage', { providerId });
+    } catch {
+      const failed = viewState.providers[providerId];
+      if (failed) {
+        viewState = {
+          providers: {
+            ...viewState.providers,
+            [providerId]: { ...failed, refreshing: false },
+          },
+        };
+      }
+      settingsError = `${providerDisplayName(providerId)} usage could not be refreshed.`;
     }
   }
   async function resetCustomization() {
@@ -936,7 +954,7 @@
               onOpenProviderCustomize={(id) => navigate(`provider:${id}`)}
               onShare={shareProvider}
               onShareTotal={shareTotalSpend}
-              onRefresh={refresh}
+              onRefresh={refreshProvider}
               {reducedMotion}
               {updateStatus}
               {installingUpdate}
@@ -984,10 +1002,10 @@
         type="button"
         onclick={refresh}
         disabled={anyRefreshing}
-        aria-label="Refresh provider usage"
+        aria-label="Refresh all provider usage"
       >
         <span>OpenQuota {appVersion}</span><small
-          >{anyRefreshing ? 'Updating…' : nextUpdateLabel(latestRefresh)}</small
+          >{anyRefreshing ? 'Updating…' : nextUpdateLabel(lastFullRefresh)}</small
         >
       </button>
       {#if screen === 'dashboard'}

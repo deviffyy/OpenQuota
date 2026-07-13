@@ -63,8 +63,27 @@ async fn refresh_usage(
     notifications: State<'_, Arc<NotificationEvaluator>>,
 ) -> Result<UsageViewState, ()> {
     let state = service
-        .refresh_enabled(&enabled_provider_ids(&settings.get()), true)
+        .refresh_all(&enabled_provider_ids(&settings.get()), true)
         .await;
+    let _ = app.emit("usage-state", &state);
+    finish_refresh(&app, &state, &settings, &notifications);
+    Ok(state)
+}
+
+#[tauri::command]
+async fn refresh_provider_usage(
+    app: AppHandle,
+    service: State<'_, Arc<ProviderService>>,
+    settings: State<'_, Arc<SettingsService>>,
+    notifications: State<'_, Arc<NotificationEvaluator>>,
+    provider_id: String,
+) -> Result<UsageViewState, String> {
+    if !enabled_provider_ids(&settings.get()).contains(&provider_id) {
+        return Err("Provider is not enabled.".to_owned());
+    }
+
+    service.refresh(&provider_id, true).await;
+    let state = service.state();
     let _ = app.emit("usage-state", &state);
     finish_refresh(&app, &state, &settings, &notifications);
     Ok(state)
@@ -160,7 +179,7 @@ async fn reset_customization(
     let state = settings_view_state(&app, &settings);
     let _ = app.emit("settings-state", &state);
     let usage_state = service
-        .refresh_enabled(&enabled_provider_ids(&settings.get()), true)
+        .refresh_all(&enabled_provider_ids(&settings.get()), true)
         .await;
     let _ = app.emit("usage-state", &usage_state);
     finish_refresh(&app, &usage_state, &settings, &notifications);
@@ -839,7 +858,7 @@ pub fn run() {
                 loop {
                     let provider_ids = enabled_provider_ids(&settings.get());
                     if !provider_ids.is_empty() {
-                        let state = service.refresh_enabled(&provider_ids, false).await;
+                        let state = service.refresh_all(&provider_ids, false).await;
                         let _ = app_handle.emit("usage-state", &state);
                         finish_refresh(&app_handle, &state, &settings, &notifications);
                     }
@@ -852,6 +871,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_usage_state,
             refresh_usage,
+            refresh_provider_usage,
             get_app_settings,
             save_app_settings,
             reset_customization,
