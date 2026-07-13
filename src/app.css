@@ -2679,11 +2679,18 @@ input[type='checkbox']:checked::after {
   display: none;
 }
 
-.share-menu > summary .symbol-icon:last-child {
+.share-menu > summary .share-menu__direction {
+  display: grid;
+  width: 16px;
+  flex: 0 0 16px;
+  place-items: center;
+}
+
+.share-menu > summary .share-menu__direction .symbol-icon {
   transition: transform 140ms ease;
 }
 
-.share-menu[open] > summary .symbol-icon:last-child {
+.share-menu[open] > summary .share-menu__direction .symbol-icon {
   transform: translateX(-2px);
 }
 

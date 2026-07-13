@@ -1007,10 +1007,8 @@
               ontoggle={(event) => (shareMenuOpen = event.currentTarget.open)}
             >
               <summary
-                ><Icon name="share" /><span>Share Screenshot</span><Icon
-                  name="chevron-left"
-                  size={12}
-                /></summary
+                ><span class="share-menu__direction"><Icon name="chevron-left" size={12} /></span
+                ><span>Share Screenshot</span></summary
               >
               <div>
                 {#if shareMenuOpen}
