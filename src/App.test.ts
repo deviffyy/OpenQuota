@@ -526,8 +526,8 @@ describe('OpenQuota dashboard', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     await fireEvent.click(screen.getByRole('button', { name: 'Check for Updates…' }));
     await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith('check_for_updates'));
-    expect(await screen.findByText('OpenQuota 0.1.0 is up to date')).toBeInTheDocument();
-    expect(screen.getByText('You have the latest verified release.')).toBeInTheDocument();
+    expect(await screen.findByText('OpenQuota 0.1.0 is up to date.')).toBeInTheDocument();
+    expect(document.querySelector('.settings-update-status')).toBeNull();
     expect(mocks.invoke).toHaveBeenCalledWith(
       'save_app_settings',
       expect.objectContaining({

@@ -717,8 +717,14 @@
         ...settingsState.settings,
         lastUpdateCheckAt: new Date().toISOString(),
       });
-      if (manual && !status.available && screen !== 'settings') {
-        showConfirmation(`OpenQuota ${status.currentVersion} is up to date.`);
+      if (manual) {
+        showConfirmation(
+          status.available
+            ? status.version
+              ? `OpenQuota ${status.version} is available.`
+              : 'An OpenQuota update is available.'
+            : `OpenQuota ${status.currentVersion} is up to date.`,
+        );
       }
     } catch (error) {
       if (manual) {
@@ -971,7 +977,6 @@
               onOpenNotificationSettings={openNotificationSettings}
               {updateError}
               {checkingUpdate}
-              {updateStatus}
               onCheckForUpdates={() => void checkForUpdates(true)}
               onCustomize={() => navigate('customize')}
               onCopyDataPath={copyDataPath}

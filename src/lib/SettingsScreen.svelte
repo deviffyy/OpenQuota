@@ -5,7 +5,6 @@
     AppSettings,
     NotificationPreferences,
     SettingsViewState,
-    UpdateStatus,
     UpdateFailure,
   } from './types';
 
@@ -16,7 +15,6 @@
     onOpenNotificationSettings: () => void;
     updateError: UpdateFailure | null;
     checkingUpdate: boolean;
-    updateStatus: UpdateStatus | null;
     onCheckForUpdates: () => void;
     onCustomize: () => void;
     onCopyDataPath: () => void;
@@ -28,7 +26,6 @@
     onOpenNotificationSettings,
     updateError,
     checkingUpdate,
-    updateStatus,
     onCheckForUpdates,
     onCustomize,
     onCopyDataPath,
@@ -50,14 +47,6 @@
   function patchNotification(key: keyof NotificationPreferences, enabled: boolean) {
     patch({ notifications: { ...settings.notifications, [key]: enabled } });
     if (enabled && settingsView.notificationPermission === 'prompt') onRequestNotifications();
-  }
-  function lastChecked(value: string) {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return 'Last check unavailable';
-    return `Last checked ${new Intl.DateTimeFormat(undefined, {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    }).format(date)}`;
   }
   function record(event: KeyboardEvent) {
     if (!recording) return;
@@ -334,30 +323,6 @@
         onclick={onCheckForUpdates}>{checkingUpdate ? 'Checking…' : 'Check for Updates…'}</button
       >
     </div>
-    {#if updateStatus}
-      <div class="settings-update-status" class:available={updateStatus.available}>
-        <span class="settings-update-status__icon"
-          ><Icon
-            name={updateStatus.available ? 'refresh' : 'check'}
-            size={13}
-            strokeWidth={2.2}
-          /></span
-        >
-        <span
-          ><b
-            >{updateStatus.available && updateStatus.version
-              ? `OpenQuota ${updateStatus.version} is available`
-              : `OpenQuota ${updateStatus.currentVersion} is up to date`}</b
-          ><small
-            >{updateStatus.available
-              ? 'Open the Dashboard to install it.'
-              : 'You have the latest verified release.'}</small
-          ></span
-        >
-      </div>
-    {:else if settings.lastUpdateCheckAt}
-      <p class="settings-note update-status-note">{lastChecked(settings.lastUpdateCheckAt)}</p>
-    {/if}
     {#if updateError}<div class="settings-update-error" role="alert">
         <b>{updateError.message}</b><small>{updateError.action}</small>
       </div>{/if}

@@ -2609,65 +2609,26 @@ input[type='checkbox']:checked::after {
   flex: 0 0 auto;
 }
 
-.settings-note.update-status-note {
-  color: var(--secondary);
-  background: var(--card);
-}
-
-.settings-update-status,
-.settings-update-error {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 0 12px 8px;
-  padding: 8px;
-  border-radius: 8px;
-  background: var(--card);
-}
-
-.settings-update-status > span:last-child,
 .settings-update-error {
   display: flex;
   flex-direction: column;
+  gap: 2px;
+  margin: 0 12px 8px;
+  padding: 8px;
+  border-radius: 8px;
+  color: var(--error);
+  background: var(--error-bg);
 }
 
-.settings-update-status__icon {
-  display: grid;
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
-  border-radius: 50%;
-  color: var(--provider);
-  background: color-mix(in srgb, var(--provider) 12%, transparent);
-  place-items: center;
-}
-
-.settings-update-status.available .settings-update-status__icon {
-  color: var(--meter-fill);
-  background: color-mix(in srgb, var(--meter-fill) 12%, transparent);
-}
-
-.settings-update-status b,
 .settings-update-error b {
   font-size: 11px;
   line-height: 14px;
 }
 
-.settings-update-status small,
 .settings-update-error small {
-  color: var(--secondary);
+  color: var(--error);
   font-size: 9px;
   line-height: 12px;
-}
-
-.settings-update-error {
-  display: flex;
-  color: var(--error);
-  background: var(--error-bg);
-}
-
-.settings-update-error small {
-  color: var(--error);
 }
 
 .options-menu__panel hr,
