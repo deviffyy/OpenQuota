@@ -122,18 +122,20 @@
               <span class="customize-metric-name"
                 >{metricDefinition(metric.id)?.label ?? metric.id}</span
               >
-              {#if metricDefinition(metric.id)?.pinnable}<button
-                  class:pinned={metric.pinned}
-                  class="pin-button"
-                  type="button"
-                  aria-label={`${metric.pinned ? 'Unpin' : 'Pin'} ${metricDefinition(metric.id)?.label}`}
-                  onclick={() => togglePin(metric)}
-                  ><Icon
-                    name={metric.pinned ? 'star-filled' : 'star'}
-                    size={15}
-                    strokeWidth={1.7}
-                  /></button
-                >{/if}
+              <span class="customize-metric-pin-slot">
+                {#if metricDefinition(metric.id)?.pinnable}<button
+                    class:pinned={metric.pinned}
+                    class="pin-button"
+                    type="button"
+                    aria-label={`${metric.pinned ? 'Unpin' : 'Pin'} ${metricDefinition(metric.id)?.label}`}
+                    onclick={() => togglePin(metric)}
+                    ><Icon
+                      name={metric.pinned ? 'star-filled' : 'star'}
+                      size={15}
+                      strokeWidth={1.7}
+                    /></button
+                  >{/if}
+              </span>
               <label class="switch"
                 ><input
                   aria-label={`Show ${metricDefinition(metric.id)?.label ?? metric.id}`}

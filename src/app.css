@@ -2445,6 +2445,19 @@ input[type='checkbox']:checked::after {
   white-space: nowrap;
 }
 
+.customize-metric-pin-slot {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  flex: 0 0 25px;
+  place-items: center;
+}
+
+.customize-metric-row > .switch {
+  display: block;
+  flex: 0 0 28px;
+}
+
 .empty-drop-zone {
   display: grid;
   height: 30px;
