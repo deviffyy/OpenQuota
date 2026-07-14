@@ -3,6 +3,7 @@
   import Icon from './Icon.svelte';
   import SelectMenu from './SelectMenu.svelte';
   import { providerDisplayName } from './metrics';
+  import { TOTAL_SPEND_GEOMETRY } from './shareCard';
   import { emptySpendMessage, projectSpend, type SpendProjection } from './totalSpend';
   import type { AppSettings, UsageHistory } from './types';
 
@@ -94,7 +95,12 @@
   }
 </script>
 
-<section class="total-spend-section" aria-label="Total Spend" data-total-spend>
+<section
+  class="total-spend-section"
+  aria-label="Total Spend"
+  data-total-spend
+  style={`--total-card-padding-x:${TOTAL_SPEND_GEOMETRY.cardPaddingX}px;--total-card-padding-y:${TOTAL_SPEND_GEOMETRY.cardPaddingY}px;--total-switcher-height:${TOTAL_SPEND_GEOMETRY.switcherHeight}px;--total-period-size:${TOTAL_SPEND_GEOMETRY.periodFontSize}px;--total-body-gap:${TOTAL_SPEND_GEOMETRY.bodyGap}px;--total-legend-gap:${TOTAL_SPEND_GEOMETRY.legendGap}px;--total-ring-size:${TOTAL_SPEND_GEOMETRY.ringDiameter}px;--total-ring-stroke:${TOTAL_SPEND_GEOMETRY.ringStroke};--total-center-size:${TOTAL_SPEND_GEOMETRY.centerFontSize}px;--total-center-unit-size:${TOTAL_SPEND_GEOMETRY.centerUnitFontSize}px;--total-legend-size:${TOTAL_SPEND_GEOMETRY.legendFontSize}px;`}
+>
   <div class="total-card__header">
     <div class="total-card__title">
       <SelectMenu
@@ -148,13 +154,19 @@
       <div class="total-card__body">
         <div class="spend-ring">
           <svg viewBox="0 0 104 104" aria-hidden="true">
-            <circle class="spend-ring__track" cx="52" cy="52" r="40" pathLength="100" />
+            <circle
+              class="spend-ring__track"
+              cx="52"
+              cy="52"
+              r={TOTAL_SPEND_GEOMETRY.ringRadius}
+              pathLength="100"
+            />
             {#each ringSegments as segment (segment.id)}
               <circle
                 class="spend-ring__segment"
                 cx="52"
                 cy="52"
-                r="40"
+                r={TOTAL_SPEND_GEOMETRY.ringRadius}
                 pathLength="100"
                 style={`--segment-color: var(--provider-${segment.id}, var(--provider)); --segment-length: ${segment.length}; --segment-offset: ${segment.offset}`}
               />
@@ -259,7 +271,7 @@
 
     .spend-ring circle {
       fill: none;
-      stroke-width: 12;
+      stroke-width: var(--total-ring-stroke);
     }
 
     .spend-ring__track {
@@ -416,20 +428,21 @@
 
     .total-card {
       margin: 0;
-      padding: 12px 14px;
+      padding: var(--total-card-padding-y) var(--total-card-padding-x);
     }
 
     .period-switcher {
       width: 100%;
+      height: var(--total-switcher-height);
       padding: 3px;
       background: var(--meter-track);
     }
 
     .period-switcher button {
-      min-height: 23px;
+      min-height: 0;
       flex: 1;
-      padding: 4px 12px;
-      font-size: 11px;
+      padding: 0 12px;
+      font-size: var(--total-period-size);
       font-weight: 500;
     }
 
@@ -438,24 +451,36 @@
     }
 
     .total-card__body {
-      gap: 18px;
-      padding-top: 12px;
+      gap: var(--total-legend-gap);
+      padding-top: var(--total-body-gap);
     }
 
     .spend-ring {
-      width: 104px;
-      height: 104px;
-      flex-basis: 104px;
+      width: var(--total-ring-size);
+      height: var(--total-ring-size);
+      flex-basis: var(--total-ring-size);
       padding: 0;
     }
 
     .spend-ring strong {
       max-width: 68px;
+      font-size: var(--total-center-size);
+    }
+
+    .spend-ring span {
+      font-size: var(--total-center-unit-size);
     }
 
     .spend-legend {
       align-content: center;
       gap: 7px 8px;
+      font-size: var(--total-legend-size);
+    }
+
+    .spend-legend span i {
+      width: 8px;
+      height: 8px;
+      margin-right: 7px;
     }
 
     .spend-legend strong {

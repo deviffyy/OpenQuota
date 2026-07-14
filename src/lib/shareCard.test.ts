@@ -1,0 +1,167 @@
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { codexState, settingsState } from '../test/appFixtures';
+import totalSpendSource from './TotalSpend.svelte?raw';
+import {
+  buildProviderShareRows,
+  providerShareCardHeight,
+  renderTotalSpendShareCard,
+  SHARE_CARD_SCALE,
+  SHARE_CARD_WIDTH,
+  TOTAL_SPEND_GEOMETRY,
+  TOTAL_SPEND_OUTER_PADDING,
+  TOTAL_SPEND_PERIOD_LABELS,
+  totalSpendShareCardHeight,
+} from './shareCard';
+
+afterEach(() => vi.restoreAllMocks());
+
+describe('share card layout', () => {
+  it('uses the Example app authored width and 4x export scale', () => {
+    expect(SHARE_CARD_WIDTH).toBe(360);
+    expect(SHARE_CARD_SCALE).toBe(4);
+  });
+
+  it('exports only the provider rows visible on the dashboard', () => {
+    const snapshot = codexState.snapshot!;
+    const settings = settingsState.settings;
+    const collapsed = settings.providers[0];
+    const collapsedRows = buildProviderShareRows(
+      'codex',
+      snapshot,
+      collapsed,
+      settings,
+      Date.now(),
+    );
+
+    expect(collapsedRows.map((row) => row.kind)).toEqual(['quota', 'quota', 'trend']);
+
+    const expandedRows = buildProviderShareRows(
+      'codex',
+      snapshot,
+      { ...collapsed, expanded: true },
+      settings,
+      Date.now(),
+    );
+    expect(expandedRows.map((row) => row.kind)).toEqual([
+      'quota',
+      'quota',
+      'trend',
+      'text',
+      'text',
+      'text',
+    ]);
+    expect(expandedRows.slice(-3)).toMatchObject([
+      { condensed: false },
+      { condensed: true },
+      { condensed: true },
+    ]);
+  });
+
+  it('keeps always-visible rows ahead of expanded rows like the dashboard', () => {
+    const snapshot = codexState.snapshot!;
+    const settings = settingsState.settings;
+    const layout = settings.providers[0];
+    const interleaved = {
+      ...layout,
+      expanded: true,
+      metrics: [layout.metrics[3], layout.metrics[0], layout.metrics[4], layout.metrics[1]],
+    };
+
+    const rows = buildProviderShareRows('codex', snapshot, interleaved, settings, Date.now());
+    expect(rows.map((row) => row.label)).toEqual(['Session', 'Weekly', 'Today', 'Yesterday']);
+  });
+
+  it('grows provider exports with content instead of enforcing a minimum canvas', () => {
+    const settings = settingsState.settings;
+    const layout = { ...settings.providers[0], expanded: true };
+    const rows = buildProviderShareRows(
+      'codex',
+      codexState.snapshot!,
+      layout,
+      settings,
+      Date.now(),
+    );
+
+    expect(providerShareCardHeight(rows)).toBeGreaterThan(
+      providerShareCardHeight(rows.slice(0, 1)),
+    );
+    expect(providerShareCardHeight([])).toBeLessThan(providerShareCardHeight(rows));
+  });
+
+  it('keeps Total Spend to the period switcher and usage body', () => {
+    expect(TOTAL_SPEND_PERIOD_LABELS).toEqual(['Today', 'Yesterday', '30 Days']);
+    expect(TOTAL_SPEND_OUTER_PADDING).toBe(10);
+    expect(TOTAL_SPEND_GEOMETRY).toMatchObject({
+      width: 320,
+      switcherHeight: 27,
+      ringDiameter: 104,
+      legendGap: 18,
+    });
+    expect(totalSpendShareCardHeight()).toBe(187);
+  });
+
+  it('shares the same geometry source with the live Total Spend card', () => {
+    expect(totalSpendSource).toContain("import { TOTAL_SPEND_GEOMETRY } from './shareCard';");
+    expect(totalSpendSource).toContain('--total-switcher-height:');
+    expect(totalSpendSource).toContain('--total-ring-size:');
+    expect(totalSpendSource).toContain('r={TOTAL_SPEND_GEOMETRY.ringRadius}');
+  });
+
+  it('does not add a title, selected-period caption, or marketing footer to Total Spend', () => {
+    const drawn: string[] = [];
+    const context = {
+      scale: vi.fn(),
+      fillRect: vi.fn(),
+      beginPath: vi.fn(),
+      roundRect: vi.fn(),
+      fill: vi.fn(),
+      arc: vi.fn(),
+      stroke: vi.fn(),
+      measureText: (value: string) => ({ width: value.length * 6 }),
+      fillText: (value: string) => drawn.push(value),
+      textAlign: 'left',
+      textBaseline: 'alphabetic',
+      fillStyle: '',
+      strokeStyle: '',
+      font: '',
+      lineWidth: 1,
+      lineCap: 'butt',
+    };
+    vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue(
+      context as unknown as CanvasRenderingContext2D,
+    );
+
+    const canvas = renderTotalSpendShareCard({
+      projection: {
+        slices: [
+          {
+            id: 'codex',
+            value: 12,
+            period: {
+              tokens: 1_000_000,
+              estimatedCostUsd: 12,
+              estimateComplete: true,
+            },
+          },
+        ],
+        centerValue: 12,
+        estimateComplete: true,
+      },
+      metric: 'cost',
+      period: 'last30Days',
+    });
+
+    expect(canvas.width).toBe(TOTAL_SPEND_GEOMETRY.width * SHARE_CARD_SCALE);
+    expect(canvas.height).toBe(totalSpendShareCardHeight() * SHARE_CARD_SCALE);
+    expect(drawn).toEqual(
+      expect.arrayContaining(['Today', 'Yesterday', '30 Days', 'Codex', 'dollars']),
+    );
+    expect(drawn).not.toEqual(
+      expect.arrayContaining([
+        'Cost',
+        'Last 30 Days',
+        'Monitor Your AI Subscriptions with OpenQuota',
+      ]),
+    );
+  });
+});

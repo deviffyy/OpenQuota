@@ -22,25 +22,26 @@
   import Dashboard from './lib/Dashboard.svelte';
   import Icon from './lib/Icon.svelte';
   import { createListenerRegistry } from './lib/listenerRegistry';
-  import { metricDefinition, providerDisplayName } from './lib/metrics';
+  import { providerDisplayName } from './lib/metrics';
   import { springMotion } from './lib/motion';
   import OpenQuotaMark from './lib/OpenQuotaMark.svelte';
   import { horizontalPageTransition, shouldSlideBetweenScreens } from './lib/pageTransition';
   import { desktopPlatform, shortcutLabels } from './lib/platform';
-  import { providerIconPath } from './lib/providerIconPaths';
+  import {
+    buildProviderShareRows,
+    renderProviderShareCard,
+    renderTotalSpendShareCard,
+  } from './lib/shareCard';
   import SettingsScreen from './lib/SettingsScreen.svelte';
   import { SettingsController } from './lib/settingsController.svelte';
   import type { SpendProjection } from './lib/totalSpend';
-  import type { AppSettings, QuotaWindow, UsageViewState } from './lib/types';
+  import type { AppSettings, UsageViewState } from './lib/types';
   import { nextUpdateLabel, UpdateController } from './lib/updateController.svelte';
   import { automaticUpdateDelay, UPDATE_CHECK_INTERVAL_MS } from './lib/updateSchedule';
   import { createWindowController, type AppScreen } from './lib/windowController';
 
   type Screen = AppScreen;
   const appVersion = import.meta.env.APP_VERSION;
-  type ShareRow =
-    | { kind: 'quota'; label: string; quota: QuotaWindow }
-    | { kind: 'text'; label: string; value: string };
   const emptyView: UsageViewState = { providers: {} };
 
   let viewState = $state<UsageViewState>(emptyView);
@@ -257,37 +258,6 @@
       settingsError = `${providerDisplayName(providerId)} customization could not be reset.`;
     }
   }
-  function canvasPalette() {
-    const styles = getComputedStyle(document.documentElement);
-    const value = (name: string) => styles.getPropertyValue(name).trim();
-    return {
-      tray: value('--tray'),
-      surface: value('--card'),
-      text: value('--text'),
-      secondary: value('--secondary'),
-      track: value('--meter-track'),
-      fill: value('--meter-fill'),
-      separator: value('--separator'),
-      provider: (id: string) => value(`--provider-${id}`) || value('--provider'),
-    };
-  }
-  function drawProviderMark(
-    context: CanvasRenderingContext2D,
-    providerId: string,
-    x: number,
-    y: number,
-    size: number,
-    color: string,
-  ) {
-    const path = providerIconPath(providerId);
-    if (!path || typeof Path2D === 'undefined') return;
-    context.save();
-    context.translate(x, y);
-    context.scale(size / 100, size / 100);
-    context.fillStyle = color;
-    context.fill(new Path2D(path));
-    context.restore();
-  }
   async function copyCanvas(canvas: HTMLCanvasElement, fallback: string) {
     const blob = await new Promise<Blob>((resolve, reject) =>
       canvas.toBlob(
@@ -308,124 +278,12 @@
     const card = document.querySelector<HTMLElement>(`[data-provider-id="${providerId}"]`);
     if (!card) return;
     const provider = viewState.providers[providerId]?.snapshot;
+    const layout = current.settings.providers.find((item) => item.id === providerId);
+    if (!provider || !layout) return;
     const snapshot = [providerDisplayName(providerId), card.innerText.trim()].join('\n');
     try {
-      const layout = current.settings.providers.find((item) => item.id === providerId);
-      const visible =
-        layout?.metrics.filter(
-          (metric) =>
-            metric.enabled && (metric.section === 'alwaysVisible' || Boolean(layout.expanded)),
-        ) ?? [];
-      const rows: ShareRow[] = [];
-      for (const metric of visible) {
-        const definition = metricDefinition(metric.id);
-        if (!definition || !provider) continue;
-        if (definition.kind === 'quota') {
-          const quota = provider.quotas.find((item) => item.id === definition.sourceId);
-          if (quota) rows.push({ kind: 'quota', label: definition.label, quota });
-          continue;
-        }
-        if (definition.kind === 'usage') {
-          const period =
-            definition.sourceId === 'today'
-              ? provider.usage.today
-              : definition.sourceId === 'yesterday'
-                ? provider.usage.yesterday
-                : provider.usage.last30Days;
-          const value = period
-            ? `${period.estimatedCostUsd === null ? '' : `$${period.estimatedCostUsd.toFixed(2)} · `}${new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(period.tokens)} tokens`
-            : 'No data';
-          rows.push({ kind: 'text', label: definition.label, value });
-          continue;
-        }
-        const total = provider.usage.daily.reduce((sum, day) => sum + day.tokens, 0);
-        rows.push({
-          kind: 'text',
-          label: definition.label,
-          value:
-            total > 0
-              ? `${new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(total)} tokens`
-              : 'No data',
-        });
-      }
-      const rowHeight = (row: ShareRow) => (row.kind === 'quota' ? 92 : 54);
-      const contentHeight = rows.reduce((sum, row) => sum + rowHeight(row), 0);
-      const canvas = document.createElement('canvas');
-      canvas.width = 720;
-      canvas.height = Math.max(350, 188 + contentHeight);
-      const context = canvas.getContext('2d');
-      if (!context) throw new Error('Canvas unavailable');
-      const palette = canvasPalette();
-      context.fillStyle = palette.tray;
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      context.fillStyle = palette.text;
-      context.font = '600 30px system-ui';
-      context.fillText(providerDisplayName(providerId), 42, 58);
-      context.fillStyle = palette.secondary;
-      context.font = '17px system-ui';
-      context.fillText(provider?.plan ?? 'OpenQuota', 42, 86);
-      drawProviderMark(
-        context,
-        providerId,
-        canvas.width - 78,
-        38,
-        38,
-        providerId === 'claude' || providerId === 'antigravity'
-          ? palette.provider(providerId)
-          : palette.text,
-      );
-
-      const cardTop = 112;
-      context.fillStyle = palette.surface;
-      context.beginPath();
-      context.roundRect(28, cardTop, 664, Math.max(88, contentHeight + 16), 20);
-      context.fill();
-      let cursor = cardTop + 8;
-      rows.forEach((row, index) => {
-        if (index > 0) {
-          context.fillStyle = palette.separator;
-          context.fillRect(50, cursor, 620, 1);
-        }
-        if (row.kind === 'quota') {
-          const remaining = Math.max(0, 100 - row.quota.usedPercent);
-          context.fillStyle = palette.text;
-          context.font = '600 19px system-ui';
-          context.fillText(row.label, 52, cursor + 27);
-          context.textAlign = 'right';
-          context.font = '17px system-ui';
-          context.fillStyle = palette.secondary;
-          context.fillText(`${remaining.toFixed(0)}% left`, 668, cursor + 27);
-          context.textAlign = 'left';
-          context.fillStyle = palette.track;
-          context.beginPath();
-          context.roundRect(52, cursor + 42, 616, 7, 4);
-          context.fill();
-          context.fillStyle = palette.fill;
-          const fillWidth = 616 * Math.min(1, Math.max(0, row.quota.usedPercent / 100));
-          if (fillWidth > 0) {
-            context.beginPath();
-            context.roundRect(52, cursor + 42, fillWidth, 7, Math.min(4, fillWidth / 2));
-            context.fill();
-          }
-          context.fillStyle = palette.text;
-          context.font = '17px system-ui';
-          context.fillText(`${row.quota.usedPercent.toFixed(0)}% used`, 52, cursor + 72);
-          cursor += rowHeight(row);
-        } else {
-          context.fillStyle = palette.text;
-          context.font = '600 18px system-ui';
-          context.fillText(row.label, 52, cursor + 34);
-          context.textAlign = 'right';
-          context.fillStyle = palette.secondary;
-          context.font = '17px system-ui';
-          context.fillText(row.value, 668, cursor + 34);
-          context.textAlign = 'left';
-          cursor += rowHeight(row);
-        }
-      });
-      context.fillStyle = palette.secondary;
-      context.font = '15px system-ui';
-      context.fillText('OpenQuota · Local usage snapshot', 42, canvas.height - 22);
+      const rows = buildProviderShareRows(providerId, provider, layout, current.settings, now);
+      const canvas = renderProviderShareCard({ providerId, plan: provider.plan, rows });
       await copyCanvas(canvas, snapshot);
     } catch {
       settingsError = 'Provider screenshot could not be copied.';
@@ -437,122 +295,11 @@
     const card = document.querySelector<HTMLElement>('[data-total-spend]');
     if (!card) return false;
     try {
-      const canvas = document.createElement('canvas');
-      canvas.width = 720;
-      canvas.height = 500;
-      const context = canvas.getContext('2d');
-      if (!context) throw new Error('Canvas unavailable');
-      const palette = canvasPalette();
-      const metric = current.settings.totalSpendMetric;
-      const period = current.settings.totalSpendPeriod;
-      const display = (value: number | null) => {
-        if (value === null) return '—';
-        if (metric === 'tokens')
-          return new Intl.NumberFormat('en-US', {
-            notation: 'compact',
-            maximumFractionDigits: 1,
-          }).format(value);
-        return `$${value >= 100 ? value.toFixed(0) : value.toFixed(2)}`;
-      };
-      const metricTitle =
-        metric === 'tokens' ? 'Tokens' : metric === 'costPerMillion' ? 'Cost/MTok' : 'Cost';
-      const unit =
-        metric === 'tokens' ? 'tokens' : metric === 'costPerMillion' ? '/ MTok' : 'total';
-      context.fillStyle = palette.tray;
-      context.fillRect(0, 0, canvas.width, canvas.height);
-      context.fillStyle = palette.text;
-      context.font = '600 30px system-ui';
-      context.fillText('Total Spend', 38, 58);
-      context.fillStyle = palette.secondary;
-      context.font = '17px system-ui';
-      context.fillText(`${metricTitle} · OpenQuota`, 38, 86);
-
-      context.fillStyle = palette.surface;
-      context.beginPath();
-      context.roundRect(28, 112, 664, 332, 22);
-      context.fill();
-
-      const options = [
-        { id: 'today', label: 'Today' },
-        { id: 'yesterday', label: 'Yesterday' },
-        { id: 'last30Days', label: '30 Days' },
-      ];
-      context.fillStyle = palette.track;
-      context.beginPath();
-      context.roundRect(48, 134, 624, 42, 21);
-      context.fill();
-      options.forEach((option, index) => {
-        const left = 52 + index * 205;
-        if (option.id === period) {
-          context.fillStyle = palette.tray;
-          context.beginPath();
-          context.roundRect(left, 138, 197, 34, 17);
-          context.fill();
-        }
-        context.fillStyle = option.id === period ? palette.text : palette.secondary;
-        context.font = `${option.id === period ? '600' : '500'} 16px system-ui`;
-        context.textAlign = 'center';
-        context.fillText(option.label, left + 98, 161);
+      const canvas = renderTotalSpendShareCard({
+        projection,
+        metric: current.settings.totalSpendMetric,
+        period: current.settings.totalSpendPeriod,
       });
-      context.textAlign = 'left';
-
-      if (projection.centerValue === null) {
-        context.fillStyle = palette.secondary;
-        context.font = '18px system-ui';
-        context.textAlign = 'center';
-        const message =
-          metric === 'tokens'
-            ? 'No token data for this period'
-            : metric === 'costPerMillion'
-              ? 'No cost-per-token data for this period'
-              : 'No cost data for this period';
-        context.fillText(message, 360, 305);
-        context.textAlign = 'left';
-      } else {
-        const total = projection.slices.reduce((sum, slice) => sum + slice.value, 0);
-        const floored = projection.slices.map((slice) =>
-          Math.max(total > 0 ? slice.value / total : 0, 0.025),
-        );
-        const flooredTotal = floored.reduce((sum, share) => sum + share, 0);
-        let start = -Math.PI / 2;
-        projection.slices.forEach((slice, index) => {
-          const width = (floored[index] / flooredTotal) * Math.PI * 2;
-          const gap = Math.min(0.025, width * 0.15);
-          context.beginPath();
-          context.strokeStyle = palette.provider(slice.id);
-          context.lineWidth = 34;
-          context.lineCap = 'round';
-          context.arc(184, 302, 76, start + gap, start + width - gap);
-          context.stroke();
-          start += width;
-        });
-        context.fillStyle = palette.text;
-        context.font = '600 25px system-ui';
-        context.textAlign = 'center';
-        context.fillText(display(projection.centerValue), 184, 300);
-        context.fillStyle = palette.secondary;
-        context.font = '14px system-ui';
-        context.fillText(unit, 184, 323);
-        context.textAlign = 'left';
-
-        projection.slices.forEach((slice, index) => {
-          const y = 246 + index * 42;
-          context.fillStyle = palette.provider(slice.id);
-          context.beginPath();
-          context.arc(335, y - 5, 6, 0, Math.PI * 2);
-          context.fill();
-          context.fillStyle = palette.text;
-          context.font = '18px system-ui';
-          context.fillText(providerDisplayName(slice.id), 352, y);
-          context.fillStyle = palette.secondary;
-          context.textAlign = 'right';
-          context.fillText(display(slice.value), 652, y);
-          context.textAlign = 'left';
-        });
-      }
-      context.fillStyle = palette.secondary;
-      context.font = '15px system-ui';
-      context.fillText('OpenQuota · Local usage snapshot', 38, 478);
       await copyCanvas(canvas, card.innerText.trim());
       return true;
     } catch {
