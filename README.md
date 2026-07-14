@@ -80,10 +80,15 @@ OpenQuota runs locally and has no cloud backend of its own.
 - Credentials are never included in the frontend state or copied into the OpenQuota SQLite cache.
 - OpenQuota contacts provider services only to retrieve quota data and refresh sign-in details when
   needed.
+- Model prices are resolved locally from bundled catalogs. When pricing is used, OpenQuota starts at
+  most one background check if the public LiteLLM, models.dev, or OpenQuota supplement feed is older
+  than a day; these requests never include usage or log data.
 - Local Codex and Claude logs are read for token counts and cost estimates. OpenQuota does not store
   your prompt content in its usage snapshots.
 - Cached snapshots, parsed usage records, and application settings are stored in `openquota.db`
   inside the platform application-data directory.
+- Validated pricing catalogs and their ETags are cached atomically in the `pricing` folder beside
+  the database. Bundled catalogs remain available when the network or a feed is unavailable.
 
 Cost values derived from local token logs and model pricing are estimates, not billing statements.
 
@@ -128,12 +133,20 @@ Svelte interface
     -> typed Tauri commands and events
     -> Rust application services
     -> provider auth, client, mapper, and local usage modules
+    -> shared offline-first model pricing engine
     -> SQLite cache and platform credential stores
 ```
 
 Provider API responses and credentials stay behind the Rust boundary. Each provider implements the
 same small runtime contract (`id`, local credential detection, and refresh) and produces a shared
 snapshot model for the UI. One provider failure does not stop the others from refreshing.
+
+Claude and Codex normalize local log events into the same pricing model. A provider refresh uses one
+immutable pricing snapshot from start to finish, while price feeds revalidate in the background with
+ETags. Unknown models remain explicitly unpriced instead of being silently counted as zero-cost
+usage. Their spend rows follow the same active-day, period-scoped unknown-model, and model-breakdown
+rules. Bundled pricing snapshots can be regenerated with
+`bash scripts/update_pricing_snapshots.sh`.
 
 The repository includes CI builds for Windows, macOS, and Linux, plus contract tests for shared
 Rust/TypeScript models and registered Tauri commands.

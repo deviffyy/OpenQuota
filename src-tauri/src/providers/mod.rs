@@ -2,6 +2,7 @@ pub mod antigravity;
 pub mod claude;
 pub mod codex;
 pub mod credential_store;
+mod daily_usage;
 #[cfg(test)]
 pub mod test_http;
 

@@ -16,7 +16,7 @@ import {
 afterEach(() => vi.restoreAllMocks());
 
 describe('share card layout', () => {
-  it('uses the Example app authored width and 4x export scale', () => {
+  it('uses the authored width and 4x export scale', () => {
     expect(SHARE_CARD_WIDTH).toBe(360);
     expect(SHARE_CARD_SCALE).toBe(4);
   });

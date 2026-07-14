@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::HashSet,
     fs,
     path::{Path, PathBuf},
     time::UNIX_EPOCH,
@@ -10,12 +10,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use walkdir::WalkDir;
 
-use crate::{
-    models::{DailyUsage, ModelUsageBreakdown, ModelUsageEntry, UsageHistory, UsagePeriod},
-    storage::Storage,
-};
+use crate::{models::UsageHistory, pricing::ModelPricing, storage::Storage};
 
-use super::{pricing::estimate_cost, CodexError};
+use super::CodexError;
+use crate::providers::daily_usage::DailyUsageAccumulator;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct TokenEvent {
@@ -28,30 +26,17 @@ pub struct TokenEvent {
     pub total: u64,
 }
 
-#[derive(Default)]
-struct DayAccumulator {
-    tokens: u64,
-    cost: f64,
-    priced_events: usize,
-    unpriced_events: usize,
-    unknown_models: HashSet<String>,
-    models: HashMap<String, ModelAccumulator>,
-}
-
-#[derive(Default)]
-struct ModelAccumulator {
-    display_name: String,
-    tokens: u64,
-    cost: f64,
-}
-
-pub fn scan_local_usage(storage: &Storage, now: DateTime<Utc>) -> Result<UsageHistory, CodexError> {
+pub fn scan_local_usage(
+    storage: &Storage,
+    now: DateTime<Utc>,
+    pricing: &ModelPricing,
+) -> Result<UsageHistory, CodexError> {
     let homes = codex_homes();
     let fast_tier = homes.iter().any(|home| uses_fast_service_tier(home));
     let since_date = now
         .with_timezone(&Local)
         .date_naive()
-        .checked_sub_days(Days::new(29))
+        .checked_sub_days(Days::new(30))
         .unwrap_or(NaiveDate::MIN);
     let mut events = Vec::new();
     let paths = discover_session_files(&homes);
@@ -89,7 +74,7 @@ pub fn scan_local_usage(storage: &Storage, now: DateTime<Utc>) -> Result<UsageHi
     }
     storage.prune_log_events("codex", &seen_paths)?;
 
-    Ok(aggregate(events, now, fast_tier))
+    Ok(aggregate(events, now, fast_tier, pricing))
 }
 
 fn codex_homes() -> Vec<PathBuf> {
@@ -422,163 +407,64 @@ fn auto_review_fallback(timestamp: &str) -> &'static str {
     .unwrap_or("gpt-5")
 }
 
-fn aggregate(events: Vec<TokenEvent>, now: DateTime<Utc>, fast_tier: bool) -> UsageHistory {
+fn aggregate(
+    events: Vec<TokenEvent>,
+    now: DateTime<Utc>,
+    fast_tier: bool,
+    pricing: &ModelPricing,
+) -> UsageHistory {
     let today = now.with_timezone(&Local).date_naive();
-    let yesterday = today.checked_sub_days(Days::new(1)).unwrap_or(today);
-    let since = today.checked_sub_days(Days::new(29)).unwrap_or(today);
+    let since = today.checked_sub_days(Days::new(30)).unwrap_or(today);
     let mut seen = HashSet::new();
-    let mut days: BTreeMap<NaiveDate, DayAccumulator> = BTreeMap::new();
+    let mut accumulator = DailyUsageAccumulator::default();
 
     for event in events {
         if !seen.insert(event.clone()) {
             continue;
         }
         let date = event.timestamp.with_timezone(&Local).date_naive();
-        if date < since || date > today {
+        if date < since {
             continue;
         }
-        let day = days.entry(date).or_default();
-        if let Some(cost) = estimate_cost(&event, fast_tier) {
-            day.tokens += event.total;
-            day.cost += cost;
-            day.priced_events += 1;
-            let name = event.model.trim();
-            if !name.is_empty() {
-                let model = day.models.entry(name.to_ascii_lowercase()).or_default();
-                if model.display_name.is_empty() {
-                    model.display_name = name.to_owned();
-                }
-                model.tokens += event.total;
-                model.cost += cost;
-            }
+        if let Some(cost) = estimate_cost(&event, fast_tier, pricing) {
+            accumulator.add(date, event.total, cost, event.model.trim());
         } else if event.total > 0 {
-            day.unpriced_events += 1;
-            if !event.model.trim().is_empty() {
-                day.unknown_models.insert(event.model.clone());
-            }
+            accumulator.add_unknown_model(date, &event.model);
         }
     }
 
-    let daily = days
-        .iter()
-        .rev()
-        .map(|(date, day)| daily_usage(*date, day))
-        .collect::<Vec<_>>();
-    let period_for = |date: &NaiveDate| {
-        days.get(date)
-            .filter(|day| day.tokens > 0 || day.cost > 0.0)
-            .map(usage_period)
-    };
-    let today_period = period_for(&today);
-    let yesterday_period = period_for(&yesterday);
-    let total = days
-        .values()
-        .fold(DayAccumulator::default(), |mut total, day| {
-            total.tokens += day.tokens;
-            total.cost += day.cost;
-            total.priced_events += day.priced_events;
-            total.unpriced_events += day.unpriced_events;
-            total.unknown_models.extend(day.unknown_models.clone());
-            for (key, model) in &day.models {
-                let target = total.models.entry(key.clone()).or_default();
-                if target.display_name.is_empty() {
-                    target.display_name = model.display_name.clone();
-                }
-                target.tokens += model.tokens;
-                target.cost += model.cost;
-            }
-            total
-        });
-    let mut unknown_models = total.unknown_models.iter().cloned().collect::<Vec<_>>();
-    unknown_models.sort();
-    UsageHistory {
-        today: today_period,
-        yesterday: yesterday_period,
-        last_30_days: (total.tokens > 0).then(|| usage_period(&total)),
-        daily,
-        unknown_models,
-    }
+    accumulator.build(now, "From your Codex logs (estimated)")
 }
 
-fn daily_usage(date: NaiveDate, day: &DayAccumulator) -> DailyUsage {
-    let period = usage_period(day);
-    DailyUsage {
-        date: date.format("%Y-%m-%d").to_string(),
-        tokens: period.tokens,
-        estimated_cost_usd: period.estimated_cost_usd,
-        estimate_complete: period.estimate_complete,
-    }
-}
-
-fn usage_period(day: &DayAccumulator) -> UsagePeriod {
-    let mut unknown_models = day.unknown_models.iter().cloned().collect::<Vec<_>>();
-    unknown_models.sort();
-    UsagePeriod {
-        tokens: day.tokens,
-        estimated_cost_usd: (day.priced_events > 0).then_some(day.cost),
-        estimate_complete: day.unpriced_events == 0,
-        model_breakdown: model_breakdown(day),
-        unknown_models,
-    }
-}
-
-fn model_breakdown(day: &DayAccumulator) -> Option<ModelUsageBreakdown> {
-    let mut models = day
-        .models
-        .values()
-        .filter(|model| model.tokens > 0 || model.cost > 0.0)
-        .map(|model| ModelUsageEntry {
-            model: model.display_name.clone(),
-            total_tokens: model.tokens,
-            cost_usd: Some(model.cost),
-        })
-        .collect::<Vec<_>>();
-    models.sort_by(|left, right| {
-        right
-            .cost_usd
-            .partial_cmp(&left.cost_usd)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| right.total_tokens.cmp(&left.total_tokens))
-            .then_with(|| left.model.cmp(&right.model))
-    });
-    if models.is_empty() {
-        return None;
-    }
-
-    let total_cost = models
-        .iter()
-        .filter_map(|model| model.cost_usd)
-        .sum::<f64>();
-    let mut visible = Vec::new();
-    let mut other_tokens = 0;
-    let mut other_cost = 0.0;
-    for model in models {
-        let share = model.cost_usd.unwrap_or_default() / total_cost.max(f64::EPSILON);
-        if share >= 0.05 && visible.len() < 5 {
-            visible.push(model);
+fn estimate_cost(event: &TokenEvent, fast_tier: bool, pricing: &ModelPricing) -> Option<f64> {
+    let rates = pricing.resolve(event.model.trim())?;
+    let non_cached = event.input.saturating_sub(event.cached) as f64;
+    let base_cost = (non_cached * rates.input_per_million
+        + event.cached as f64 * rates.cache_read_per_million
+        + event.output as f64 * rates.output_per_million)
+        / 1_000_000.0;
+    let multiplier = if fast_tier {
+        if rates.fast_multiplier == 1.0 {
+            2.0
         } else {
-            other_tokens += model.total_tokens;
-            other_cost += model.cost_usd.unwrap_or_default();
+            rates.fast_multiplier
         }
-    }
-    if other_tokens > 0 || other_cost > 0.0 {
-        visible.push(ModelUsageEntry {
-            model: "Other".into(),
-            total_tokens: other_tokens,
-            cost_usd: Some(other_cost),
-        });
-    }
-    Some(ModelUsageBreakdown {
-        models: visible,
-        source_note: "From your Codex logs (estimated)".into(),
-    })
+    } else {
+        1.0
+    };
+    Some(base_cost * multiplier)
 }
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use chrono::{TimeZone, Utc};
 
-    use super::{aggregate, parse_jsonl};
+    use super::{aggregate, estimate_cost, parse_jsonl, TokenEvent};
+    use crate::pricing::{
+        test_bundled_pricing, ModelPricing, ModelRates, PricingCatalog, PricingSupplement,
+    };
 
     #[test]
     fn parses_last_usage_and_tracks_turn_model() {
@@ -605,7 +491,8 @@ mod tests {
     fn newly_priced_models_produce_a_complete_estimate() {
         let now = Utc.with_ymd_and_hms(2026, 7, 10, 12, 0, 0).unwrap();
         let content = r#"{"timestamp":"2026-07-10T08:00:00Z","type":"event_msg","payload":{"type":"token_count","model":"gpt-5.6-sol","info":{"last_token_usage":{"input_tokens":100,"output_tokens":10,"total_tokens":110}}}}"#;
-        let history = aggregate(parse_jsonl(content), now, false);
+        let pricing = test_bundled_pricing();
+        let history = aggregate(parse_jsonl(content), now, false, &pricing);
         assert_eq!(history.today.as_ref().unwrap().tokens, 110);
         assert!(history.today.as_ref().unwrap().estimated_cost_usd.is_some());
         assert!(history.today.as_ref().unwrap().estimate_complete);
@@ -618,7 +505,8 @@ mod tests {
         let content = r#"{"timestamp":"2026-07-10T08:00:00Z","type":"event_msg","payload":{"type":"token_count","model":"gpt-5.4","info":{"last_token_usage":{"input_tokens":1000,"output_tokens":100,"total_tokens":1100}}}}
 {"timestamp":"2026-07-10T09:00:00Z","type":"event_msg","payload":{"type":"token_count","model":"gpt-5.3-codex","info":{"last_token_usage":{"input_tokens":800,"output_tokens":100,"total_tokens":900}}}}
 {"timestamp":"2026-07-10T10:00:00Z","type":"event_msg","payload":{"type":"token_count","model":"future-unpriced-model","info":{"last_token_usage":{"input_tokens":400,"output_tokens":100,"total_tokens":500}}}}"#;
-        let history = aggregate(parse_jsonl(content), now, false);
+        let pricing = test_bundled_pricing();
+        let history = aggregate(parse_jsonl(content), now, false, &pricing);
         let today = history.today.unwrap();
         let breakdown = today.model_breakdown.unwrap();
 
@@ -636,11 +524,47 @@ mod tests {
     }
 
     #[test]
+    fn unknown_only_usage_does_not_create_spend_periods() {
+        let now = Utc.with_ymd_and_hms(2026, 7, 10, 12, 0, 0).unwrap();
+        let content = r#"{"timestamp":"2026-07-10T10:00:00Z","type":"event_msg","payload":{"type":"token_count","model":"future-unpriced-model","info":{"last_token_usage":{"input_tokens":400,"output_tokens":100,"total_tokens":500}}}}"#;
+        let pricing = test_bundled_pricing();
+        let history = aggregate(parse_jsonl(content), now, false, &pricing);
+
+        assert!(history.today.is_none());
+        assert!(history.last_30_days.is_none());
+        assert!(history.daily.is_empty());
+        assert_eq!(history.unknown_models, ["future-unpriced-model"]);
+    }
+
+    #[test]
     fn provider_fixture_parses_realistic_codex_jsonl() {
         let content = include_str!("../../../tests/fixtures/codex_session.jsonl");
         let events = parse_jsonl(content);
         assert_eq!(events.len(), 2);
         assert_eq!(events.iter().map(|event| event.total).sum::<u64>(), 225);
         assert!(events.iter().all(|event| event.model == "gpt-5.4"));
+    }
+
+    #[test]
+    fn fast_tier_defaults_to_two_x_multiplier() {
+        let pricing = ModelPricing::new(
+            PricingSupplement::default(),
+            PricingCatalog {
+                entries: HashMap::from([("test-model".into(), ModelRates::new(2.0, 8.0))]),
+                retrieved_at: None,
+            },
+            PricingCatalog::default(),
+        );
+        let event = TokenEvent {
+            timestamp: Utc::now(),
+            model: "test-model".into(),
+            input: 1_000_000,
+            cached: 0,
+            output: 0,
+            reasoning: 0,
+            total: 1_000_000,
+        };
+        assert_eq!(estimate_cost(&event, false, &pricing), Some(2.0));
+        assert_eq!(estimate_cost(&event, true, &pricing), Some(4.0));
     }
 }

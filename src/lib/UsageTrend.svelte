@@ -26,7 +26,7 @@
     const result: DailyUsage[] = [];
     const today = new SvelteDate();
     today.setHours(12, 0, 0, 0);
-    for (let offset = 29; offset >= 0; offset -= 1) {
+    for (let offset = 30; offset >= 0; offset -= 1) {
       const date = new SvelteDate(today);
       date.setDate(today.getDate() - offset);
       const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;

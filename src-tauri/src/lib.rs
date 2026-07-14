@@ -6,6 +6,7 @@ mod notifications;
 mod pacing;
 mod policy;
 mod popup;
+mod pricing;
 mod providers;
 mod refresh_loop;
 mod service;
@@ -34,6 +35,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use crate::{
     desktop_integration::DesktopIntegration,
     pacing::NotificationEvaluator,
+    pricing::PricingStore,
     providers::{
         antigravity::AntigravityProvider, claude::ClaudeProvider, codex::CodexProvider,
         UsageProvider,
@@ -127,9 +129,12 @@ pub fn run() {
 
             let database_path = app.path().app_data_dir()?.join("openquota.db");
             let storage = Arc::new(Storage::open(&database_path)?);
+            let pricing = Arc::new(PricingStore::new(
+                app.path().app_data_dir()?.join("pricing"),
+            )?);
             let providers: Vec<Arc<dyn UsageProvider>> = vec![
-                Arc::new(ClaudeProvider::new(storage.clone())?),
-                Arc::new(CodexProvider::new(storage.clone())?),
+                Arc::new(ClaudeProvider::new(storage.clone(), pricing.clone())?),
+                Arc::new(CodexProvider::new(storage.clone(), pricing.clone())?),
                 Arc::new(AntigravityProvider::new()?),
             ];
             let detected = providers

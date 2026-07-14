@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fs,
     path::PathBuf,
     time::UNIX_EPOCH,
@@ -11,11 +11,13 @@ use serde_json::Value;
 use walkdir::WalkDir;
 
 use crate::{
-    models::{DailyUsage, UsageHistory, UsagePeriod},
+    models::UsageHistory,
+    pricing::{ModelPricing, TokenBreakdown},
     storage::Storage,
 };
 
 use super::{auth::claude_home, ClaudeError};
+use crate::providers::daily_usage::DailyUsageAccumulator;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ClaudeTokenEvent {
@@ -29,7 +31,19 @@ pub struct ClaudeTokenEvent {
     pub message_id: Option<String>,
     pub request_id: Option<String>,
     pub sidechain: bool,
+    #[serde(default)]
+    pub is_fast: bool,
+    #[serde(default)]
+    pub has_speed: bool,
     pub cost_usd: Option<f64>,
+}
+
+const LOG_CACHE_SCHEMA_VERSION: u8 = 1;
+
+#[derive(Serialize, Deserialize)]
+struct CachedClaudeEvents {
+    schema_version: u8,
+    events: Vec<ClaudeTokenEvent>,
 }
 
 impl ClaudeTokenEvent {
@@ -38,22 +52,15 @@ impl ClaudeTokenEvent {
     }
 }
 
-#[derive(Default)]
-struct DayAccumulator {
-    tokens: u64,
-    cost: f64,
-    complete: bool,
-    unknown_models: HashSet<String>,
-}
-
 pub fn scan_local_usage(
     storage: &Storage,
     now: DateTime<Utc>,
+    pricing: &ModelPricing,
 ) -> Result<UsageHistory, ClaudeError> {
     let since_date = now
         .with_timezone(&Local)
         .date_naive()
-        .checked_sub_days(Days::new(29))
+        .checked_sub_days(Days::new(30))
         .unwrap_or(NaiveDate::MIN);
     let mut events = Vec::new();
     let paths = discover_files();
@@ -72,16 +79,22 @@ pub fn scan_local_usage(
         let cached = storage
             .load_log_events("claude", &path, metadata.len(), modified_millis)
             .map_err(|_| ClaudeError::LocalUsage)?;
-        let parsed = if let Some(parsed) = cached
-            .as_deref()
-            .and_then(|json| serde_json::from_str::<Vec<ClaudeTokenEvent>>(json).ok())
-        {
+        let parsed = if let Some(parsed) = cached.as_deref().and_then(|json| {
+            serde_json::from_str::<CachedClaudeEvents>(json)
+                .ok()
+                .filter(|cache| cache.schema_version == LOG_CACHE_SCHEMA_VERSION)
+                .map(|cache| cache.events)
+        }) {
             parsed
         } else {
             let parsed = fs::read_to_string(&path)
                 .map(|content| parse_jsonl(&content))
                 .unwrap_or_default();
-            let json = serde_json::to_string(&parsed).map_err(|_| ClaudeError::LocalUsage)?;
+            let json = serde_json::to_string(&CachedClaudeEvents {
+                schema_version: LOG_CACHE_SCHEMA_VERSION,
+                events: parsed.clone(),
+            })
+            .map_err(|_| ClaudeError::LocalUsage)?;
             storage
                 .save_log_events("claude", &path, metadata.len(), modified_millis, &json)
                 .map_err(|_| ClaudeError::LocalUsage)?;
@@ -96,7 +109,7 @@ pub fn scan_local_usage(
     storage
         .prune_log_events("claude", &seen_paths)
         .map_err(|_| ClaudeError::LocalUsage)?;
-    Ok(aggregate(deduplicate(events), now))
+    Ok(aggregate(deduplicate(events), now, pricing))
 }
 
 fn discover_files() -> Vec<PathBuf> {
@@ -133,6 +146,10 @@ fn parse_line(line: &str) -> Option<ClaudeTokenEvent> {
     let usage = message.get("usage")?;
     let input = integer(usage.get("input_tokens"))?;
     let output = integer(usage.get("output_tokens"))?;
+    let speed = usage.get("speed").and_then(Value::as_str);
+    if speed.is_some_and(|speed| !matches!(speed, "fast" | "standard")) {
+        return None;
+    }
     let (cache_write_5m, cache_write_1h) = usage
         .get("cache_creation")
         .map(|cache| {
@@ -169,6 +186,8 @@ fn parse_line(line: &str) -> Option<ClaudeTokenEvent> {
             .get("isSidechain")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        is_fast: speed == Some("fast"),
+        has_speed: speed.is_some(),
         cost_usd: object.get("costUSD").and_then(number),
     })
 }
@@ -195,7 +214,10 @@ fn deduplicate(events: Vec<ClaudeTokenEvent>) -> Vec<ClaudeTokenEvent> {
             let existing = &output[index];
             let replace = (existing.sidechain && !event.sidechain)
                 || (existing.sidechain == event.sidechain
-                    && event.total_tokens() > existing.total_tokens());
+                    && (event.total_tokens() > existing.total_tokens()
+                        || (event.total_tokens() == existing.total_tokens()
+                            && event.has_speed
+                            && !existing.has_speed)));
             if replace {
                 output[index] = event;
                 exact.insert(key, index);
@@ -210,114 +232,52 @@ fn deduplicate(events: Vec<ClaudeTokenEvent>) -> Vec<ClaudeTokenEvent> {
     output
 }
 
-fn aggregate(events: Vec<ClaudeTokenEvent>, now: DateTime<Utc>) -> UsageHistory {
-    let today = now.with_timezone(&Local).date_naive();
-    let start = today.checked_sub_days(Days::new(29)).unwrap_or(today);
-    let mut days = BTreeMap::<NaiveDate, DayAccumulator>::new();
-    for offset in 0..30 {
-        if let Some(date) = start.checked_add_days(Days::new(offset)) {
-            days.insert(
-                date,
-                DayAccumulator {
-                    complete: true,
-                    ..DayAccumulator::default()
-                },
-            );
-        }
-    }
+fn aggregate(
+    events: Vec<ClaudeTokenEvent>,
+    now: DateTime<Utc>,
+    pricing: &ModelPricing,
+) -> UsageHistory {
+    let since = now
+        .with_timezone(&Local)
+        .date_naive()
+        .checked_sub_days(Days::new(30))
+        .unwrap_or(NaiveDate::MIN);
+    let mut accumulator = DailyUsageAccumulator::default();
     for event in events {
         let date = event.timestamp.with_timezone(&Local).date_naive();
-        let Some(day) = days.get_mut(&date) else {
+        if date < since {
             continue;
+        }
+        let tokens = TokenBreakdown {
+            input: event.input,
+            cache_write_5m: event.cache_write_5m,
+            cache_write_1h: event.cache_write_1h,
+            cache_read: event.cache_read,
+            output: event.output,
+            is_fast: event.is_fast,
         };
-        day.tokens += event.total_tokens();
-        if let Some(cost) = event.cost_usd.or_else(|| estimate_cost(&event)) {
-            day.cost += cost;
-        } else if event.total_tokens() > 0 {
-            day.complete = false;
-            if let Some(model) = event.model {
-                day.unknown_models.insert(model);
+        let model_name = event
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty());
+        let cost = event
+            .cost_usd
+            .or_else(|| pricing.estimated_cost_dollars(model_name?, tokens, true));
+        if let Some(cost) = cost {
+            accumulator.add(
+                date,
+                tokens.total_tokens(),
+                cost,
+                model_name.unwrap_or("Unattributed"),
+            );
+        } else if tokens.total_tokens() > 0 {
+            if let Some(model) = model_name {
+                accumulator.add_unknown_model(date, model);
             }
         }
     }
-    let daily = days
-        .iter()
-        .map(|(date, day)| DailyUsage {
-            date: date.to_string(),
-            tokens: day.tokens,
-            estimated_cost_usd: (day.complete || day.cost > 0.0).then_some(day.cost),
-            estimate_complete: day.complete,
-        })
-        .collect::<Vec<_>>();
-    let yesterday = today.checked_sub_days(Days::new(1));
-    let period_for = |date: Option<NaiveDate>| {
-        let day = days.get(&date?)?;
-        Some(UsagePeriod {
-            tokens: day.tokens,
-            estimated_cost_usd: (day.complete || day.cost > 0.0).then_some(day.cost),
-            estimate_complete: day.complete,
-            model_breakdown: None,
-            unknown_models: Vec::new(),
-        })
-    };
-    let mut unknown_models = days
-        .values()
-        .flat_map(|day| day.unknown_models.iter().cloned())
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect::<Vec<_>>();
-    unknown_models.sort();
-    UsageHistory {
-        today: period_for(Some(today)),
-        yesterday: period_for(yesterday),
-        last_30_days: Some(UsagePeriod {
-            tokens: days.values().map(|day| day.tokens).sum(),
-            estimated_cost_usd: days
-                .values()
-                .all(|day| day.complete)
-                .then(|| days.values().map(|day| day.cost).sum()),
-            estimate_complete: days.values().all(|day| day.complete),
-            model_breakdown: None,
-            unknown_models: Vec::new(),
-        }),
-        daily,
-        unknown_models,
-    }
-}
-
-fn estimate_cost(event: &ClaudeTokenEvent) -> Option<f64> {
-    let model = event.model.as_deref()?.to_ascii_lowercase();
-    let (input, output) = if model.contains("fable-5") || model.contains("mythos-5") {
-        (10.0, 50.0)
-    } else if model.contains("opus-4-8")
-        || model.contains("opus-4-7")
-        || model.contains("opus-4-6")
-        || model.contains("opus-4-5")
-    {
-        (5.0, 25.0)
-    } else if model.contains("opus-4") || model.contains("opus-3") {
-        (15.0, 75.0)
-    } else if model.contains("sonnet-5") {
-        (2.0, 10.0)
-    } else if model.contains("sonnet-4") || model.contains("sonnet-3") {
-        (3.0, 15.0)
-    } else if model.contains("haiku-4-5") {
-        (1.0, 5.0)
-    } else if model.contains("haiku-3-5") {
-        (0.8, 4.0)
-    } else if model.contains("haiku-3") {
-        (0.25, 1.25)
-    } else {
-        return None;
-    };
-    Some(
-        (event.input as f64 * input
-            + event.cache_write_5m as f64 * input * 1.25
-            + event.cache_write_1h as f64 * input * 2.0
-            + event.cache_read as f64 * input * 0.1
-            + event.output as f64 * output)
-            / 1_000_000.0,
-    )
+    accumulator.build(now, "From your Claude usage history (estimated)")
 }
 
 fn integer(value: Option<&Value>) -> Option<u64> {
@@ -332,7 +292,12 @@ fn number(value: &Value) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
-    use super::{deduplicate, estimate_cost, parse_jsonl};
+    use chrono::{TimeZone, Utc};
+
+    use super::{
+        aggregate, deduplicate, parse_jsonl, CachedClaudeEvents, LOG_CACHE_SCHEMA_VERSION,
+    };
+    use crate::pricing::test_bundled_pricing;
 
     #[test]
     fn provider_fixture_parses_and_deduplicates_claude_usage_lines() {
@@ -341,6 +306,57 @@ mod tests {
         let events = deduplicate(events);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].total_tokens(), 170);
-        assert!(estimate_cost(&events[0]).unwrap() > 0.0);
+        let history = aggregate(events, chrono::Utc::now(), &test_bundled_pricing());
+        assert!(history.last_30_days.unwrap().estimated_cost_usd.is_some());
+    }
+
+    #[test]
+    fn unknown_usage_is_excluded_but_remains_visible_as_incomplete() {
+        let content = r#"{"timestamp":"2026-07-15T08:00:00Z","message":{"model":"claude-sonnet-4-5-20250929","usage":{"input_tokens":100,"output_tokens":10}}}
+{"timestamp":"2026-07-15T09:00:00Z","message":{"model":"future-unpriced-model","usage":{"input_tokens":500,"output_tokens":20}}}"#;
+        let now = Utc.with_ymd_and_hms(2026, 7, 15, 12, 0, 0).unwrap();
+        let history = aggregate(parse_jsonl(content), now, &test_bundled_pricing());
+        let today = history.today.unwrap();
+        assert_eq!(today.tokens, 110);
+        assert!(!today.estimate_complete);
+        assert_eq!(today.unknown_models, ["future-unpriced-model"]);
+    }
+
+    #[test]
+    fn explicit_cost_wins_even_when_model_has_no_catalog_entry() {
+        let content = r#"{"timestamp":"2026-07-15T08:00:00Z","costUSD":1.75,"message":{"model":"future-unpriced-model","usage":{"input_tokens":500,"output_tokens":20}}}"#;
+        let now = Utc.with_ymd_and_hms(2026, 7, 15, 12, 0, 0).unwrap();
+        let history = aggregate(parse_jsonl(content), now, &test_bundled_pricing());
+        let today = history.today.unwrap();
+        assert_eq!(today.tokens, 520);
+        assert_eq!(today.estimated_cost_usd, Some(1.75));
+        assert!(today.estimate_complete);
+        assert!(today.unknown_models.is_empty());
+    }
+
+    #[test]
+    fn parser_preserves_supported_speed_for_fast_pricing() {
+        let content = r#"{"timestamp":"2026-07-15T08:00:00Z","message":{"model":"claude-opus-4-6","usage":{"input_tokens":100,"output_tokens":10,"speed":"fast"}}}"#;
+        let event = parse_jsonl(content).pop().unwrap();
+        assert!(event.is_fast);
+        assert!(event.has_speed);
+    }
+
+    #[test]
+    fn old_log_cache_shape_is_rejected_after_speed_support() {
+        let events = parse_jsonl(
+            r#"{"timestamp":"2026-07-15T08:00:00Z","message":{"model":"claude-opus-4-6","usage":{"input_tokens":100,"output_tokens":10,"speed":"fast"}}}"#,
+        );
+        let old_cache = serde_json::to_string(&events).unwrap();
+        assert!(serde_json::from_str::<CachedClaudeEvents>(&old_cache).is_err());
+
+        let current = serde_json::to_string(&CachedClaudeEvents {
+            schema_version: LOG_CACHE_SCHEMA_VERSION,
+            events,
+        })
+        .unwrap();
+        let decoded = serde_json::from_str::<CachedClaudeEvents>(&current).unwrap();
+        assert_eq!(decoded.schema_version, LOG_CACHE_SCHEMA_VERSION);
+        assert!(decoded.events[0].is_fast);
     }
 }

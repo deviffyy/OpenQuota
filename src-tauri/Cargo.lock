@@ -2678,6 +2678,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "notify-rust",
+ "regex",
  "reqwest",
  "rusqlite",
  "secret-service",

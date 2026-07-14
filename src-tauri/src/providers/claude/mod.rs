@@ -9,7 +9,11 @@ use chrono::{Duration, Utc};
 use reqwest::StatusCode;
 use thiserror::Error;
 
-use crate::{models::ProviderSnapshot, storage::Storage};
+use crate::{
+    models::ProviderSnapshot,
+    pricing::{ModelPricing, PricingStore},
+    storage::Storage,
+};
 
 use self::{
     auth::{load_candidates, oauth_config, ClaudeCredential},
@@ -42,15 +46,17 @@ pub enum ClaudeError {
 
 pub struct ClaudeProvider {
     storage: Arc<Storage>,
+    pricing: Arc<PricingStore>,
     client: ClaudeClient,
     last_good: Mutex<Option<ProviderSnapshot>>,
     rate_limited_until: Mutex<Option<chrono::DateTime<Utc>>>,
 }
 
 impl ClaudeProvider {
-    pub fn new(storage: Arc<Storage>) -> Result<Self, ClaudeError> {
+    pub fn new(storage: Arc<Storage>, pricing: Arc<PricingStore>) -> Result<Self, ClaudeError> {
         Ok(Self {
             storage,
+            pricing,
             client: ClaudeClient::new()?,
             last_good: Mutex::new(None),
             rate_limited_until: Mutex::new(None),
@@ -64,9 +70,10 @@ impl ClaudeProvider {
         }
         let now = Utc::now();
         let config = oauth_config()?;
+        let pricing = self.pricing.current();
         let mut last_auth_error = None;
         for mut credential in candidates {
-            match self.refresh_candidate(&mut credential, &config, now) {
+            match self.refresh_candidate(&mut credential, &config, now, &pricing) {
                 Ok(snapshot) => return Ok(snapshot),
                 Err(error @ (ClaudeError::SessionExpired | ClaudeError::TokenExpired)) => {
                     last_auth_error = Some(error);
@@ -82,15 +89,10 @@ impl ClaudeProvider {
         credential: &mut ClaudeCredential,
         config: &auth::ClaudeOAuthConfig,
         now: chrono::DateTime<Utc>,
+        pricing: &ModelPricing,
     ) -> Result<ProviderSnapshot, ClaudeError> {
         let mut warnings = Vec::new();
-        let usage = scan_local_usage(&self.storage, now)?;
-        if !usage.unknown_models.is_empty() {
-            warnings.push(format!(
-                "No public price is available for: {}. Token totals remain measured; cost estimates may be incomplete.",
-                usage.unknown_models.join(", ")
-            ));
-        }
+        let usage = scan_local_usage(&self.storage, now, pricing)?;
 
         if credential.inference_only {
             return Ok(ProviderSnapshot {

@@ -2,7 +2,6 @@ pub mod auth;
 pub mod client;
 pub mod local_usage;
 pub mod mapper;
-pub mod pricing;
 
 use std::sync::Arc;
 
@@ -10,7 +9,7 @@ use chrono::Utc;
 use reqwest::StatusCode;
 use thiserror::Error;
 
-use crate::{models::ProviderSnapshot, storage::Storage};
+use crate::{models::ProviderSnapshot, pricing::PricingStore, storage::Storage};
 
 use self::{
     auth::CodexAuthState, client::CodexClient, local_usage::scan_local_usage, mapper::map_usage,
@@ -56,13 +55,15 @@ impl From<crate::storage::StorageError> for CodexError {
 
 pub struct CodexProvider {
     storage: Arc<Storage>,
+    pricing: Arc<PricingStore>,
     client: CodexClient,
 }
 
 impl CodexProvider {
-    pub fn new(storage: Arc<Storage>) -> Result<Self, CodexError> {
+    pub fn new(storage: Arc<Storage>, pricing: Arc<PricingStore>) -> Result<Self, CodexError> {
         Ok(Self {
             storage,
+            pricing,
             client: CodexClient::new()?,
         })
     }
@@ -94,7 +95,8 @@ impl CodexProvider {
                 .fetch_usage(&auth.access_token, auth.account_id.as_deref())?;
         }
         let mapped = map_usage(&response, now)?;
-        let usage = scan_local_usage(&self.storage, now)?;
+        let pricing = self.pricing.current();
+        let usage = scan_local_usage(&self.storage, now, &pricing)?;
         Ok(ProviderSnapshot {
             provider_id: "codex".into(),
             plan: mapped.plan,

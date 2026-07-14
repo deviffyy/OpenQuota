@@ -68,6 +68,6 @@ describe('native visual contract', () => {
     const bars = container.querySelectorAll<HTMLElement>('.trend-detail__bars i');
     await fireEvent.mouseEnter(bars[bars.length - 1]);
     expect(screen.getByText(/· 42K tokens$/)).toBeInTheDocument();
-    expect(container.querySelectorAll('.trend-detail__bars i.muted')).toHaveLength(29);
+    expect(container.querySelectorAll('.trend-detail__bars i.muted')).toHaveLength(30);
   });
 });
