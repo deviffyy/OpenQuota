@@ -155,9 +155,18 @@
     opacity: 0 !important;
   }
 
-  .pointer-reorder-lift {
+  .pointer-reorder-layer {
     position: fixed;
+    inset: 0;
     z-index: 9999;
+    overflow: visible;
+    pointer-events: none;
+    isolation: isolate;
+  }
+
+  .pointer-reorder-lift {
+    position: absolute;
+    z-index: 1;
     pointer-events: none;
     color: var(--text);
     opacity: 1;

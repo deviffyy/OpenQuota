@@ -188,6 +188,9 @@ describe('pointer reorder interaction', () => {
 
   it('keeps the lifted preview inside the visible window', async () => {
     const { source, header } = reorderFixture();
+    const previewButton = document.createElement('button');
+    previewButton.autofocus = true;
+    source.append(previewButton);
     const action = pointerReorder(source, {
       id: 'first',
       group: 'test',
@@ -208,6 +211,10 @@ describe('pointer reorder interaction', () => {
       clientY: window.innerHeight + 500,
     });
     const lift = document.querySelector<HTMLElement>('.pointer-reorder-lift')!;
+    expect(lift.parentElement).toHaveClass('pointer-reorder-layer');
+    expect(lift).not.toHaveAttribute('inert');
+    expect(lift.querySelector('button')).toHaveAttribute('tabindex', '-1');
+    expect(lift.querySelector('button')).not.toHaveAttribute('autofocus');
     expect(Number.parseFloat(lift.style.left)).toBeLessThanOrEqual(window.innerWidth - 200);
     expect(Number.parseFloat(lift.style.top)).toBeLessThanOrEqual(window.innerHeight - 40);
 
@@ -220,6 +227,7 @@ describe('pointer reorder interaction', () => {
     expect(Number.parseFloat(lift.style.left)).toBeGreaterThanOrEqual(0);
     expect(Number.parseFloat(lift.style.top)).toBeGreaterThanOrEqual(0);
     await fireEvent.pointerUp(window, { pointerId: 1, pointerType: 'mouse' });
+    expect(document.querySelector('.pointer-reorder-layer')).toBeNull();
     action.destroy();
   });
 

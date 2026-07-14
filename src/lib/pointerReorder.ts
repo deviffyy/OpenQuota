@@ -148,7 +148,7 @@ function reorderElements(group: string) {
   return [...document.querySelectorAll<HTMLElement>('[data-reorder-group][data-reorder-id]')]
     .filter(
       (element) =>
-        element.dataset.reorderGroup === group && !element.closest('.pointer-reorder-lift'),
+        element.dataset.reorderGroup === group && !element.closest('.pointer-reorder-layer'),
     )
     .map((element) => ({
       element,
@@ -158,16 +158,37 @@ function reorderElements(group: string) {
     .filter((entry) => entry.id.length > 0);
 }
 
+function makePreviewNonInteractive(preview: HTMLElement) {
+  const focusable = preview.matches(
+    'a[href], button, input, select, textarea, summary, [tabindex], [contenteditable]',
+  )
+    ? [preview]
+    : [];
+  focusable.push(
+    ...preview.querySelectorAll<HTMLElement>(
+      'a[href], button, input, select, textarea, summary, [tabindex], [contenteditable]',
+    ),
+  );
+  for (const element of focusable) {
+    element.tabIndex = -1;
+    element.removeAttribute('autofocus');
+    if (element.hasAttribute('contenteditable')) element.setAttribute('contenteditable', 'false');
+  }
+}
+
 function makeLift(source: HTMLElement, start: ReorderPoint) {
   const rect = source.getBoundingClientRect();
+  const layer = document.createElement('div');
+  layer.className = 'pointer-reorder-layer';
+  layer.setAttribute('aria-hidden', 'true');
   const lift = source.cloneNode(true) as HTMLElement;
   lift.classList.remove('reorder-source');
   lift.classList.add('pointer-reorder-lift');
-  lift.setAttribute('aria-hidden', 'true');
-  lift.inert = true;
+  makePreviewNonInteractive(lift);
   lift.style.width = `${rect.width}px`;
   lift.style.height = `${rect.height}px`;
-  document.body.append(lift);
+  layer.append(lift);
+  document.body.append(layer);
 
   const offsetX = Math.min(Math.max(0, start.x - rect.left), rect.width);
   const offsetY = Math.min(Math.max(0, start.y - rect.top), rect.height);
@@ -182,7 +203,7 @@ function makeLift(source: HTMLElement, start: ReorderPoint) {
     lift.style.top = `${top}px`;
   };
   move(start);
-  return { lift, move };
+  return { lift, move, remove: () => layer.remove() };
 }
 
 function suppressDragClick() {
@@ -272,7 +293,7 @@ export function pointerReorder(node: HTMLElement, initialOptions: PointerReorder
         // The source can be replaced while crossing between keyed sections.
       }
       currentSource?.classList.remove('reorder-source');
-      lift?.lift.remove();
+      lift?.remove();
       document.documentElement.classList.remove('is-reordering');
       activeCleanup = null;
       if (dragging) {

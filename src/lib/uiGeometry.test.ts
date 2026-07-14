@@ -70,7 +70,12 @@ describe('popover geometry contract', () => {
   });
 
   it('keeps drag depth on painted surfaces instead of darkening transparent headers', () => {
+    const layerRule = css.match(/\.pointer-reorder-layer\s*{([^}]*)}/s)?.[1] ?? '';
     const liftRule = css.match(/\.pointer-reorder-lift\s*{([^}]*)}/s)?.[1] ?? '';
+    expect(layerRule).toContain('position: fixed');
+    expect(layerRule).toContain('inset: 0');
+    expect(layerRule).toContain('isolation: isolate');
+    expect(liftRule).toContain('position: absolute');
     expect(liftRule).toContain('color: var(--text)');
     expect(liftRule).toContain('opacity: 1');
     expect(liftRule).not.toContain('box-shadow');
