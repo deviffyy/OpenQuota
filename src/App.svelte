@@ -19,6 +19,7 @@
   } from './lib/backend';
   import CustomizeProviderDetail from './lib/CustomizeProviderDetail.svelte';
   import CustomizeProviderList from './lib/CustomizeProviderList.svelte';
+  import ConfirmationSheet from './lib/ConfirmationSheet.svelte';
   import Dashboard from './lib/Dashboard.svelte';
   import Icon from './lib/Icon.svelte';
   import { createListenerRegistry } from './lib/listenerRegistry';
@@ -56,6 +57,8 @@
   let customizationGestureStart: AppSettings | null = null;
   let reordering = $state(false);
   let confirmationMessage = $state<string | null>(null);
+  let resetConfirmationOpen = $state(false);
+  let resettingCustomization = $state(false);
   let showAbout = $state(false);
   let shareMenuOpen = $state(false);
   let optionsMenuElement = $state<HTMLDetailsElement>();
@@ -102,6 +105,10 @@
     windowController.scheduleFit();
   }
 
+  function beginContentMorph() {
+    windowController.beginContentMorph();
+  }
+
   function closePopup() {
     resetTransientUi();
     navigate('dashboard');
@@ -109,6 +116,8 @@
   }
   function resetTransientUi() {
     showAbout = false;
+    resetConfirmationOpen = false;
+    resettingCustomization = false;
     confirmationMessage = null;
     shareMenuOpen = false;
     const content = document.querySelector<HTMLElement>('.content');
@@ -230,20 +239,21 @@
       settingsError = `${providerDisplayName(providerId)} usage could not be refreshed.`;
     }
   }
-  async function resetCustomization() {
+  function requestCustomizationReset() {
+    resetConfirmationOpen = true;
+  }
+  async function confirmCustomizationReset() {
     const current = settingsState;
-    if (!current) return;
-    if (
-      !window.confirm(
-        "Turns providers back on for the tools you have installed and resets every provider's metrics and order. Are you sure?",
-      )
-    )
-      return;
+    if (!current || resettingCustomization) return;
+    resettingCustomization = true;
     customizationHistory = [...customizationHistory.slice(-19), cloneSettings(current.settings)];
     try {
       settingsController.setState(await resetCustomizationCommand());
     } catch {
       settingsError = 'Customization could not be reset.';
+    } finally {
+      resettingCustomization = false;
+      resetConfirmationOpen = false;
     }
   }
   async function resetProviderCustomization(providerId: string) {
@@ -519,7 +529,7 @@
           <button
             class="text-button"
             type="button"
-            onclick={resetCustomization}
+            onclick={requestCustomizationReset}
             aria-label="Reset all customization"
             data-tooltip="Reset All Customization"
             ><Icon name="reset" size={15} strokeWidth={2} /></button
@@ -570,6 +580,7 @@
                 onShare={shareProvider}
                 onShareTotal={shareTotalSpend}
                 onRefresh={refreshProvider}
+                onContentMorph={beginContentMorph}
                 {reducedMotion}
                 updateStatus={updates.status}
                 installingUpdate={updates.installing}
@@ -704,6 +715,17 @@
       </div>
     {/if}
 
+    {#if resetConfirmationOpen}
+      <ConfirmationSheet
+        title="Reset All Customization?"
+        message="This turns installed providers back on and restores every provider's metric visibility and order."
+        confirmLabel="Reset All"
+        pending={resettingCustomization}
+        onConfirm={() => void confirmCustomizationReset()}
+        onCancel={() => (resetConfirmationOpen = false)}
+      />
+    {/if}
+
     {#if showAbout}
       <div class="about-backdrop" role="presentation" onclick={closeAboutFromBackdrop}>
         <div
@@ -741,6 +763,7 @@
 <style>
   :global {
     .popover {
+      position: relative;
       display: flex;
       width: 100%;
       height: 100%;
@@ -748,6 +771,7 @@
       overflow: hidden;
       color: var(--text);
       background: var(--tray);
+      isolation: isolate;
       user-select: none;
     }
 
@@ -915,9 +939,7 @@
       min-height: 0;
       grid-area: 1 / 1;
       align-self: start;
-      backface-visibility: hidden;
       transform-origin: 50% 45%;
-      will-change: transform;
     }
 
     .footer {

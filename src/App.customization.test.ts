@@ -55,6 +55,7 @@ describe('OpenQuota customization persistence and reorder', () => {
           ...settingsState,
           settings: args?.settings ?? settingsState.settings,
         });
+      if (command === 'reset_customization') return Promise.resolve(settingsState);
       if (command === 'resize_main_window') return Promise.resolve();
       if (command === 'check_for_updates')
         return Promise.resolve({
@@ -69,6 +70,28 @@ describe('OpenQuota customization persistence and reorder', () => {
     });
   });
   afterEach(cleanup);
+
+  it('uses an in-app confirmation sheet before resetting all customization', async () => {
+    const browserConfirm = vi.spyOn(window, 'confirm');
+    render(App);
+    await screen.findByText('Plus');
+    await fireEvent.click(screen.getByLabelText('Open options'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Reset all customization' }));
+
+    const dialog = screen.getByRole('alertdialog', { name: 'Reset All Customization?' });
+    expect(dialog).toHaveTextContent('restores every provider');
+    expect(browserConfirm).not.toHaveBeenCalled();
+    expect(mocks.invoke).not.toHaveBeenCalledWith('reset_customization');
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Reset all customization' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Reset All' }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith('reset_customization'));
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+  });
 
   it('undoes the latest customization with Ctrl+Z', async () => {
     render(App);

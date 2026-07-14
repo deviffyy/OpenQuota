@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { flip } from 'svelte/animate';
   import { scale, slide } from 'svelte/transition';
   import { reorderFlip, springMotion } from './motion';
@@ -33,6 +34,7 @@
     onShare: (providerId: string) => void;
     onShareTotal: (projection: SpendProjection) => boolean | Promise<boolean>;
     onRefresh: (providerId: string) => void;
+    onContentMorph: () => void;
     reducedMotion: boolean;
     updateStatus: UpdateStatus | null;
     installingUpdate: boolean;
@@ -54,6 +56,7 @@
     onShare,
     onShareTotal,
     onRefresh,
+    onContentMorph,
     reducedMotion,
     updateStatus,
     installingUpdate,
@@ -73,6 +76,8 @@
   let metricMenu = $state<{ providerId: string; metricId: string; x: number; y: number } | null>(
     null,
   );
+  let demandMorphing = $state(false);
+  let demandMorphTimer: ReturnType<typeof setTimeout> | undefined;
   const enabledProviders = $derived(settings.providers.filter((provider) => provider.enabled));
   const dashboardProviders = $derived(
     enabledProviders.map((provider) => ({
@@ -102,6 +107,19 @@
     };
     (customization ? onCustomizationChange : onSettingsChange)(changed);
   }
+  function toggleDemandMetrics(provider: ProviderLayout) {
+    window.clearTimeout(demandMorphTimer);
+    demandMorphing = !reducedMotion;
+    if (demandMorphing) {
+      demandMorphTimer = window.setTimeout(
+        () => (demandMorphing = false),
+        springMotion(false).duration + 34,
+      );
+    }
+    onContentMorph();
+    updateProvider({ ...provider, expanded: !provider.expanded }, false);
+  }
+  onDestroy(() => window.clearTimeout(demandMorphTimer));
   function reorderProvider(draggedId: string, targetId: string) {
     if (draggedId === targetId) return;
     const enabled = settings.providers.filter((provider) => provider.enabled);
@@ -346,7 +364,11 @@
 {/if}
 
 {#each dashboardProviders as { provider, state, alwaysMetrics, demandMetrics } (provider.id)}
-  <div class="provider-reorder-shell" animate:flip={reorderFlip(reducedMotion)}>
+  <div
+    class="provider-reorder-shell"
+    class:provider-reorder-shell--content-morph={demandMorphing}
+    animate:flip={reorderFlip(reducedMotion || demandMorphing)}
+  >
     {#if state?.snapshot}
       <section
         class="provider-section"
@@ -415,6 +437,7 @@
           {#each alwaysMetrics as metric (metric.id)}
             <div
               class="metric-context-target"
+              class:metric-context-target--content-morph={demandMorphing}
               data-reorder-group={`dashboard-metrics:${provider.id}`}
               data-reorder-id={metric.id}
               role="group"
@@ -428,7 +451,7 @@
                 onStart: onReorderStart,
                 onEnd: onReorderEnd,
               }}
-              animate:flip={reorderFlip(reducedMotion)}
+              animate:flip={reorderFlip(reducedMotion || demandMorphing)}
               oncontextmenu={(event) => openMetricMenu(event, provider.id, metric.id)}
             >
               <button
@@ -458,7 +481,7 @@
               type="button"
               aria-expanded={provider.expanded}
               aria-label={provider.expanded ? 'Show less' : 'Show more'}
-              onclick={() => updateProvider({ ...provider, expanded: !provider.expanded }, false)}
+              onclick={() => toggleDemandMetrics(provider)}
             >
               <Icon
                 name={provider.expanded ? 'chevron-up' : 'chevron-down'}
@@ -471,6 +494,7 @@
                 {#each demandMetrics as metric (metric.id)}
                   <div
                     class="metric-context-target"
+                    class:metric-context-target--content-morph={demandMorphing}
                     data-reorder-group={`dashboard-metrics:${provider.id}`}
                     data-reorder-id={metric.id}
                     role="group"
@@ -485,7 +509,7 @@
                       onStart: onReorderStart,
                       onEnd: onReorderEnd,
                     }}
-                    animate:flip={reorderFlip(reducedMotion)}
+                    animate:flip={reorderFlip(reducedMotion || demandMorphing)}
                     oncontextmenu={(event) => openMetricMenu(event, provider.id, metric.id)}
                   >
                     <button
@@ -860,6 +884,14 @@
 
     .demand-metrics {
       overflow: hidden;
+    }
+
+    .provider-reorder-shell--content-morph {
+      transform: none !important;
+    }
+
+    .metric-context-target--content-morph {
+      transform: none !important;
     }
 
     .detection-card {

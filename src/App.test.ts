@@ -244,6 +244,60 @@ describe('OpenQuota dashboard', () => {
     );
   });
 
+  it('keeps neighboring provider values mounted while Codex On Demand morphs', async () => {
+    const multiUsage: UsageViewState = {
+      providers: { claude: claudeState, codex: codexState },
+    };
+    const multiSettings: SettingsViewState = {
+      ...settingsState,
+      settings: {
+        ...settingsState.settings,
+        providers: [
+          {
+            id: 'claude',
+            enabled: true,
+            detected: true,
+            expanded: false,
+            metrics: [
+              { id: 'claude.session', enabled: true, section: 'alwaysVisible', pinned: true },
+            ],
+          },
+          settingsState.settings.providers[0],
+        ],
+      },
+    };
+    mockInvoke((command: string, args?: InvokeArgs) => {
+      if (command === 'get_usage_state') return Promise.resolve(multiUsage);
+      if (command === 'get_app_settings') return Promise.resolve(multiSettings);
+      if (command === 'save_app_settings')
+        return Promise.resolve({
+          ...multiSettings,
+          settings: args?.settings ?? multiSettings.settings,
+        });
+      if (command === 'resize_main_window') return Promise.resolve();
+      return Promise.resolve();
+    });
+
+    render(App);
+    const claude = await screen.findByRole('group', { name: 'Claude provider' });
+    const codex = screen.getByRole('group', { name: 'Codex provider' });
+    const claudeReading = within(claude).getByText('80% left');
+
+    await fireEvent.click(within(codex).getByRole('button', { name: 'Show more' }));
+
+    expect(claudeReading.isConnected).toBe(true);
+    expect(within(claude).getByText('80% left')).toBe(claudeReading);
+    expect(claude.closest('.provider-reorder-shell')).toHaveClass(
+      'provider-reorder-shell--content-morph',
+    );
+    expect(codex.closest('.provider-reorder-shell')).toHaveClass(
+      'provider-reorder-shell--content-morph',
+    );
+    for (const metric of claude.querySelectorAll('.metric-context-target')) {
+      expect(metric).toHaveClass('metric-context-target--content-morph');
+    }
+  });
+
   it('uses the compact reference caret instead of a labeled On Demand divider', async () => {
     render(App);
     const toggle = await screen.findByRole('button', { name: 'Show more' });
