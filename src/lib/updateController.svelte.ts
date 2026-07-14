@@ -2,6 +2,8 @@ import { checkForApplicationUpdates, installApplicationUpdate, openUpdatePage } 
 import { SvelteDate } from 'svelte/reactivity';
 import type { UpdateFailure, UpdateProgress, UpdateStatus } from './types';
 
+const USAGE_REFRESH_INTERVAL_MS = 5 * 60_000;
+
 export class UpdateController {
   status = $state<UpdateStatus | null>(null);
   error = $state<UpdateFailure | null>(null);
@@ -60,7 +62,11 @@ export function nextUpdateLabel(value: string | undefined, now: number) {
   if (!value) return 'Waiting for first update';
   const timestamp = Date.parse(value);
   if (Number.isNaN(timestamp)) return 'Next update unavailable';
-  const seconds = Math.max(0, Math.ceil((timestamp + 300_000 - now) / 1000));
+  const remaining = Math.min(
+    USAGE_REFRESH_INTERVAL_MS,
+    Math.max(0, timestamp + USAGE_REFRESH_INTERVAL_MS - now),
+  );
+  const seconds = Math.ceil(remaining / 1000);
   return seconds >= 60
     ? `Next update in ${Math.ceil(seconds / 60)}m`
     : `Next update in ${seconds}s`;
