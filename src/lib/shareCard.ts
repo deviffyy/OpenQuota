@@ -1,6 +1,7 @@
 import { metricDefinition, providerDisplayName } from './metrics';
 import { formatLimit, formatReset, projectPace } from './pacing';
 import { providerIconPath } from './providerIconPaths';
+import { fillRingSector, spendRingArcs } from './spendRing';
 import type { SpendProjection } from './totalSpend';
 import type {
   AppSettings,
@@ -30,8 +31,9 @@ export const TOTAL_SPEND_GEOMETRY = {
   switcherHeight: 27,
   bodyGap: 12,
   ringDiameter: 104,
-  ringRadius: 42,
-  ringStroke: 20,
+  innerRadiusRatio: 0.618,
+  gapWidth: 1.6,
+  cornerRadius: 3,
   legendGap: 18,
   legendRowHeight: 22,
   periodFontSize: 11,
@@ -519,32 +521,13 @@ function drawSpendBody(
   }
 
   const ringOuterRadius = TOTAL_SPEND_GEOMETRY.ringDiameter / 2;
-  const centerX = outerPadding + TOTAL_SPEND_GEOMETRY.cardPaddingX + ringOuterRadius;
+  const ringLeft = outerPadding + TOTAL_SPEND_GEOMETRY.cardPaddingX;
+  const centerX = ringLeft + ringOuterRadius;
   const centerY = top + ringOuterRadius;
-  context.strokeStyle = palette.track;
-  context.lineWidth = TOTAL_SPEND_GEOMETRY.ringStroke;
-  context.beginPath();
-  context.arc(centerX, centerY, TOTAL_SPEND_GEOMETRY.ringRadius, 0, Math.PI * 2);
-  context.stroke();
-
-  const total = projection.slices.reduce((sum, slice) => sum + slice.value, 0);
-  const floored = projection.slices.map((slice) =>
-    Math.max(total > 0 ? slice.value / total : 0, 0.025),
-  );
-  const flooredTotal = floored.reduce((sum, share) => sum + share, 0);
-  let start = -Math.PI / 2;
-  projection.slices.forEach((slice, index) => {
-    const arc = (floored[index] / flooredTotal) * Math.PI * 2;
-    const gap = projection.slices.length === 1 ? 0 : Math.min(0.035, arc * 0.15);
-    context.beginPath();
-    context.strokeStyle = palette.provider(slice.id);
-    context.lineWidth = TOTAL_SPEND_GEOMETRY.ringStroke;
-    context.lineCap = 'round';
-    context.arc(centerX, centerY, TOTAL_SPEND_GEOMETRY.ringRadius, start + gap, start + arc - gap);
-    context.stroke();
-    start += arc;
+  spendRingArcs(projection.slices).forEach((arc) => {
+    context.fillStyle = palette.provider(arc.id);
+    fillRingSector(context, arc, TOTAL_SPEND_GEOMETRY, ringLeft, top);
   });
-  context.lineCap = 'butt';
 
   const center = ringCenter(projection.centerValue, metric);
   context.fillStyle = palette.text;

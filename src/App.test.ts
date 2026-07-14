@@ -263,11 +263,14 @@ describe('OpenQuota dashboard', () => {
     );
   });
 
-  it('renders the Total Spend ring as rounded SVG sectors', async () => {
+  it('renders the Total Spend ring as separated rounded SVG sectors', async () => {
     render(App);
     expect(await screen.findByRole('region', { name: 'Total Spend' })).toBeInTheDocument();
     await waitFor(() => expect(document.querySelector('.spend-ring svg')).not.toBeNull());
-    expect(document.querySelector('.spend-ring__segment')).not.toBeNull();
+    const segment = document.querySelector('.spend-ring__segment');
+    expect(segment?.tagName).toBe('path');
+    expect(segment?.getAttribute('d')).toMatch(/^M .* A .* Q .* Z$/);
+    expect(document.querySelector('.spend-ring__track')).toBeNull();
     expect(document.querySelector('.period-switcher__selection')).not.toBeNull();
   });
 

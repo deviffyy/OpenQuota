@@ -104,7 +104,7 @@ describe('share card layout', () => {
     expect(totalSpendSource).toContain("import { TOTAL_SPEND_GEOMETRY } from './shareCard';");
     expect(totalSpendSource).toContain('--total-switcher-height:');
     expect(totalSpendSource).toContain('--total-ring-size:');
-    expect(totalSpendSource).toContain('r={TOTAL_SPEND_GEOMETRY.ringRadius}');
+    expect(totalSpendSource).toContain('ringSectorPath(segment, TOTAL_SPEND_GEOMETRY)');
   });
 
   it('does not add a title, selected-period caption, or marketing footer to Total Spend', () => {
@@ -116,6 +116,10 @@ describe('share card layout', () => {
       roundRect: vi.fn(),
       fill: vi.fn(),
       arc: vi.fn(),
+      moveTo: vi.fn(),
+      lineTo: vi.fn(),
+      quadraticCurveTo: vi.fn(),
+      closePath: vi.fn(),
       stroke: vi.fn(),
       measureText: (value: string) => ({ width: value.length * 6 }),
       fillText: (value: string) => drawn.push(value),

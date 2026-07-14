@@ -103,7 +103,8 @@
     }
 
     .usage-row span {
-      font-weight: 650;
+      color: color-mix(in srgb, var(--text) 88%, var(--card));
+      font-weight: 600;
     }
 
     .usage-row strong,

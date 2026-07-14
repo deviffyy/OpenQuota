@@ -4,6 +4,7 @@
   import SelectMenu from './SelectMenu.svelte';
   import { providerDisplayName } from './metrics';
   import { TOTAL_SPEND_GEOMETRY } from './shareCard';
+  import { ringSectorPath, spendRingArcs } from './spendRing';
   import { emptySpendMessage, projectSpend, type SpendProjection } from './totalSpend';
   import type { AppSettings, UsageHistory } from './types';
 
@@ -18,24 +19,7 @@
     projectSpend(providers, settings.totalSpendPeriod, settings.totalSpendMetric),
   );
   const providerNames = $derived(providers.map((provider) => providerDisplayName(provider.id)));
-  const ringSegments = $derived.by(() => {
-    const total = projection.slices.reduce((sum, provider) => sum + provider.value, 0);
-    if (total <= 0) return [];
-    const floored = projection.slices.map((provider) => Math.max(provider.value / total, 0.025));
-    const flooredTotal = floored.reduce((sum, share) => sum + share, 0);
-    let cursor = 0;
-    return projection.slices.map((provider, index) => {
-      const share = (floored[index] / flooredTotal) * 100;
-      const gap = projection.slices.length === 1 ? 0 : Math.min(1.2, share * 0.15);
-      const segment = {
-        id: provider.id,
-        length: Math.max(0.5, share - gap),
-        offset: cursor + gap / 2,
-      };
-      cursor += share;
-      return segment;
-    });
-  });
+  const ringSegments = $derived(spendRingArcs(projection.slices));
   const periodIndex = $derived(
     settings.totalSpendPeriod === 'today' ? 0 : settings.totalSpendPeriod === 'yesterday' ? 1 : 2,
   );
@@ -99,7 +83,7 @@
   class="total-spend-section"
   aria-label="Total Spend"
   data-total-spend
-  style={`--total-card-padding-x:${TOTAL_SPEND_GEOMETRY.cardPaddingX}px;--total-card-padding-y:${TOTAL_SPEND_GEOMETRY.cardPaddingY}px;--total-switcher-height:${TOTAL_SPEND_GEOMETRY.switcherHeight}px;--total-period-size:${TOTAL_SPEND_GEOMETRY.periodFontSize}px;--total-body-gap:${TOTAL_SPEND_GEOMETRY.bodyGap}px;--total-legend-gap:${TOTAL_SPEND_GEOMETRY.legendGap}px;--total-ring-size:${TOTAL_SPEND_GEOMETRY.ringDiameter}px;--total-ring-stroke:${TOTAL_SPEND_GEOMETRY.ringStroke};--total-center-size:${TOTAL_SPEND_GEOMETRY.centerFontSize}px;--total-center-unit-size:${TOTAL_SPEND_GEOMETRY.centerUnitFontSize}px;--total-legend-size:${TOTAL_SPEND_GEOMETRY.legendFontSize}px;`}
+  style={`--total-card-padding-x:${TOTAL_SPEND_GEOMETRY.cardPaddingX}px;--total-card-padding-y:${TOTAL_SPEND_GEOMETRY.cardPaddingY}px;--total-switcher-height:${TOTAL_SPEND_GEOMETRY.switcherHeight}px;--total-period-size:${TOTAL_SPEND_GEOMETRY.periodFontSize}px;--total-body-gap:${TOTAL_SPEND_GEOMETRY.bodyGap}px;--total-legend-gap:${TOTAL_SPEND_GEOMETRY.legendGap}px;--total-ring-size:${TOTAL_SPEND_GEOMETRY.ringDiameter}px;--total-center-size:${TOTAL_SPEND_GEOMETRY.centerFontSize}px;--total-center-unit-size:${TOTAL_SPEND_GEOMETRY.centerUnitFontSize}px;--total-legend-size:${TOTAL_SPEND_GEOMETRY.legendFontSize}px;`}
 >
   <div class="total-card__header">
     <div class="total-card__title">
@@ -153,22 +137,16 @@
     {:else}
       <div class="total-card__body">
         <div class="spend-ring">
-          <svg viewBox="0 0 104 104" aria-hidden="true">
-            <circle
-              class="spend-ring__track"
-              cx="52"
-              cy="52"
-              r={TOTAL_SPEND_GEOMETRY.ringRadius}
-              pathLength="100"
-            />
+          <svg
+            viewBox={`0 0 ${TOTAL_SPEND_GEOMETRY.ringDiameter} ${TOTAL_SPEND_GEOMETRY.ringDiameter}`}
+            shape-rendering="geometricPrecision"
+            aria-hidden="true"
+          >
             {#each ringSegments as segment (segment.id)}
-              <circle
+              <path
                 class="spend-ring__segment"
-                cx="52"
-                cy="52"
-                r={TOTAL_SPEND_GEOMETRY.ringRadius}
-                pathLength="100"
-                style={`--segment-color: var(--provider-${segment.id}, var(--provider)); --segment-length: ${segment.length}; --segment-offset: ${segment.offset}`}
+                d={ringSectorPath(segment, TOTAL_SPEND_GEOMETRY)}
+                style={`--segment-color: var(--provider-${segment.id}, var(--provider))`}
               />
             {/each}
           </svg>
@@ -266,26 +244,11 @@
       width: 100%;
       height: 100%;
       overflow: visible;
-      transform: rotate(-90deg);
-    }
-
-    .spend-ring circle {
-      fill: none;
-      stroke-width: var(--total-ring-stroke);
-    }
-
-    .spend-ring__track {
-      stroke: var(--meter-track);
     }
 
     .spend-ring__segment {
-      stroke: var(--segment-color);
-      stroke-dasharray: var(--segment-length) calc(100 - var(--segment-length));
-      stroke-dashoffset: calc(-1 * var(--segment-offset));
-      stroke-linecap: round;
-      transition:
-        stroke-dasharray var(--motion-spring),
-        stroke-dashoffset var(--motion-spring);
+      fill: var(--segment-color);
+      transition: fill 160ms ease;
     }
 
     .spend-ring__label {
