@@ -7,6 +7,28 @@ use crate::{desktop_integration::DesktopIntegration, popup::PopupDismissGuard};
 
 pub const MAIN_WINDOW: &str = "main";
 
+/// Brings the already-running application forward when a later launch is redirected to it by the
+/// single-instance plugin. During an extremely tight simultaneous-launch race the callback can arrive
+/// before setup has installed the popup state; the fallback still reveals and focuses the window, while
+/// the normal path preserves tray positioning and cancels any pending focus-loss dismissal.
+pub fn activate_existing_instance(app: &AppHandle) {
+    if let Some(guard) = app.try_state::<PopupDismissGuard>() {
+        guard.cancel_pending();
+    }
+
+    let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
+        return;
+    };
+    if app.try_state::<DesktopIntegration>().is_some() {
+        show_popup(&window);
+        return;
+    }
+
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
 pub fn show_popup(window: &WebviewWindow) {
     let standalone = window
         .app_handle()

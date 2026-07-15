@@ -65,7 +65,8 @@ subscription quota endpoint.
 - **Customize.** Reorder providers and metrics, move metrics between Always Visible and On Demand,
   hide values, and reset individual provider layouts.
 - **Desktop integration.** Toggle the panel with a global shortcut, launch at login, follow the
-  system theme, or choose light/dark and default/compact density.
+  system theme, or choose light/dark and default/compact density. Opening OpenQuota again activates
+  the running app instead of starting a second tray process.
 - **Instant cached data.** Your latest values appear as soon as OpenQuota starts. Providers refresh
   in parallel every five minutes, and a failed refresh never wipes the last successful result.
 - **Linux desktop support.** OpenQuota uses a StatusNotifier tray when one is available and falls
