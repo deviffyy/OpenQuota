@@ -1,6 +1,6 @@
 {
   "name": "openquota",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.11.0",
