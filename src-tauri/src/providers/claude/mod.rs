@@ -10,10 +10,96 @@ use reqwest::StatusCode;
 use thiserror::Error;
 
 use crate::{
-    models::{ProviderNotice, ProviderNoticeTone, ProviderSnapshot},
+    models::{
+        MetricDefinition, MetricSection, ProviderDefinition, ProviderNotice, ProviderNoticeTone,
+        ProviderSnapshot, UsagePeriodSelection,
+    },
     pricing::{ModelPricing, PricingStore},
     storage::Storage,
 };
+
+pub(crate) fn definition() -> ProviderDefinition {
+    ProviderDefinition {
+        id: "claude".into(),
+        display_name: "Claude".into(),
+        short_name: "Cl".into(),
+        fallback_enabled: true,
+        local_usage_source_note: Some("From your Claude usage history (estimated)".into()),
+        metrics: vec![
+            MetricDefinition::quota(
+                "claude.session",
+                "Session",
+                "session",
+                true,
+                true,
+                MetricSection::AlwaysVisible,
+                true,
+                "S",
+            ),
+            MetricDefinition::quota(
+                "claude.weekly",
+                "Weekly",
+                "weekly",
+                false,
+                true,
+                MetricSection::AlwaysVisible,
+                true,
+                "W",
+            ),
+            MetricDefinition::quota(
+                "claude.sonnet",
+                "Sonnet",
+                "sonnet",
+                false,
+                false,
+                MetricSection::OnDemand,
+                false,
+                "Sn",
+            ),
+            MetricDefinition::quota(
+                "claude.fable",
+                "Fable",
+                "fable",
+                false,
+                false,
+                MetricSection::OnDemand,
+                false,
+                "F",
+            ),
+            MetricDefinition::quota_or_value(
+                "claude.extra",
+                "Extra Usage",
+                "extra",
+                true,
+                MetricSection::AlwaysVisible,
+                false,
+                "E",
+            ),
+            MetricDefinition::trend("claude.trend"),
+            MetricDefinition::usage(
+                "claude.today",
+                "Today",
+                UsagePeriodSelection::Today,
+                MetricSection::OnDemand,
+                "T",
+            ),
+            MetricDefinition::usage(
+                "claude.yesterday",
+                "Yesterday",
+                UsagePeriodSelection::Yesterday,
+                MetricSection::OnDemand,
+                "Y",
+            ),
+            MetricDefinition::usage(
+                "claude.last30",
+                "Last 30 Days",
+                UsagePeriodSelection::Last30Days,
+                MetricSection::OnDemand,
+                "M",
+            ),
+        ],
+    }
+}
 
 use self::{
     auth::{load_candidates, oauth_config, ClaudeCredential},
@@ -304,8 +390,8 @@ fn plan_name(credential: &ClaudeCredential) -> Option<String> {
 }
 
 impl crate::providers::UsageProvider for ClaudeProvider {
-    fn id(&self) -> &'static str {
-        "claude"
+    fn definition(&self) -> ProviderDefinition {
+        definition()
     }
 
     fn has_local_credentials(&self) -> bool {

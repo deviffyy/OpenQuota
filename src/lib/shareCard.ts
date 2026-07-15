@@ -1,4 +1,4 @@
-import { metricDefinition, providerDisplayName } from './metrics';
+import type { ProviderCatalogIndex } from './metrics';
 import {
   formatMetricNumber,
   formatMetricValue,
@@ -6,7 +6,7 @@ import {
   totalSpendRingCenter,
 } from './metricFormat';
 import { formatLimit, formatReset, projectPace } from './pacing';
-import { providerIconPath } from './providerIconPaths';
+import { providerIconColor, providerIconPath } from './providerIconPaths';
 import { fillRingSector, spendRingArcs } from './spendRing';
 import type { SpendProjection } from './totalSpend';
 import type {
@@ -87,7 +87,7 @@ interface TotalSpendShareCardOptions {
 }
 
 export function buildProviderShareRows(
-  providerId: string,
+  catalog: ProviderCatalogIndex,
   snapshot: ProviderSnapshot,
   layout: ProviderLayout,
   settings: AppSettings,
@@ -110,15 +110,15 @@ export function buildProviderShareRows(
   }
 
   for (const metric of visible) {
-    const definition = metricDefinition(metric.id);
+    const definition = catalog.metric(metric.id);
     if (!definition) continue;
-    if (definition.kind === 'quota' || definition.kind === 'quotaOrValue') {
-      if (!definition.sourceId) continue;
-      const quota = snapshot.quotas.find((item) => item.id === definition.sourceId);
+    const source = definition.source;
+    if (source.kind === 'quota' || source.kind === 'quotaOrValue') {
+      const quota = snapshot.quotas.find((item) => item.id === source.sourceId);
       if (quota) {
-        rows.push(quotaShareRow(providerId, quota, settings, now));
-      } else if (definition.kind === 'quotaOrValue') {
-        const valueMetric = snapshot.valueMetrics.find((item) => item.id === definition.sourceId);
+        rows.push(quotaShareRow(quota, settings, now, source.sessionWindow));
+      } else if (source.kind === 'quotaOrValue') {
+        const valueMetric = snapshot.valueMetrics.find((item) => item.id === source.sourceId);
         rows.push({
           kind: 'text',
           label: definition.label,
@@ -147,15 +147,14 @@ export function buildProviderShareRows(
       previousTextSection = null;
       continue;
     }
-    if (definition.kind === 'trend') {
+    if (source.kind === 'trend') {
       rows.push({ kind: 'trend', label: definition.label, daily: snapshot.usage.daily });
       previousTextSection = null;
       continue;
     }
 
-    if (definition.kind === 'value') {
-      if (!definition.sourceId) continue;
-      const valueMetric = snapshot.valueMetrics.find((item) => item.id === definition.sourceId);
+    if (source.kind === 'value') {
+      const valueMetric = snapshot.valueMetrics.find((item) => item.id === source.sourceId);
       rows.push({
         kind: 'text',
         label: definition.label,
@@ -172,8 +171,8 @@ export function buildProviderShareRows(
       continue;
     }
 
-    if (!definition.sourceId) continue;
-    const period = usagePeriod(snapshot, definition.sourceId);
+    if (source.kind !== 'usage') continue;
+    const period = usagePeriod(snapshot, source.period);
     rows.push({
       kind: 'text',
       label: definition.label,
@@ -203,13 +202,16 @@ export function totalSpendShareCardHeight() {
   return TOTAL_SPEND_OUTER_PADDING + cardHeight + TOTAL_SPEND_OUTER_PADDING;
 }
 
-export function renderProviderShareCard(options: ProviderShareCardOptions) {
+export function renderProviderShareCard(
+  catalog: ProviderCatalogIndex,
+  options: ProviderShareCardOptions,
+) {
   const height = providerShareCardHeight(options.rows);
   const { canvas, context } = createCanvas(SHARE_CARD_WIDTH, height);
   const palette = canvasPalette();
   fillBackground(context, palette, SHARE_CARD_WIDTH, height);
 
-  drawProviderHeader(context, palette, options.providerId, options.plan);
+  drawProviderHeader(context, palette, catalog, options.providerId, options.plan);
   const cardTop = OUTER_PADDING + HEADER_HEIGHT + CONTENT_GAP;
   const cardHeight =
     CARD_GUTTER * 2 +
@@ -240,7 +242,10 @@ export function renderProviderShareCard(options: ProviderShareCardOptions) {
   return canvas;
 }
 
-export function renderTotalSpendShareCard(options: TotalSpendShareCardOptions) {
+export function renderTotalSpendShareCard(
+  catalog: ProviderCatalogIndex,
+  options: TotalSpendShareCardOptions,
+) {
   const height = totalSpendShareCardHeight();
   const width = TOTAL_SPEND_GEOMETRY.width;
   const { canvas, context } = createCanvas(width, height);
@@ -270,6 +275,7 @@ export function renderTotalSpendShareCard(options: TotalSpendShareCardOptions) {
   drawSpendBody(
     context,
     palette,
+    catalog,
     options,
     switcherTop + TOTAL_SPEND_GEOMETRY.switcherHeight + TOTAL_SPEND_GEOMETRY.bodyGap,
     TOTAL_SPEND_OUTER_PADDING,
@@ -279,10 +285,10 @@ export function renderTotalSpendShareCard(options: TotalSpendShareCardOptions) {
 }
 
 function quotaShareRow(
-  providerId: string,
   quota: QuotaWindow,
   settings: AppSettings,
   now: number,
+  sessionWindow: boolean,
 ): ShareRow {
   const used = clamp(quota.usedPercent, 0, 100);
   const remaining = Math.max(0, 100 - used);
@@ -299,9 +305,6 @@ function quotaShareRow(
     }
   }
 
-  const sessionWindow =
-    (providerId === 'claude' && quota.id === 'session') ||
-    (providerId === 'antigravity' && (quota.id === 'geminiPro' || quota.id === 'claude'));
   const pace = projectPace(quota, now, sessionWindow);
   const severity =
     pace.severity === 'spent' || pace.severity === 'runningOut'
@@ -396,15 +399,13 @@ function fillBackground(
 function drawProviderHeader(
   context: CanvasRenderingContext2D,
   palette: SharePalette,
+  catalog: ProviderCatalogIndex,
   providerId: string,
   plan: string | null,
 ) {
-  const iconColor =
-    providerId === 'claude' || providerId === 'antigravity'
-      ? palette.provider(providerId)
-      : palette.text;
+  const iconColor = providerIconColor(providerId) ?? palette.text;
   drawProviderMark(context, providerId, OUTER_PADDING, OUTER_PADDING, 22, iconColor);
-  const name = providerDisplayName(providerId);
+  const name = catalog.displayName(providerId);
   context.fillStyle = palette.text;
   context.font = '600 15px system-ui';
   context.fillText(name, 48, 31);
@@ -556,6 +557,7 @@ function drawPeriodSwitcher(
 function drawSpendBody(
   context: CanvasRenderingContext2D,
   palette: SharePalette,
+  catalog: ProviderCatalogIndex,
   options: TotalSpendShareCardOptions,
   top: number,
   outerPadding: number,
@@ -613,7 +615,7 @@ function drawSpendBody(
     context.fill();
     context.fillStyle = palette.text;
     context.font = `${TOTAL_SPEND_GEOMETRY.legendFontSize}px system-ui`;
-    fitText(context, providerDisplayName(slice.id), legendLeft + 15, baseline, 62);
+    fitText(context, catalog.displayName(slice.id), legendLeft + 15, baseline, 62);
     context.fillStyle = palette.secondary;
     context.font = `600 ${TOTAL_SPEND_GEOMETRY.legendFontSize}px system-ui`;
     context.textAlign = 'right';

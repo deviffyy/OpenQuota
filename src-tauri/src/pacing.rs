@@ -6,8 +6,9 @@ use std::{
 use chrono::{DateTime, Duration, Utc};
 
 use crate::models::{
-    AppSettings, NotificationPreferences, ProviderSnapshot, QuotaFormat, QuotaWindow,
+    AppSettings, MetricSource, NotificationPreferences, ProviderSnapshot, QuotaFormat, QuotaWindow,
 };
+use crate::providers::ProviderRegistry;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PaceSeverity {
@@ -205,6 +206,7 @@ impl NotificationEvaluator {
         &self,
         snapshot: &ProviderSnapshot,
         settings: &AppSettings,
+        registry: &ProviderRegistry,
         now: DateTime<Utc>,
     ) -> Vec<PaceAlert> {
         let Some(provider) = settings
@@ -212,6 +214,9 @@ impl NotificationEvaluator {
             .iter()
             .find(|provider| provider.id == snapshot.provider_id && provider.enabled)
         else {
+            return Vec::new();
+        };
+        let Some(provider_definition) = registry.definition(&snapshot.provider_id) else {
             return Vec::new();
         };
         let enabled = provider
@@ -225,15 +230,21 @@ impl NotificationEvaluator {
         };
         let mut alerts = Vec::new();
         for window in &snapshot.quotas {
-            let metric_id = format!("{}.{}", snapshot.provider_id, window.id);
-            if !enabled.contains(metric_id.as_str()) {
+            let Some(metric_definition) = provider_definition.metrics.iter().find(|metric| {
+                matches!(
+                    &metric.source,
+                    MetricSource::Quota { source_id, .. }
+                        | MetricSource::QuotaOrValue { source_id, .. }
+                        if source_id == &window.id
+                )
+            }) else {
+                continue;
+            };
+            if !enabled.contains(metric_definition.id.as_str()) {
                 continue;
             }
-            let is_session_window = match snapshot.provider_id.as_str() {
-                "claude" => window.id == "session",
-                "antigravity" => matches!(window.id.as_str(), "geminiPro" | "claude"),
-                _ => false,
-            };
+            let metric_id = metric_definition.id.clone();
+            let is_session_window = metric_definition.source.session_window();
             let projection = project(window, now, is_session_window);
             let state = states.entry(metric_id.clone()).or_default();
             let previous_severity = state.previous;
@@ -247,7 +258,7 @@ impl NotificationEvaluator {
                 &window.label,
             );
             for alert in &mut new_alerts {
-                alert.provider = provider_display_name(&snapshot.provider_id).into();
+                alert.provider = provider_definition.display_name.clone();
                 alert.metric_id.clone_from(&metric_id);
                 alert.previous_severity = previous_severity;
                 alert.previous_was_under_ten = previous_was_under_ten;
@@ -343,14 +354,6 @@ fn transition(
         .collect()
 }
 
-fn provider_display_name(id: &str) -> &'static str {
-    match id {
-        "claude" => "Claude",
-        "antigravity" => "Antigravity",
-        _ => "Codex",
-    }
-}
-
 fn reset_advanced(current: Option<DateTime<Utc>>, previous: Option<DateTime<Utc>>) -> bool {
     match (current, previous) {
         (Some(_), None) => true,
@@ -370,9 +373,11 @@ mod tests {
         PaceSeverity,
     };
     use crate::models::{
-        AppSettings, MetricLayout, MetricSection, NotificationPreferences, ProviderLayout,
-        QuotaWindow,
+        AppSettings, MetricDefinition, MetricLayout, MetricSection, MetricSource,
+        NotificationPreferences, ProviderDefinition, ProviderLayout, ProviderSnapshot, QuotaWindow,
+        UsageHistory,
     };
+    use crate::providers::ProviderRegistry;
 
     fn window(used: f64, elapsed_fraction: f64) -> QuotaWindow {
         let now = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
@@ -641,6 +646,74 @@ mod tests {
         assert!(state.fired.is_empty());
         assert_eq!(state.previous, Some(PaceSeverity::Healthy));
         assert!(!state.was_under_ten);
+    }
+
+    #[test]
+    fn evaluator_resolves_metric_identity_from_registry_metadata() {
+        let registry = ProviderRegistry::from_definitions(vec![ProviderDefinition {
+            id: "custom".into(),
+            display_name: "Custom Provider".into(),
+            short_name: "C".into(),
+            fallback_enabled: true,
+            local_usage_source_note: None,
+            metrics: vec![MetricDefinition::new(
+                "custom.rolling",
+                "Rolling",
+                MetricSource::Quota {
+                    source_id: "bucket".into(),
+                    session_window: true,
+                },
+                true,
+                true,
+                MetricSection::AlwaysVisible,
+                true,
+                Some("R"),
+                None,
+            )],
+        }])
+        .unwrap();
+        let settings = AppSettings {
+            providers: vec![ProviderLayout {
+                id: "custom".into(),
+                enabled: true,
+                detected: true,
+                expanded: false,
+                metrics: vec![MetricLayout {
+                    id: "custom.rolling".into(),
+                    enabled: true,
+                    section: MetricSection::AlwaysVisible,
+                    pinned: true,
+                }],
+            }],
+            ..AppSettings::default()
+        };
+        let snapshot = ProviderSnapshot {
+            provider_id: "custom".into(),
+            plan: None,
+            quotas: vec![QuotaWindow {
+                id: "bucket".into(),
+                label: "Rolling".into(),
+                used_percent: 25.0,
+                resets_at: None,
+                period_seconds: 18_000,
+                format: crate::models::QuotaFormat::Percent,
+                used_value: None,
+                limit_value: None,
+            }],
+            value_metrics: Vec::new(),
+            notices: Vec::new(),
+            usage: UsageHistory::default(),
+            warnings: Vec::new(),
+            refreshed_at: Utc::now(),
+        };
+        let evaluator = NotificationEvaluator::default();
+
+        assert!(evaluator
+            .evaluate(&snapshot, &settings, &registry, Utc::now())
+            .is_empty());
+        let states = evaluator.states.lock().unwrap();
+        assert!(states.contains_key("custom.rolling"));
+        assert!(!states.contains_key("custom.bucket"));
     }
 
     #[test]

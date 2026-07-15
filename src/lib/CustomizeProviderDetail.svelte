@@ -1,6 +1,6 @@
 <script lang="ts">
   import { flip } from 'svelte/animate';
-  import { metricDefinition, providerDisplayName } from './metrics';
+  import type { ProviderCatalogIndex } from './metrics';
   import type { AppSettings, MetricLayout, MetricSection, ProviderLayout } from './types';
   import Icon from './Icon.svelte';
   import { reorderFlip } from './motion';
@@ -9,13 +9,23 @@
   interface Props {
     settings: AppSettings;
     providerId: string;
+    catalog: ProviderCatalogIndex;
     onChange: (settings: AppSettings) => void;
     onReorderStart: () => void;
     onReorderEnd: (moved: boolean, cancelled?: boolean) => void;
     reducedMotion: boolean;
   }
-  let { settings, providerId, onChange, onReorderStart, onReorderEnd, reducedMotion }: Props =
-    $props();
+  let {
+    settings,
+    providerId,
+    catalog,
+    onChange,
+    onReorderStart,
+    onReorderEnd,
+    reducedMotion,
+  }: Props = $props();
+  const metricDefinition = (id: string) => catalog.metric(id);
+  const providerDisplayName = (id: string) => catalog.displayName(id);
   let message = $state('');
   let messageKind = $state<'success' | 'denied'>('success');
   let messageTimer: ReturnType<typeof setTimeout> | undefined;

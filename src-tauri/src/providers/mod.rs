@@ -3,11 +3,16 @@ pub mod claude;
 pub mod codex;
 pub mod credential_store;
 mod daily_usage;
+mod detection;
 mod log_usage;
+mod registry;
 #[cfg(test)]
 pub mod test_http;
 
-use crate::models::{ProviderErrorKind, ProviderSnapshot};
+pub use detection::detect_local_credentials;
+pub use registry::ProviderRegistry;
+
+use crate::models::{ProviderDefinition, ProviderErrorKind, ProviderSnapshot};
 
 #[derive(Debug, thiserror::Error)]
 #[error("{message}")]
@@ -34,7 +39,7 @@ impl ProviderError {
 }
 
 pub trait UsageProvider: Send + Sync {
-    fn id(&self) -> &'static str;
+    fn definition(&self) -> ProviderDefinition;
     fn has_local_credentials(&self) -> bool;
     fn refresh(&self) -> Result<ProviderSnapshot, ProviderError>;
 }

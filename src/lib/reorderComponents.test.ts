@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { providerCatalogIndex } from '../test/appFixtures';
 import CustomizeProviderDetail from './CustomizeProviderDetail.svelte';
 import CustomizeProviderList from './CustomizeProviderList.svelte';
 import type { AppSettings } from './types';
@@ -95,6 +96,7 @@ describe('pointer reorder integrations', () => {
     const onReorderEnd = vi.fn();
     render(CustomizeProviderList, {
       settings,
+      catalog: providerCatalogIndex,
       onOpen: vi.fn(),
       onChange,
       onReorderStart,
@@ -121,6 +123,7 @@ describe('pointer reorder integrations', () => {
     const onReorderEnd = vi.fn();
     render(CustomizeProviderList, {
       settings,
+      catalog: providerCatalogIndex,
       onOpen: vi.fn(),
       onChange,
       onReorderStart,
@@ -145,6 +148,7 @@ describe('pointer reorder integrations', () => {
     render(CustomizeProviderDetail, {
       settings,
       providerId: 'codex',
+      catalog: providerCatalogIndex,
       onChange,
       onReorderStart: vi.fn(),
       onReorderEnd: vi.fn(),

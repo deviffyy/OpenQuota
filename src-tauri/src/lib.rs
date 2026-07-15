@@ -22,11 +22,11 @@ use std::sync::Arc;
 
 use popup::PopupDismissGuard;
 use service::ProviderService;
-use settings::SettingsService;
+use settings::{CredentialDetectionPlan, SettingsService};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager,
+    AppHandle, Emitter, Manager,
 };
 #[cfg(not(target_os = "linux"))]
 use tauri_plugin_autostart::ManagerExt as AutostartExt;
@@ -38,11 +38,47 @@ use crate::{
     pricing::PricingStore,
     providers::{
         antigravity::AntigravityProvider, claude::ClaudeProvider, codex::CodexProvider,
-        UsageProvider,
+        detect_local_credentials, ProviderRegistry, UsageProvider,
     },
     storage::Storage,
     window::{handle_window_event, open_screen, show_popup, toggle_popup, MAIN_WINDOW},
 };
+
+fn spawn_startup_credential_detection(
+    app: AppHandle,
+    registry: Arc<ProviderRegistry>,
+    service: Arc<ProviderService>,
+    settings: Arc<SettingsService>,
+    notifications: Arc<NotificationEvaluator>,
+    plan: CredentialDetectionPlan,
+) {
+    tauri::async_runtime::spawn(async move {
+        let detected = detect_local_credentials(registry, plan.provider_ids()).await;
+        let Ok(outcome) = settings.apply_credential_detection(&plan, &detected) else {
+            return;
+        };
+
+        tray_presentation::update(
+            &app,
+            &service.state(),
+            &outcome.settings,
+            settings.registry(),
+        );
+        let _ = app.emit(
+            "settings-state",
+            commands::settings::settings_view_state(&app, &settings),
+        );
+        if outcome.newly_enabled_provider_ids.is_empty() {
+            return;
+        }
+        service
+            .refresh_enabled(&outcome.newly_enabled_provider_ids, true)
+            .await;
+        let state = service.state();
+        let _ = app.emit("usage-state", &state);
+        notifications::finish_refresh(&app, &state, &settings, &notifications);
+    });
+}
 
 fn register_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), String> {
     app.global_shortcut()
@@ -143,14 +179,13 @@ pub fn run() {
                 Arc::new(CodexProvider::new(storage.clone(), pricing.clone())?),
                 Arc::new(AntigravityProvider::new()?),
             ];
-            let detected = providers
-                .iter()
-                .filter(|provider| provider.has_local_credentials())
-                .map(|provider| provider.id().to_owned())
-                .collect();
-            let service = Arc::new(ProviderService::new(providers, storage.clone()));
-            let settings = Arc::new(SettingsService::new(storage, &detected)?);
+            let registry = Arc::new(ProviderRegistry::new(providers)?);
+            let service = Arc::new(ProviderService::new(registry.clone(), storage.clone()));
+            let (settings_service, credential_detection_plan) =
+                SettingsService::new_deferred(storage, registry.clone())?;
+            let settings = Arc::new(settings_service);
             let notifications = Arc::new(NotificationEvaluator::default());
+            app.manage(registry.clone());
             app.manage(service.clone());
             app.manage(settings.clone());
             app.manage(notifications.clone());
@@ -222,7 +257,20 @@ pub fn run() {
                 }
             }
 
-            tray_presentation::update(app.handle(), &service.state(), &settings.get());
+            tray_presentation::update(
+                app.handle(),
+                &service.state(),
+                &settings.get(),
+                settings.registry(),
+            );
+            spawn_startup_credential_detection(
+                app.handle().clone(),
+                registry,
+                service.clone(),
+                settings.clone(),
+                notifications.clone(),
+                credential_detection_plan,
+            );
             refresh_loop::spawn(app.handle().clone(), service, settings, notifications);
 
             Ok(())

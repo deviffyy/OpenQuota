@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
 import type { SettingsViewState, UpdateProgress } from './lib/types';
-import { liveState, settingsState } from './test/appFixtures';
+import { liveState, providerCatalog, settingsState } from './test/appFixtures';
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -28,7 +28,7 @@ function mockInvoke(implementation: InvokeImplementation) {
       return Promise.all([
         implementation('get_usage_state', args),
         implementation('get_app_settings', args),
-      ]).then(([usage, settings]) => ({ usage, settings }));
+      ]).then(([usage, settings]) => ({ usage, settings, catalog: providerCatalog }));
     }
     return implementation(command, args);
   });

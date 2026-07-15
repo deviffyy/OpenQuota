@@ -1,7 +1,7 @@
 <script lang="ts">
   import { flip } from 'svelte/animate';
   import type { AppSettings, ProviderLayout } from './types';
-  import { providerDisplayName } from './metrics';
+  import type { ProviderCatalogIndex } from './metrics';
   import Icon from './Icon.svelte';
   import ProviderIcon from './ProviderIcon.svelte';
   import { reorderFlip } from './motion';
@@ -9,6 +9,7 @@
 
   interface Props {
     settings: AppSettings;
+    catalog: ProviderCatalogIndex;
     onOpen: (providerId: string) => void;
     onChange: (settings: AppSettings) => void;
     onReorderStart: () => void;
@@ -18,6 +19,7 @@
   }
   let {
     settings,
+    catalog,
     onOpen,
     onChange,
     onReorderStart,
@@ -25,6 +27,7 @@
     onSettings,
     reducedMotion,
   }: Props = $props();
+  const providerDisplayName = (id: string) => catalog.displayName(id);
   function updateProvider(provider: ProviderLayout) {
     onChange({
       ...settings,

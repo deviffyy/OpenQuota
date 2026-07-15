@@ -10,7 +10,7 @@
   import MetricRenderer from './MetricRenderer.svelte';
   import TotalSpend from './TotalSpend.svelte';
   import type { SpendProjection } from './totalSpend';
-  import { metricDefinition, providerDisplayName, providerSupportsSpend } from './metrics';
+  import type { ProviderCatalogIndex } from './metrics';
   import type {
     AppSettings,
     MetricLayout,
@@ -26,6 +26,7 @@
     viewState: UsageViewState;
     settings: AppSettings;
     now: number;
+    catalog: ProviderCatalogIndex;
     onSettingsChange: (settings: AppSettings) => void;
     onCustomizationChange: (settings: AppSettings) => void;
     onReorderStart: () => void;
@@ -48,6 +49,7 @@
     viewState,
     settings,
     now,
+    catalog,
     onSettingsChange,
     onCustomizationChange,
     onReorderStart,
@@ -66,6 +68,9 @@
     onInstallUpdate,
     onOpenUpdatePage,
   }: Props = $props();
+  const metricDefinition = (id: string) => catalog.metric(id);
+  const providerDisplayName = (id: string) => catalog.displayName(id);
+  const providerSupportsSpend = (id: string) => catalog.supportsSpend(id);
   const emptyUsage: UsageHistory = {
     today: null,
     yesterday: null,
@@ -359,6 +364,7 @@
   <TotalSpend
     providers={providerUsage}
     {settings}
+    {catalog}
     onChange={onSettingsChange}
     onShare={onShareTotal}
   />
@@ -485,6 +491,7 @@
                 snapshot={state.snapshot}
                 {settings}
                 {now}
+                {catalog}
                 {onSettingsChange}
               />
             </div>
@@ -543,6 +550,7 @@
                       snapshot={state.snapshot}
                       {settings}
                       {now}
+                      {catalog}
                       {onSettingsChange}
                     />
                   </div>

@@ -23,7 +23,7 @@
   import Dashboard from './lib/Dashboard.svelte';
   import Icon from './lib/Icon.svelte';
   import { createListenerRegistry } from './lib/listenerRegistry';
-  import { providerDisplayName } from './lib/metrics';
+  import { emptyProviderCatalog, ProviderCatalogIndex } from './lib/metrics';
   import { springMotion } from './lib/motion';
   import OpenQuotaMark from './lib/OpenQuotaMark.svelte';
   import { horizontalPageTransition, shouldSlideBetweenScreens } from './lib/pageTransition';
@@ -46,6 +46,7 @@
   const emptyView: UsageViewState = { providers: {} };
 
   let viewState = $state<UsageViewState>(emptyView);
+  let catalog = $state<ProviderCatalogIndex>(emptyProviderCatalog);
   let screen = $state<Screen>('dashboard');
   let now = $state(Date.now());
   let settingsError = $state<string | null>(null);
@@ -69,6 +70,7 @@
   const platform = desktopPlatform();
   const shortcuts = shortcutLabels(platform);
   const settingsController = new SettingsController((message) => (settingsError = message));
+  const providerDisplayName = (id: string) => catalog.displayName(id);
   const settingsState = $derived(settingsController.state);
   const updates = new UpdateController();
   const windowController = createWindowController({
@@ -292,8 +294,8 @@
     if (!provider || !layout) return;
     const snapshot = [providerDisplayName(providerId), card.innerText.trim()].join('\n');
     try {
-      const rows = buildProviderShareRows(providerId, provider, layout, current.settings, now);
-      const canvas = renderProviderShareCard({ providerId, plan: provider.plan, rows });
+      const rows = buildProviderShareRows(catalog, provider, layout, current.settings, now);
+      const canvas = renderProviderShareCard(catalog, { providerId, plan: provider.plan, rows });
       await copyCanvas(canvas, snapshot);
     } catch {
       settingsError = 'Provider screenshot could not be copied.';
@@ -305,7 +307,7 @@
     const card = document.querySelector<HTMLElement>('[data-total-spend]');
     if (!card) return false;
     try {
-      const canvas = renderTotalSpendShareCard({
+      const canvas = renderTotalSpendShareCard(catalog, {
         projection,
         metric: current.settings.totalSpendMetric,
         period: current.settings.totalSpendPeriod,
@@ -488,6 +490,7 @@
     );
     void getBootstrapState()
       .then((state) => {
+        catalog = new ProviderCatalogIndex(state.catalog);
         viewState = state.usage;
         settingsController.setState(state.settings);
         automaticUpdatesReady = true;
@@ -569,6 +572,7 @@
             {#if screen === 'dashboard'}
               <Dashboard
                 {viewState}
+                {catalog}
                 settings={settingsState.settings}
                 {now}
                 onSettingsChange={saveSettings}
@@ -604,6 +608,7 @@
             {:else if screen === 'customize'}
               <CustomizeProviderList
                 settings={settingsState.settings}
+                {catalog}
                 onOpen={(id) => navigate(`provider:${id}`)}
                 onChange={saveCustomization}
                 onReorderStart={beginCustomizationGesture}
@@ -615,6 +620,7 @@
               <CustomizeProviderDetail
                 settings={settingsState.settings}
                 providerId={screen.slice(9)}
+                {catalog}
                 onChange={saveCustomization}
                 onReorderStart={beginCustomizationGesture}
                 onReorderEnd={endCustomizationGesture}

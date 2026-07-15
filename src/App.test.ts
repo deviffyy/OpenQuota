@@ -7,6 +7,7 @@ import {
   claudeState,
   codexState,
   liveState,
+  providerCatalog,
   settingsState,
 } from './test/appFixtures';
 
@@ -34,7 +35,7 @@ function mockInvoke(implementation: InvokeImplementation) {
       return Promise.all([
         implementation('get_usage_state', args),
         implementation('get_app_settings', args),
-      ]).then(([usage, settings]) => ({ usage, settings }));
+      ]).then(([usage, settings]) => ({ usage, settings, catalog: providerCatalog }));
     }
     return implementation(command, args);
   });

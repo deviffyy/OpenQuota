@@ -28,12 +28,17 @@ pub fn finish_refresh(
     notifications: &NotificationEvaluator,
 ) {
     let preferences = settings.get();
-    tray_presentation::update(app, state, &preferences);
+    tray_presentation::update(app, state, &preferences, settings.registry());
     notifications.prune(&preferences);
     for provider_state in state.providers.values() {
         if provider_state.error.is_none() {
             if let Some(snapshot) = provider_state.snapshot.as_ref() {
-                let alerts = notifications.evaluate(snapshot, &preferences, chrono::Utc::now());
+                let alerts = notifications.evaluate(
+                    snapshot,
+                    &preferences,
+                    settings.registry(),
+                    chrono::Utc::now(),
+                );
                 let failed = deliver(app, &alerts);
                 if !failed.is_empty() {
                     notifications.rollback(&failed);

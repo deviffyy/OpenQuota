@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { codexState, settingsState } from '../test/appFixtures';
+import { codexState, providerCatalogIndex, settingsState } from '../test/appFixtures';
 import totalSpendSource from './TotalSpend.svelte?raw';
 import {
-  buildProviderShareRows,
+  buildProviderShareRows as buildProviderShareRowsWithCatalog,
   providerShareCardHeight,
-  renderTotalSpendShareCard,
+  renderTotalSpendShareCard as renderTotalSpendShareCardWithCatalog,
   SHARE_CARD_SCALE,
   SHARE_CARD_WIDTH,
   TOTAL_SPEND_GEOMETRY,
@@ -12,6 +12,23 @@ import {
   TOTAL_SPEND_PERIOD_LABELS,
   totalSpendShareCardHeight,
 } from './shareCard';
+import type { AppSettings, ProviderLayout, ProviderSnapshot } from './types';
+
+function buildProviderShareRows(
+  _providerId: string,
+  snapshot: ProviderSnapshot,
+  layout: ProviderLayout,
+  settings: AppSettings,
+  now: number,
+) {
+  return buildProviderShareRowsWithCatalog(providerCatalogIndex, snapshot, layout, settings, now);
+}
+
+function renderTotalSpendShareCard(
+  options: Parameters<typeof renderTotalSpendShareCardWithCatalog>[1],
+) {
+  return renderTotalSpendShareCardWithCatalog(providerCatalogIndex, options);
+}
 
 afterEach(() => vi.restoreAllMocks());
 

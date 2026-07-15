@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
@@ -10,9 +10,10 @@ use crate::{
     models::{AppSettings, SettingsViewState},
     notifications::{finish_refresh, permission as notification_permission},
     pacing::NotificationEvaluator,
+    providers::{detect_local_credentials, ProviderRegistry},
     service::ProviderService,
     set_autostart,
-    settings::{default_settings, SettingsService},
+    settings::SettingsService,
     tray_presentation,
 };
 
@@ -64,7 +65,12 @@ pub async fn save_app_settings(
             return Err(error);
         }
     };
-    tray_presentation::update(&app, &service.state(), &updated);
+    tray_presentation::update(
+        &app,
+        &service.state(),
+        &updated,
+        settings_service.registry(),
+    );
     let _ = app.emit(
         "settings-state",
         settings_view_state(&app, &settings_service),
@@ -94,15 +100,27 @@ pub async fn save_app_settings(
 #[tauri::command]
 pub async fn reset_customization(
     app: AppHandle,
+    registry: State<'_, Arc<ProviderRegistry>>,
     service: State<'_, Arc<ProviderService>>,
     settings: State<'_, Arc<SettingsService>>,
     notifications: State<'_, Arc<NotificationEvaluator>>,
 ) -> Result<SettingsViewState, String> {
     let mut next = settings.get();
-    next.providers = default_settings(&settings.detected_provider_ids()).providers;
+    next.providers = settings.default_settings(&HashSet::new()).providers;
     next.detection_notice_dismissed = false;
     let next = settings.update(next)?;
-    tray_presentation::update(&app, &service.state(), &next);
+    tray_presentation::update(&app, &service.state(), &next, settings.registry());
+    let state = settings_view_state(&app, &settings);
+    let _ = app.emit("settings-state", &state);
+    let plan = settings.reset_detection_plan();
+    let detected = detect_local_credentials(registry.inner().clone(), plan.provider_ids()).await;
+    let outcome = settings.apply_credential_detection(&plan, &detected)?;
+    tray_presentation::update(
+        &app,
+        &service.state(),
+        &outcome.settings,
+        settings.registry(),
+    );
     let state = settings_view_state(&app, &settings);
     let _ = app.emit("settings-state", &state);
     let usage_state = service
@@ -121,7 +139,7 @@ pub fn reset_provider_customization(
     provider_id: String,
 ) -> Result<SettingsViewState, String> {
     let updated = settings.reset_provider(&provider_id)?;
-    tray_presentation::update(&app, &service.state(), &updated);
+    tray_presentation::update(&app, &service.state(), &updated, settings.registry());
     let state = settings_view_state(&app, &settings);
     let _ = app.emit("settings-state", &state);
     Ok(state)

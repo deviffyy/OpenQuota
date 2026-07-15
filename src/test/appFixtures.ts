@@ -1,4 +1,126 @@
-import type { ProviderViewState, SettingsViewState, UsageViewState } from '../lib/types';
+import { ProviderCatalogIndex } from '../lib/metrics';
+import type {
+  MetricDefinition,
+  ProviderCatalog,
+  ProviderViewState,
+  SettingsViewState,
+  UsageViewState,
+} from '../lib/types';
+
+function quota(
+  id: string,
+  label: string,
+  sourceId: string,
+  sessionWindow = false,
+): MetricDefinition {
+  return {
+    id,
+    label,
+    source: { kind: 'quota', sourceId, sessionWindow },
+    pinnable: true,
+    defaultEnabled: true,
+    defaultSection: 'onDemand',
+    defaultPinned: false,
+    tray: { shortLabel: label.slice(0, 1), suffix: null },
+  };
+}
+
+function usage(
+  id: string,
+  label: string,
+  period: 'today' | 'yesterday' | 'last30Days',
+): MetricDefinition {
+  return {
+    id,
+    label,
+    source: { kind: 'usage', period },
+    pinnable: true,
+    defaultEnabled: true,
+    defaultSection: 'onDemand',
+    defaultPinned: false,
+    tray: { shortLabel: label.slice(0, 1), suffix: null },
+  };
+}
+
+function trend(id: string): MetricDefinition {
+  return {
+    id,
+    label: 'Usage Trend',
+    source: { kind: 'trend' },
+    pinnable: false,
+    defaultEnabled: true,
+    defaultSection: 'alwaysVisible',
+    defaultPinned: false,
+    tray: null,
+  };
+}
+
+export const providerCatalog: ProviderCatalog = {
+  providers: [
+    {
+      id: 'claude',
+      displayName: 'Claude',
+      shortName: 'Cl',
+      fallbackEnabled: false,
+      localUsageSourceNote: 'From your Claude usage history (estimated)',
+      metrics: [
+        quota('claude.session', 'Session', 'session', true),
+        quota('claude.weekly', 'Weekly', 'weekly'),
+        quota('claude.sonnet', 'Sonnet', 'sonnet'),
+        quota('claude.fable', 'Fable', 'fable'),
+        {
+          ...quota('claude.extra', 'Extra Usage', 'extra'),
+          source: { kind: 'quotaOrValue', sourceId: 'extra', sessionWindow: false },
+        },
+        trend('claude.trend'),
+        usage('claude.today', 'Today', 'today'),
+        usage('claude.yesterday', 'Yesterday', 'yesterday'),
+        usage('claude.last30', 'Last 30 Days', 'last30Days'),
+      ],
+    },
+    {
+      id: 'codex',
+      displayName: 'Codex',
+      shortName: 'Cx',
+      fallbackEnabled: true,
+      localUsageSourceNote: 'From your Codex logs (estimated)',
+      metrics: [
+        quota('codex.session', 'Session', 'session'),
+        quota('codex.weekly', 'Weekly', 'weekly'),
+        quota('codex.spark', 'Spark', 'spark'),
+        quota('codex.sparkWeekly', 'Spark Weekly', 'sparkWeekly'),
+        trend('codex.trend'),
+        {
+          ...quota('codex.credits', 'Extra Usage', 'credits'),
+          source: { kind: 'value', sourceId: 'credits' },
+        },
+        {
+          ...quota('codex.rateLimitResets', 'Rate Limit Resets', 'rateLimitResets'),
+          source: { kind: 'value', sourceId: 'rateLimitResets' },
+          tray: { shortLabel: 'R', suffix: 'resets' },
+        },
+        usage('codex.today', 'Today', 'today'),
+        usage('codex.yesterday', 'Yesterday', 'yesterday'),
+        usage('codex.last30', 'Last 30 Days', 'last30Days'),
+      ],
+    },
+    {
+      id: 'antigravity',
+      displayName: 'Antigravity',
+      shortName: 'A',
+      fallbackEnabled: false,
+      localUsageSourceNote: null,
+      metrics: [
+        quota('antigravity.geminiPro', 'Session', 'geminiPro', true),
+        quota('antigravity.geminiWeekly', 'Weekly', 'geminiWeekly'),
+        quota('antigravity.claude', 'Claude', 'claude', true),
+        quota('antigravity.claudeWeekly', 'Claude Weekly', 'claudeWeekly'),
+      ],
+    },
+  ],
+};
+
+export const providerCatalogIndex = new ProviderCatalogIndex(providerCatalog);
 
 export const codexState: ProviderViewState = {
   source: 'live',

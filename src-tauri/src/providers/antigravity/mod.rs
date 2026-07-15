@@ -9,7 +9,9 @@ use chrono::Utc;
 use serde_json::{json, Value};
 use thiserror::Error;
 
-use crate::models::{ProviderSnapshot, UsageHistory};
+use crate::models::{
+    MetricDefinition, MetricSection, ProviderDefinition, ProviderSnapshot, UsageHistory,
+};
 
 use self::{
     auth::load_token,
@@ -20,6 +22,58 @@ use self::{
 
 const QUOTA_SUMMARY_PATH: &str = "/v1internal:retrieveUserQuotaSummary";
 const LOAD_CODE_ASSIST_PATH: &str = "/v1internal:loadCodeAssist";
+
+pub(crate) fn definition() -> ProviderDefinition {
+    ProviderDefinition {
+        id: "antigravity".into(),
+        display_name: "Antigravity".into(),
+        short_name: "A".into(),
+        fallback_enabled: false,
+        local_usage_source_note: None,
+        metrics: vec![
+            MetricDefinition::quota(
+                "antigravity.geminiPro",
+                "Session",
+                "geminiPro",
+                true,
+                true,
+                MetricSection::AlwaysVisible,
+                true,
+                "S",
+            ),
+            MetricDefinition::quota(
+                "antigravity.geminiWeekly",
+                "Weekly",
+                "geminiWeekly",
+                false,
+                true,
+                MetricSection::AlwaysVisible,
+                true,
+                "W",
+            ),
+            MetricDefinition::quota(
+                "antigravity.claude",
+                "Claude",
+                "claude",
+                true,
+                true,
+                MetricSection::OnDemand,
+                false,
+                "C",
+            ),
+            MetricDefinition::quota(
+                "antigravity.claudeWeekly",
+                "Claude Weekly",
+                "claudeWeekly",
+                false,
+                true,
+                MetricSection::OnDemand,
+                false,
+                "CW",
+            ),
+        ],
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum AntigravityError {
@@ -157,8 +211,8 @@ fn snapshot(plan: Option<String>, quotas: Vec<crate::models::QuotaWindow>) -> Pr
 }
 
 impl crate::providers::UsageProvider for AntigravityProvider {
-    fn id(&self) -> &'static str {
-        "antigravity"
+    fn definition(&self) -> ProviderDefinition {
+        definition()
     }
 
     fn has_local_credentials(&self) -> bool {

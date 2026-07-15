@@ -140,8 +140,14 @@ Svelte interface
 ```
 
 Provider API responses and credentials stay behind the Rust boundary. Each provider implements the
-same small runtime contract (`id`, local credential detection, and refresh) and produces a shared
-snapshot model for the UI. One provider failure does not stop the others from refreshing.
+same small runtime contract (definition, local credential detection, and refresh), owns its static
+metric metadata, and produces a shared snapshot model for the UI. A validated registry shares that
+catalog with settings, tray, pacing, and the frontend bootstrap path. One provider failure does not
+stop the others from refreshing.
+
+Local credential detection starts after Tauri setup and fans out across blocking workers, so
+credential-store access does not hold up the UI thread. Fresh installs show the established fallback
+immediately, then adopt the detected provider set without overriding toggles changed during detection.
 
 Claude and Codex normalize local log events into the same pricing model. A provider refresh uses one
 immutable pricing snapshot from start to finish, while price feeds revalidate in the background with

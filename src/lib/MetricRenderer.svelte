@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { metricDefinition } from './metrics';
+  import type { ProviderCatalogIndex } from './metrics';
   import QuotaMetric from './QuotaMetric.svelte';
   import UsageMetric from './UsageMetric.svelte';
   import UsageTrend from './UsageTrend.svelte';
@@ -11,42 +11,35 @@
     snapshot: ProviderSnapshot;
     settings: AppSettings;
     now: number;
+    catalog: ProviderCatalogIndex;
     onSettingsChange: (settings: AppSettings) => void;
   }
-  let { layout, snapshot, settings, now, onSettingsChange }: Props = $props();
-  const definition = $derived(metricDefinition(layout.id));
-  const quota = $derived(
-    definition?.kind === 'quota' || definition?.kind === 'quotaOrValue'
-      ? snapshot.quotas.find((item) => item.id === definition.sourceId)
-      : undefined,
-  );
+  let { layout, snapshot, settings, now, catalog, onSettingsChange }: Props = $props();
+  const definition = $derived(catalog.metric(layout.id));
+  const quota = $derived.by(() => {
+    const source = definition?.source;
+    if (source?.kind !== 'quota' && source?.kind !== 'quotaOrValue') return undefined;
+    return snapshot.quotas.find((item) => item.id === source.sourceId);
+  });
   const isSessionWindow = $derived(
-    (definition?.kind === 'quota' || definition?.kind === 'quotaOrValue') &&
-      ((snapshot.providerId === 'claude' && definition.sourceId === 'session') ||
-        (snapshot.providerId === 'antigravity' &&
-          (definition.sourceId === 'geminiPro' || definition.sourceId === 'claude'))),
+    (definition?.source.kind === 'quota' || definition?.source.kind === 'quotaOrValue') &&
+      definition.source.sessionWindow,
   );
   const period = $derived.by(() => {
-    if (definition?.kind !== 'usage') return null;
-    if (definition.sourceId === 'today') return snapshot.usage.today;
-    if (definition.sourceId === 'yesterday') return snapshot.usage.yesterday;
+    if (definition?.source.kind !== 'usage') return null;
+    if (definition.source.period === 'today') return snapshot.usage.today;
+    if (definition.source.period === 'yesterday') return snapshot.usage.yesterday;
     return snapshot.usage.last30Days;
   });
-  const valueMetric = $derived(
-    definition?.kind === 'value' || definition?.kind === 'quotaOrValue'
-      ? (snapshot.valueMetrics.find((item) => item.id === definition.sourceId) ?? null)
-      : null,
-  );
-  const usageSourceNote = $derived(
-    snapshot.providerId === 'claude'
-      ? 'From your Claude usage history (estimated)'
-      : snapshot.providerId === 'codex'
-        ? 'From your Codex logs (estimated)'
-        : `From your ${snapshot.providerId} usage history`,
-  );
+  const valueMetric = $derived.by(() => {
+    const source = definition?.source;
+    if (source?.kind !== 'value' && source?.kind !== 'quotaOrValue') return null;
+    return snapshot.valueMetrics.find((item) => item.id === source.sourceId) ?? null;
+  });
+  const usageSourceNote = $derived(catalog.localUsageSourceNote(snapshot.providerId));
 </script>
 
-{#if (definition?.kind === 'quota' || definition?.kind === 'quotaOrValue') && quota}
+{#if (definition?.source.kind === 'quota' || definition?.source.kind === 'quotaOrValue') && quota}
   <QuotaMetric
     {quota}
     {now}
@@ -66,7 +59,7 @@
         resetDisplay: settings.resetDisplay === 'countdown' ? 'exact' : 'countdown',
       })}
   />
-{:else if definition?.kind === 'quotaOrValue' && valueMetric}
+{:else if definition?.source.kind === 'quotaOrValue' && valueMetric}
   <ValueMetric
     label={definition.label}
     metric={valueMetric}
@@ -74,7 +67,7 @@
     resetDisplay={settings.resetDisplay}
     timeFormat={settings.timeFormat}
   />
-{:else if definition?.kind === 'quota' || definition?.kind === 'quotaOrValue'}
+{:else if definition?.source.kind === 'quota' || definition?.source.kind === 'quotaOrValue'}
   <section class="metric metric--no-data" aria-label={`${definition.label} quota`}>
     <div class="metric__heading"><h2>{definition.label}</h2></div>
     <div class="meter-shell">
@@ -89,11 +82,11 @@
     </div>
     <div class="metric__reading"><span>No data</span><span>Reset unavailable</span></div>
   </section>
-{:else if definition?.kind === 'trend'}
+{:else if definition?.source.kind === 'trend'}
   <UsageTrend daily={snapshot.usage.daily} sourceNote={usageSourceNote} />
-{:else if definition?.kind === 'usage'}
+{:else if definition?.source.kind === 'usage'}
   <UsageMetric label={definition.label} {period} />
-{:else if definition?.kind === 'value'}
+{:else if definition?.source.kind === 'value'}
   <ValueMetric
     label={definition.label}
     metric={valueMetric}

@@ -9,11 +9,111 @@ use chrono::Utc;
 use reqwest::StatusCode;
 use thiserror::Error;
 
-use crate::{models::ProviderSnapshot, pricing::PricingStore, storage::Storage};
+use crate::{
+    models::{
+        MetricDefinition, MetricSection, ProviderDefinition, ProviderSnapshot, UsagePeriodSelection,
+    },
+    pricing::PricingStore,
+    storage::Storage,
+};
 
 use self::{
     auth::CodexAuthState, client::CodexClient, local_usage::scan_local_usage, mapper::map_usage,
 };
+
+pub(crate) fn definition() -> ProviderDefinition {
+    ProviderDefinition {
+        id: "codex".into(),
+        display_name: "Codex".into(),
+        short_name: "Cx".into(),
+        fallback_enabled: true,
+        local_usage_source_note: Some("From your Codex logs (estimated)".into()),
+        metrics: vec![
+            MetricDefinition::quota(
+                "codex.session",
+                "Session",
+                "session",
+                false,
+                true,
+                MetricSection::AlwaysVisible,
+                true,
+                "S",
+            ),
+            MetricDefinition::quota(
+                "codex.weekly",
+                "Weekly",
+                "weekly",
+                false,
+                true,
+                MetricSection::AlwaysVisible,
+                true,
+                "W",
+            ),
+            MetricDefinition::quota(
+                "codex.spark",
+                "Spark",
+                "spark",
+                false,
+                true,
+                MetricSection::OnDemand,
+                false,
+                "Sp",
+            ),
+            MetricDefinition::quota(
+                "codex.sparkWeekly",
+                "Spark Weekly",
+                "sparkWeekly",
+                false,
+                true,
+                MetricSection::OnDemand,
+                false,
+                "SW",
+            ),
+            MetricDefinition::trend("codex.trend"),
+            MetricDefinition::value(
+                "codex.credits",
+                "Extra Usage",
+                "credits",
+                true,
+                MetricSection::OnDemand,
+                false,
+                "E",
+                None,
+            ),
+            MetricDefinition::value(
+                "codex.rateLimitResets",
+                "Rate Limit Resets",
+                "rateLimitResets",
+                true,
+                MetricSection::OnDemand,
+                false,
+                "R",
+                Some("resets"),
+            ),
+            MetricDefinition::usage(
+                "codex.today",
+                "Today",
+                UsagePeriodSelection::Today,
+                MetricSection::OnDemand,
+                "T",
+            ),
+            MetricDefinition::usage(
+                "codex.yesterday",
+                "Yesterday",
+                UsagePeriodSelection::Yesterday,
+                MetricSection::OnDemand,
+                "Y",
+            ),
+            MetricDefinition::usage(
+                "codex.last30",
+                "Last 30 Days",
+                UsagePeriodSelection::Last30Days,
+                MetricSection::OnDemand,
+                "M",
+            ),
+        ],
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum CodexError {
@@ -168,8 +268,8 @@ impl CodexProvider {
 }
 
 impl crate::providers::UsageProvider for CodexProvider {
-    fn id(&self) -> &'static str {
-        "codex"
+    fn definition(&self) -> ProviderDefinition {
+        definition()
     }
 
     fn has_local_credentials(&self) -> bool {

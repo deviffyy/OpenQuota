@@ -211,6 +211,234 @@ pub enum MetricSection {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum MetricSource {
+    Quota {
+        #[serde(rename = "sourceId")]
+        source_id: String,
+        #[serde(rename = "sessionWindow")]
+        session_window: bool,
+    },
+    QuotaOrValue {
+        #[serde(rename = "sourceId")]
+        source_id: String,
+        #[serde(rename = "sessionWindow")]
+        session_window: bool,
+    },
+    Value {
+        #[serde(rename = "sourceId")]
+        source_id: String,
+    },
+    Usage {
+        period: UsagePeriodSelection,
+    },
+    Trend,
+}
+
+impl MetricSource {
+    pub fn source_id(&self) -> Option<&str> {
+        match self {
+            Self::Quota { source_id, .. }
+            | Self::QuotaOrValue { source_id, .. }
+            | Self::Value { source_id } => Some(source_id),
+            Self::Usage { .. } | Self::Trend => None,
+        }
+    }
+
+    pub fn session_window(&self) -> bool {
+        matches!(
+            self,
+            Self::Quota {
+                session_window: true,
+                ..
+            } | Self::QuotaOrValue {
+                session_window: true,
+                ..
+            }
+        )
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrayMetricDefinition {
+    pub short_label: String,
+    pub suffix: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MetricDefinition {
+    pub id: String,
+    pub label: String,
+    pub source: MetricSource,
+    pub pinnable: bool,
+    pub default_enabled: bool,
+    pub default_section: MetricSection,
+    pub default_pinned: bool,
+    pub tray: Option<TrayMetricDefinition>,
+}
+
+impl MetricDefinition {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        id: impl Into<String>,
+        label: impl Into<String>,
+        source: MetricSource,
+        pinnable: bool,
+        default_enabled: bool,
+        default_section: MetricSection,
+        default_pinned: bool,
+        tray_short_label: Option<&str>,
+        tray_suffix: Option<&str>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            source,
+            pinnable,
+            default_enabled,
+            default_section,
+            default_pinned,
+            tray: tray_short_label.map(|short_label| TrayMetricDefinition {
+                short_label: short_label.into(),
+                suffix: tray_suffix.map(str::to_owned),
+            }),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn quota(
+        id: &str,
+        label: &str,
+        source_id: &str,
+        session_window: bool,
+        default_enabled: bool,
+        default_section: MetricSection,
+        default_pinned: bool,
+        tray_short_label: &str,
+    ) -> Self {
+        Self::new(
+            id,
+            label,
+            MetricSource::Quota {
+                source_id: source_id.into(),
+                session_window,
+            },
+            true,
+            default_enabled,
+            default_section,
+            default_pinned,
+            Some(tray_short_label),
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn quota_or_value(
+        id: &str,
+        label: &str,
+        source_id: &str,
+        default_enabled: bool,
+        default_section: MetricSection,
+        default_pinned: bool,
+        tray_short_label: &str,
+    ) -> Self {
+        Self::new(
+            id,
+            label,
+            MetricSource::QuotaOrValue {
+                source_id: source_id.into(),
+                session_window: false,
+            },
+            true,
+            default_enabled,
+            default_section,
+            default_pinned,
+            Some(tray_short_label),
+            None,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn value(
+        id: &str,
+        label: &str,
+        source_id: &str,
+        default_enabled: bool,
+        default_section: MetricSection,
+        default_pinned: bool,
+        tray_short_label: &str,
+        tray_suffix: Option<&str>,
+    ) -> Self {
+        Self::new(
+            id,
+            label,
+            MetricSource::Value {
+                source_id: source_id.into(),
+            },
+            true,
+            default_enabled,
+            default_section,
+            default_pinned,
+            Some(tray_short_label),
+            tray_suffix,
+        )
+    }
+
+    pub fn usage(
+        id: &str,
+        label: &str,
+        period: UsagePeriodSelection,
+        default_section: MetricSection,
+        tray_short_label: &str,
+    ) -> Self {
+        Self::new(
+            id,
+            label,
+            MetricSource::Usage { period },
+            true,
+            true,
+            default_section,
+            false,
+            Some(tray_short_label),
+            None,
+        )
+    }
+
+    pub fn trend(id: &str) -> Self {
+        Self::new(
+            id,
+            "Usage Trend",
+            MetricSource::Trend,
+            false,
+            true,
+            MetricSection::AlwaysVisible,
+            false,
+            None,
+            None,
+        )
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderDefinition {
+    pub id: String,
+    pub display_name: String,
+    pub short_name: String,
+    pub fallback_enabled: bool,
+    pub local_usage_source_note: Option<String>,
+    pub metrics: Vec<MetricDefinition>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderCatalog {
+    pub providers: Vec<ProviderDefinition>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MetricLayout {
     pub id: String,

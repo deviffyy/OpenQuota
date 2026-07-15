@@ -5,8 +5,10 @@ use tauri::image::Image;
 
 use crate::{
     models::{
-        AppSettings, MetricValue, MetricValueKind, ProviderSnapshot, UsageDisplay, UsagePeriod,
+        AppSettings, MetricDefinition, MetricSource, MetricValue, MetricValueKind,
+        ProviderSnapshot, UsageDisplay, UsagePeriod, UsagePeriodSelection,
     },
+    providers::ProviderRegistry,
     service::UsageViewState,
 };
 
@@ -23,11 +25,16 @@ struct TrayMetric {
     fraction: Option<f64>,
 }
 
-pub fn update(app: &AppHandle, state: &UsageViewState, settings: &AppSettings) {
+pub fn update(
+    app: &AppHandle,
+    state: &UsageViewState,
+    settings: &AppSettings,
+    registry: &ProviderRegistry,
+) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
     };
-    let metrics = resolved_metrics(state, settings);
+    let metrics = resolved_metrics(state, settings, registry);
     let tooltip = if metrics.is_empty() {
         "OpenQuota".to_owned()
     } else {
@@ -76,12 +83,17 @@ pub fn update(app: &AppHandle, state: &UsageViewState, settings: &AppSettings) {
     }
 }
 
-fn resolved_metrics(state: &UsageViewState, settings: &AppSettings) -> Vec<TrayMetric> {
+fn resolved_metrics(
+    state: &UsageViewState,
+    settings: &AppSettings,
+    registry: &ProviderRegistry,
+) -> Vec<TrayMetric> {
     settings
         .providers
         .iter()
         .filter(|provider| provider.enabled)
         .flat_map(|provider| {
+            let definition = registry.definition(&provider.id);
             let snapshot = state
                 .providers
                 .get(&provider.id)
@@ -92,11 +104,12 @@ fn resolved_metrics(state: &UsageViewState, settings: &AppSettings) -> Vec<TrayM
                 .filter(|metric| metric.enabled && metric.pinned)
                 .filter_map(move |metric| {
                     let snapshot = snapshot?;
-                    let mut resolved = tray_metric(&metric.id, snapshot, settings.usage_display)?;
-                    let display_name = provider_display_name(&provider.id);
-                    resolved.compact =
-                        format!("{} {}", provider_short_name(&provider.id), resolved.compact);
-                    resolved.detail = format!("{display_name} {}", resolved.detail);
+                    let definition = definition?;
+                    let metric_definition = registry.metric(&metric.id)?;
+                    let mut resolved =
+                        tray_metric(metric_definition, snapshot, settings.usage_display)?;
+                    resolved.compact = format!("{} {}", definition.short_name, resolved.compact);
+                    resolved.detail = format!("{} {}", definition.display_name, resolved.detail);
                     Some(resolved)
                 })
         })
@@ -104,10 +117,11 @@ fn resolved_metrics(state: &UsageViewState, settings: &AppSettings) -> Vec<TrayM
 }
 
 fn tray_metric(
-    metric_id: &str,
+    definition: &MetricDefinition,
     snapshot: &ProviderSnapshot,
     display: UsageDisplay,
 ) -> Option<TrayMetric> {
+    let tray = definition.tray.as_ref()?;
     let quota = |id: &str, short: &str| {
         snapshot
             .quotas
@@ -130,30 +144,37 @@ fn tray_metric(
                 }
             })
     };
-    match metric_id {
-        id if id.ends_with(".session") => quota("session", "S"),
-        id if id.ends_with(".weekly") => quota("weekly", "W"),
-        id if id.ends_with(".sonnet") => quota("sonnet", "Sn"),
-        id if id.ends_with(".fable") => quota("fable", "F"),
-        id if id.ends_with(".extra") => {
-            quota("extra", "E").or_else(|| value_metric("E", snapshot, "extra", None))
-        }
-        id if id.ends_with(".credits") => value_metric("E", snapshot, "credits", None),
-        id if id.ends_with(".rateLimitResets") => {
-            value_metric("R", snapshot, "rateLimitResets", Some("resets"))
-        }
-        id if id.ends_with(".geminiPro") => quota("geminiPro", "S"),
-        id if id.ends_with(".geminiWeekly") => quota("geminiWeekly", "W"),
-        id if id.ends_with(".claude") => quota("claude", "C"),
-        id if id.ends_with(".claudeWeekly") => quota("claudeWeekly", "CW"),
-        id if id.ends_with(".today") => usage_metric("T", "Today", snapshot.usage.today.as_ref()),
-        id if id.ends_with(".yesterday") => {
-            usage_metric("Y", "Yesterday", snapshot.usage.yesterday.as_ref())
-        }
-        id if id.ends_with(".last30") => {
-            usage_metric("M", "30 Days", snapshot.usage.last_30_days.as_ref())
-        }
-        _ => None,
+    match &definition.source {
+        MetricSource::Quota { source_id, .. } => quota(source_id, &tray.short_label),
+        MetricSource::QuotaOrValue { source_id, .. } => quota(source_id, &tray.short_label)
+            .or_else(|| {
+                value_metric(
+                    &tray.short_label,
+                    snapshot,
+                    source_id,
+                    tray.suffix.as_deref(),
+                )
+            }),
+        MetricSource::Value { source_id } => value_metric(
+            &tray.short_label,
+            snapshot,
+            source_id,
+            tray.suffix.as_deref(),
+        ),
+        MetricSource::Usage { period } => usage_metric(
+            &tray.short_label,
+            &definition.label,
+            usage_period(snapshot, *period),
+        ),
+        MetricSource::Trend => None,
+    }
+}
+
+fn usage_period(snapshot: &ProviderSnapshot, period: UsagePeriodSelection) -> Option<&UsagePeriod> {
+    match period {
+        UsagePeriodSelection::Today => snapshot.usage.today.as_ref(),
+        UsagePeriodSelection::Yesterday => snapshot.usage.yesterday.as_ref(),
+        UsagePeriodSelection::Last30Days => snapshot.usage.last_30_days.as_ref(),
     }
 }
 
@@ -211,22 +232,6 @@ fn format_detail_value(value: &MetricValue) -> String {
         .as_deref()
         .map(|label| format!("{number} {label}"))
         .unwrap_or(number)
-}
-
-fn provider_display_name(id: &str) -> &'static str {
-    match id {
-        "claude" => "Claude",
-        "antigravity" => "Antigravity",
-        _ => "Codex",
-    }
-}
-
-fn provider_short_name(id: &str) -> &'static str {
-    match id {
-        "claude" => "Cl",
-        "antigravity" => "A",
-        _ => "Cx",
-    }
 }
 
 fn usage_metric(short: &str, label: &str, period: Option<&UsagePeriod>) -> Option<TrayMetric> {
@@ -314,6 +319,7 @@ mod tests {
             MetricValue, MetricValueKind, ProviderSnapshot, ProviderViewState, QuotaWindow,
             SnapshotSource, UsageHistory, ValueMetric,
         },
+        providers::{codex, ProviderRegistry},
         settings::default_settings,
     };
 
@@ -362,9 +368,11 @@ mod tests {
             providers: [("codex".into(), provider_state)].into_iter().collect(),
             last_full_refresh_at: None,
         };
+        let catalog = ProviderRegistry::from_definitions(vec![codex::definition()]).unwrap();
         let metrics = resolved_metrics(
             &state,
-            &default_settings(&HashSet::from(["codex".to_owned()])),
+            &default_settings(&catalog, &HashSet::from(["codex".to_owned()])),
+            &catalog,
         );
         assert_eq!(metrics.len(), 2);
         assert_eq!(metrics[0].compact, "Cx S 75%");
@@ -407,8 +415,9 @@ mod tests {
             warnings: Vec::new(),
             refreshed_at: Utc::now(),
         };
+        let catalog = ProviderRegistry::from_definitions(vec![codex::definition()]).unwrap();
         let metric = super::tray_metric(
-            "codex.credits",
+            catalog.metric("codex.credits").unwrap(),
             &snapshot,
             crate::models::UsageDisplay::Left,
         )

@@ -8,9 +8,11 @@ use chrono::Utc;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::{
-    models::{ProviderErrorKind, ProviderSnapshot, ProviderViewState, SnapshotSource},
+    models::{
+        MetricSource, ProviderErrorKind, ProviderSnapshot, ProviderViewState, SnapshotSource,
+    },
     policy::{REFRESH_INTERVAL, STALE_AFTER},
-    providers::{ProviderError, UsageProvider},
+    providers::{ProviderError, ProviderRegistry},
     storage::Storage,
 };
 
@@ -22,7 +24,7 @@ pub struct UsageViewState {
 }
 
 pub struct ProviderService {
-    providers: BTreeMap<String, Arc<dyn UsageProvider>>,
+    registry: Arc<ProviderRegistry>,
     storage: Arc<Storage>,
     states: RwLock<BTreeMap<String, ProviderViewState>>,
     refresh_gates: HashMap<String, Arc<AsyncMutex<()>>>,
@@ -31,12 +33,11 @@ pub struct ProviderService {
 }
 
 impl ProviderService {
-    pub fn new(providers: Vec<Arc<dyn UsageProvider>>, storage: Arc<Storage>) -> Self {
-        let mut provider_map = BTreeMap::new();
+    pub fn new(registry: Arc<ProviderRegistry>, storage: Arc<Storage>) -> Self {
         let mut states = BTreeMap::new();
         let mut refresh_gates = HashMap::new();
-        for provider in providers {
-            let id = provider.id().to_owned();
+        for definition in &registry.catalog().providers {
+            let id = definition.id.clone();
             let state = storage
                 .load_snapshot(&id)
                 .ok()
@@ -45,10 +46,9 @@ impl ProviderService {
                 .unwrap_or_default();
             states.insert(id.clone(), state);
             refresh_gates.insert(id.clone(), Arc::new(AsyncMutex::new(())));
-            provider_map.insert(id, provider);
         }
         Self {
-            providers: provider_map,
+            registry,
             storage,
             states: RwLock::new(states),
             refresh_gates,
@@ -81,7 +81,7 @@ impl ProviderService {
     }
 
     pub async fn refresh(&self, provider_id: &str, force: bool) -> ProviderViewState {
-        let Some(provider) = self.providers.get(provider_id).cloned() else {
+        let Some(provider) = self.registry.runtime(provider_id) else {
             return ProviderViewState {
                 error: Some("Unknown provider.".into()),
                 error_kind: Some(ProviderErrorKind::Internal),
@@ -110,6 +110,8 @@ impl ProviderService {
                 "Provider refresh stopped unexpectedly.",
             )),
         };
+        let refresh_result = refresh_result
+            .and_then(|snapshot| validate_snapshot(&self.registry, provider_id, snapshot));
         let state = self.apply_refresh_result(provider_id, refresh_result);
         if state.error.is_none() {
             if let Ok(mut last) = self.last_live_refresh.lock() {
@@ -194,6 +196,58 @@ impl ProviderService {
     }
 }
 
+fn validate_snapshot(
+    registry: &ProviderRegistry,
+    provider_id: &str,
+    snapshot: ProviderSnapshot,
+) -> Result<ProviderSnapshot, ProviderError> {
+    let Some(definition) = registry.definition(provider_id) else {
+        return Err(snapshot_contract_error());
+    };
+    if snapshot.provider_id != provider_id {
+        return Err(snapshot_contract_error());
+    }
+
+    let quota_sources = definition
+        .metrics
+        .iter()
+        .filter_map(|metric| match &metric.source {
+            MetricSource::Quota { source_id, .. }
+            | MetricSource::QuotaOrValue { source_id, .. } => Some(source_id.as_str()),
+            _ => None,
+        })
+        .collect::<std::collections::HashSet<_>>();
+    let value_sources = definition
+        .metrics
+        .iter()
+        .filter_map(|metric| match &metric.source {
+            MetricSource::Value { source_id } | MetricSource::QuotaOrValue { source_id, .. } => {
+                Some(source_id.as_str())
+            }
+            _ => None,
+        })
+        .collect::<std::collections::HashSet<_>>();
+    if snapshot
+        .quotas
+        .iter()
+        .any(|quota| !quota_sources.contains(quota.id.as_str()))
+        || snapshot
+            .value_metrics
+            .iter()
+            .any(|metric| !value_sources.contains(metric.id.as_str()))
+    {
+        return Err(snapshot_contract_error());
+    }
+    Ok(snapshot)
+}
+
+fn snapshot_contract_error() -> ProviderError {
+    ProviderError::new(
+        ProviderErrorKind::Internal,
+        "Provider data does not match its registered metric contract.",
+    )
+}
+
 fn merge_refresh_result(
     state: &mut ProviderViewState,
     result: Result<ProviderSnapshot, ProviderError>,
@@ -229,11 +283,13 @@ mod tests {
     use chrono::Utc;
     use tempfile::tempdir;
 
-    use super::{merge_refresh_result, ProviderService};
+    use super::{merge_refresh_result, validate_snapshot, ProviderService};
     use crate::{
-        models::ProviderErrorKind,
-        models::{ProviderSnapshot, ProviderViewState, UsageHistory},
-        providers::{ProviderError, UsageProvider},
+        models::{
+            MetricDefinition, MetricSection, MetricSource, ProviderDefinition, ProviderErrorKind,
+            ProviderSnapshot, ProviderViewState, UsageHistory,
+        },
+        providers::{ProviderError, ProviderRegistry, UsageProvider},
         storage::Storage,
     };
 
@@ -244,8 +300,28 @@ mod tests {
     }
 
     impl UsageProvider for SlowProvider {
-        fn id(&self) -> &'static str {
-            self.id
+        fn definition(&self) -> ProviderDefinition {
+            ProviderDefinition {
+                id: self.id.into(),
+                display_name: self.id.into(),
+                short_name: "T".into(),
+                fallback_enabled: true,
+                local_usage_source_note: None,
+                metrics: vec![MetricDefinition::new(
+                    format!("{}.session", self.id),
+                    "Session",
+                    MetricSource::Quota {
+                        source_id: "session".into(),
+                        session_window: false,
+                    },
+                    true,
+                    true,
+                    MetricSection::AlwaysVisible,
+                    true,
+                    Some("S"),
+                    None,
+                )],
+            }
         }
 
         fn has_local_credentials(&self) -> bool {
@@ -297,6 +373,34 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_contract_rejects_wrong_provider_and_unknown_sources() {
+        let provider = SlowProvider {
+            id: "contract",
+            active: Arc::new(AtomicUsize::new(0)),
+            maximum: Arc::new(AtomicUsize::new(0)),
+        };
+        let registry = ProviderRegistry::from_definitions(vec![provider.definition()]).unwrap();
+        let snapshot = provider.refresh().unwrap();
+
+        let mut wrong_provider = snapshot.clone();
+        wrong_provider.provider_id = "other".into();
+        assert!(validate_snapshot(&registry, "contract", wrong_provider).is_err());
+
+        let mut unknown_source = snapshot;
+        unknown_source.quotas.push(crate::models::QuotaWindow {
+            id: "unknown".into(),
+            label: "Unknown".into(),
+            used_percent: 0.0,
+            resets_at: None,
+            period_seconds: 1,
+            format: crate::models::QuotaFormat::Percent,
+            used_value: None,
+            limit_value: None,
+        });
+        assert!(validate_snapshot(&registry, "contract", unknown_source).is_err());
+    }
+
+    #[test]
     fn enabled_providers_refresh_in_parallel() {
         let directory = tempdir().unwrap();
         let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
@@ -312,7 +416,8 @@ mod tests {
                 }) as Arc<dyn UsageProvider>
             })
             .collect();
-        let service = Arc::new(ProviderService::new(providers, storage));
+        let registry = Arc::new(ProviderRegistry::new(providers).unwrap());
+        let service = Arc::new(ProviderService::new(registry, storage));
 
         tauri::async_runtime::block_on(
             service.refresh_enabled(&["claude".into(), "antigravity".into()], true),

@@ -110,6 +110,42 @@ export interface UsageViewState {
 
 export type MetricSection = 'alwaysVisible' | 'onDemand';
 
+export type MetricSource =
+  | { kind: 'quota'; sourceId: string; sessionWindow: boolean }
+  | { kind: 'quotaOrValue'; sourceId: string; sessionWindow: boolean }
+  | { kind: 'value'; sourceId: string }
+  | { kind: 'usage'; period: 'today' | 'yesterday' | 'last30Days' }
+  | { kind: 'trend' };
+
+export interface TrayMetricDefinition {
+  shortLabel: string;
+  suffix: string | null;
+}
+
+export interface MetricDefinition {
+  id: string;
+  label: string;
+  source: MetricSource;
+  pinnable: boolean;
+  defaultEnabled: boolean;
+  defaultSection: MetricSection;
+  defaultPinned: boolean;
+  tray: TrayMetricDefinition | null;
+}
+
+export interface ProviderDefinition {
+  id: string;
+  displayName: string;
+  shortName: string;
+  fallbackEnabled: boolean;
+  localUsageSourceNote: string | null;
+  metrics: MetricDefinition[];
+}
+
+export interface ProviderCatalog {
+  providers: ProviderDefinition[];
+}
+
 export interface MetricLayout {
   id: string;
   enabled: boolean;
@@ -188,4 +224,5 @@ export interface SettingsViewState {
 export interface BootstrapState {
   usage: UsageViewState;
   settings: SettingsViewState;
+  catalog: ProviderCatalog;
 }

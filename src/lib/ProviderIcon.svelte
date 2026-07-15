@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { providerIconPath } from './providerIconPaths';
+  import { providerIconColor, providerIconPath } from './providerIconPaths';
 
   interface Props {
     providerId: string;
@@ -8,6 +8,7 @@
 
   let { providerId, size = 18 }: Props = $props();
   const path = $derived(providerIconPath(providerId));
+  const color = $derived(providerIconColor(providerId));
 </script>
 
 <svg
@@ -18,14 +19,7 @@
   fill="none"
   aria-hidden="true"
 >
-  <path
-    d={path}
-    fill={providerId === 'claude'
-      ? '#DE7356'
-      : providerId === 'antigravity'
-        ? '#4285F4'
-        : 'currentColor'}
-  />
+  <path d={path} fill={color ?? 'currentColor'} />
 </svg>
 
 <style>

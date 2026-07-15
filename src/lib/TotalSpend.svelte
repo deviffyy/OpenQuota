@@ -3,7 +3,7 @@
   import Icon from './Icon.svelte';
   import { formatSpendValue, totalSpendRingCenter } from './metricFormat';
   import SelectMenu from './SelectMenu.svelte';
-  import { providerDisplayName } from './metrics';
+  import type { ProviderCatalogIndex } from './metrics';
   import { TOTAL_SPEND_GEOMETRY } from './shareCard';
   import { ringSectorPath, spendRingArcs } from './spendRing';
   import { emptySpendMessage, projectSpend, type SpendProjection } from './totalSpend';
@@ -12,10 +12,12 @@
   interface Props {
     providers: Array<{ id: string; usage: UsageHistory }>;
     settings: AppSettings;
+    catalog: ProviderCatalogIndex;
     onChange: (settings: AppSettings) => void;
     onShare: (projection: SpendProjection) => boolean | Promise<boolean>;
   }
-  let { providers, settings, onChange, onShare }: Props = $props();
+  let { providers, settings, catalog, onChange, onShare }: Props = $props();
+  const providerDisplayName = (id: string) => catalog.displayName(id);
   const projection = $derived(
     projectSpend(providers, settings.totalSpendPeriod, settings.totalSpendMetric),
   );
