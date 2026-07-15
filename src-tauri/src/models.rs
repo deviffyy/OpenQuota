@@ -43,6 +43,22 @@ pub struct ValueMetric {
     pub expiries_at: Vec<DateTime<Utc>>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ProviderNoticeTone {
+    Info,
+    Warning,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderNotice {
+    pub id: String,
+    pub title: String,
+    pub message: String,
+    pub tone: ProviderNoticeTone,
+}
+
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum QuotaFormat {
@@ -121,6 +137,8 @@ pub struct ProviderSnapshot {
     pub quotas: Vec<QuotaWindow>,
     #[serde(default)]
     pub value_metrics: Vec<ValueMetric>,
+    #[serde(default)]
+    pub notices: Vec<ProviderNotice>,
     pub usage: UsageHistory,
     pub warnings: Vec<String>,
     pub refreshed_at: DateTime<Utc>,
@@ -344,7 +362,7 @@ pub struct SettingsViewState {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppSettings, ProviderErrorKind, ProviderViewState, UsagePeriod};
+    use super::{AppSettings, ProviderErrorKind, ProviderSnapshot, ProviderViewState, UsagePeriod};
 
     #[test]
     fn older_settings_default_new_update_state_fields() {
@@ -377,5 +395,22 @@ mod tests {
         )
         .unwrap();
         assert!(period.cost_estimated);
+    }
+
+    #[test]
+    fn cached_snapshots_default_new_dynamic_rows() {
+        let snapshot: ProviderSnapshot = serde_json::from_str(
+            r#"{
+                "providerId":"codex",
+                "plan":null,
+                "quotas":[],
+                "usage":{"today":null,"yesterday":null,"last30Days":null,"daily":[],"unknownModels":[]},
+                "warnings":[],
+                "refreshedAt":"2026-07-15T00:00:00Z"
+            }"#,
+        )
+        .unwrap();
+        assert!(snapshot.value_metrics.is_empty());
+        assert!(snapshot.notices.is_empty());
     }
 }

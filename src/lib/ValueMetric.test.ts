@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/svelte';
+import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import ValueMetric from './ValueMetric.svelte';
 
@@ -26,7 +26,7 @@ describe('ValueMetric', () => {
     );
   });
 
-  it('shows sorted reset expiries and distinguishes count-only fallback', () => {
+  it('opens a sorted reset-expiry timeline and distinguishes count-only fallback', async () => {
     const { rerender } = render(ValueMetric, {
       label: 'Rate Limit Resets',
       metric: {
@@ -40,10 +40,12 @@ describe('ValueMetric', () => {
       timeFormat: 'twentyFourHour',
     });
 
-    expect(screen.getByText('2 available')).toHaveAttribute(
-      'data-tooltip',
-      'Resets expire in:\n1. 1h 30m\n2. 3h',
-    );
+    const trigger = screen.getByRole('button', { name: 'Rate Limit Resets: 2 available' });
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+    await fireEvent.click(trigger);
+    expect(screen.getByRole('tooltip', { name: 'Rate Limit Resets expiry details' })).toBeVisible();
+    expect(screen.getByText('1h 30m')).toBeInTheDocument();
+    expect(screen.getByText('3h')).toBeInTheDocument();
 
     rerender({
       label: 'Rate Limit Resets',
@@ -57,9 +59,7 @@ describe('ValueMetric', () => {
       resetDisplay: 'countdown',
       timeFormat: 'twentyFourHour',
     });
-    expect(screen.getByText('3 available')).toHaveAttribute(
-      'data-tooltip',
-      'Expiry times unavailable',
-    );
+    expect(screen.getAllByText('3 available')).toHaveLength(2);
+    expect(screen.getByText('Expiry times unavailable')).toBeInTheDocument();
   });
 });

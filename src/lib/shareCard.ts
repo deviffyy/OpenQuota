@@ -105,6 +105,10 @@ export function buildProviderShareRows(
   const rows: ShareRow[] = [];
   let previousTextSection: ProviderLayout['metrics'][number]['section'] | null = null;
 
+  for (const notice of snapshot.notices) {
+    rows.push({ kind: 'text', label: notice.title, value: notice.message, condensed: false });
+  }
+
   for (const metric of visible) {
     const definition = metricDefinition(metric.id);
     if (!definition) continue;

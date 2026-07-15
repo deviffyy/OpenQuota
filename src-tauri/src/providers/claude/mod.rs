@@ -10,7 +10,7 @@ use reqwest::StatusCode;
 use thiserror::Error;
 
 use crate::{
-    models::ProviderSnapshot,
+    models::{ProviderNotice, ProviderNoticeTone, ProviderSnapshot},
     pricing::{ModelPricing, PricingStore},
     storage::Storage,
 };
@@ -108,6 +108,7 @@ impl ClaudeProvider {
                 plan: plan_name(credential),
                 quotas: Vec::new(),
                 value_metrics: Vec::new(),
+                notices: Vec::new(),
                 usage,
                 warnings,
                 refreshed_at: now,
@@ -123,6 +124,7 @@ impl ClaudeProvider {
                 plan: plan_name(credential),
                 quotas: Vec::new(),
                 value_metrics: Vec::new(),
+                notices: Vec::new(),
                 usage,
                 warnings,
                 refreshed_at: now,
@@ -145,18 +147,20 @@ impl ClaudeProvider {
                 snapshot.warnings.push(
                     "Claude live usage is rate limited; showing the last successful limits.".into(),
                 );
+                snapshot.notices = vec![rate_limit_notice(retry, true)];
                 snapshot.refreshed_at = now;
                 return Ok(snapshot);
             }
             warnings.push(format!(
-                "Claude live usage is rate limited; retrying in about {} minutes.",
-                retry.div_ceil(60)
+                "Claude live usage is rate limited; retrying in about {}.",
+                retry_minutes(retry)
             ));
             return Ok(ProviderSnapshot {
                 provider_id: "claude".into(),
                 plan: plan_name(credential),
                 quotas: Vec::new(),
                 value_metrics: Vec::new(),
+                notices: vec![rate_limit_notice(retry, false)],
                 usage,
                 warnings,
                 refreshed_at: now,
@@ -178,21 +182,23 @@ impl ClaudeProvider {
             if let Some(mut snapshot) = self.last_good.lock().ok().and_then(|value| value.clone()) {
                 snapshot.usage = usage;
                 snapshot.warnings.push(format!(
-                    "Claude live usage is rate limited; retrying in about {} minutes.",
-                    retry.div_ceil(60)
+                    "Claude live usage is rate limited; retrying in about {}.",
+                    retry_minutes(retry)
                 ));
+                snapshot.notices = vec![rate_limit_notice(retry, true)];
                 snapshot.refreshed_at = now;
                 return Ok(snapshot);
             }
             warnings.push(format!(
-                "Claude live usage is rate limited; retrying in about {} minutes.",
-                retry.div_ceil(60)
+                "Claude live usage is rate limited; retrying in about {}.",
+                retry_minutes(retry)
             ));
             return Ok(ProviderSnapshot {
                 provider_id: "claude".into(),
                 plan: plan_name(credential),
                 quotas: Vec::new(),
                 value_metrics: Vec::new(),
+                notices: vec![rate_limit_notice(retry, false)],
                 usage,
                 warnings,
                 refreshed_at: now,
@@ -216,6 +222,7 @@ impl ClaudeProvider {
             plan: mapped.plan,
             quotas: mapped.quotas,
             value_metrics: mapped.value_metrics,
+            notices: Vec::new(),
             usage,
             warnings,
             refreshed_at: now,
@@ -228,6 +235,32 @@ impl ClaudeProvider {
         }
         Ok(snapshot)
     }
+}
+
+fn rate_limit_notice(retry_seconds: u64, showing_stale_limits: bool) -> ProviderNotice {
+    let retry = if retry_seconds == 0 {
+        "Ready to retry".to_owned()
+    } else {
+        format!("Retrying in about {}", retry_minutes(retry_seconds))
+    };
+    ProviderNotice {
+        id: "rateLimited".into(),
+        title: "Live usage paused".into(),
+        message: if showing_stale_limits {
+            format!("Showing the last successful limits · {retry}")
+        } else {
+            retry
+        },
+        tone: ProviderNoticeTone::Warning,
+    }
+}
+
+fn retry_minutes(retry_seconds: u64) -> String {
+    let minutes = retry_seconds.div_ceil(60);
+    format!(
+        "{minutes} {}",
+        if minutes == 1 { "minute" } else { "minutes" }
+    )
 }
 
 fn refresh_credential(
@@ -298,5 +331,26 @@ impl crate::providers::UsageProvider for ClaudeProvider {
             };
             crate::providers::ProviderError::from_display(kind, error)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::models::ProviderNoticeTone;
+
+    use super::rate_limit_notice;
+
+    #[test]
+    fn rate_limit_notice_distinguishes_empty_and_stale_live_usage() {
+        let empty = rate_limit_notice(301, false);
+        assert_eq!(empty.title, "Live usage paused");
+        assert_eq!(empty.message, "Retrying in about 6 minutes");
+        assert_eq!(empty.tone, ProviderNoticeTone::Warning);
+
+        let stale = rate_limit_notice(60, true);
+        assert_eq!(
+            stale.message,
+            "Showing the last successful limits · Retrying in about 1 minute"
+        );
     }
 }

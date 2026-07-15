@@ -149,6 +149,7 @@ fn snapshot(plan: Option<String>, quotas: Vec<crate::models::QuotaWindow>) -> Pr
         plan,
         quotas,
         value_metrics: Vec::new(),
+        notices: Vec::new(),
         usage: UsageHistory::default(),
         warnings: Vec::new(),
         refreshed_at: Utc::now(),

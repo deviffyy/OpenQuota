@@ -1,6 +1,8 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { formatMetricValue } from './metricFormat';
   import { formatReset } from './pacing';
+  import ResetCreditsDetail from './ResetCreditsDetail.svelte';
   import type { ValueMetric } from './types';
 
   interface Props {
@@ -12,6 +14,11 @@
   }
 
   let { label, metric, now, resetDisplay, timeFormat }: Props = $props();
+  let detailOpen = $state(false);
+  let detailTop = $state(8);
+  let showTimer: ReturnType<typeof setTimeout> | undefined;
+  let hideTimer: ReturnType<typeof setTimeout> | undefined;
+  const showsResetDetail = $derived(metric?.id === 'rateLimitResets');
 
   const reading = $derived(
     metric?.values
@@ -20,7 +27,7 @@
   );
   const tooltip = $derived.by(() => {
     if (!metric) return undefined;
-    if (metric.expiriesAt.length) {
+    if (metric.expiriesAt.length && !showsResetDetail) {
       const sorted = [...metric.expiriesAt].sort();
       const lines = sorted.map((expiry, index) => {
         const formatted = formatReset(expiry, now, resetDisplay, timeFormat).replace(
@@ -52,16 +59,84 @@
     if (remaining <= 7 * 24 * 60 * 60 * 1000) return 'warning';
     return 'normal';
   });
+
+  function scheduleShow(event: Event) {
+    if (!showsResetDetail || detailOpen || showTimer) return;
+    if (hideTimer) clearTimeout(hideTimer);
+    const target = event.currentTarget as HTMLElement;
+    const rect = target.getBoundingClientRect();
+    const estimatedHeight = Math.min(72 + (metric?.expiriesAt.length ?? 0) * 34, 340);
+    detailTop = Math.max(8, Math.min(rect.bottom + 7, window.innerHeight - estimatedHeight - 8));
+    showTimer = setTimeout(() => {
+      detailOpen = true;
+      showTimer = undefined;
+    }, 350);
+  }
+  function scheduleHide() {
+    if (showTimer) clearTimeout(showTimer);
+    showTimer = undefined;
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => {
+      detailOpen = false;
+      hideTimer = undefined;
+    }, 180);
+  }
+  function keepOpen() {
+    if (hideTimer) clearTimeout(hideTimer);
+    hideTimer = undefined;
+  }
+  function toggleDetail(event: Event) {
+    if (!showsResetDetail) return;
+    if (detailOpen) {
+      detailOpen = false;
+      return;
+    }
+    scheduleShow(event);
+    if (showTimer) clearTimeout(showTimer);
+    showTimer = undefined;
+    detailOpen = true;
+  }
+  onDestroy(() => {
+    if (showTimer) clearTimeout(showTimer);
+    if (hideTimer) clearTimeout(hideTimer);
+  });
 </script>
 
 <div class="value-row">
   <span>{label}</span>
-  <span class="value-reading" data-tooltip={tooltip}>
-    {#if expirySeverity}<i class="expiry-dot expiry-dot--{expirySeverity}" aria-hidden="true"
-      ></i>{/if}
-    {reading}
-  </span>
+  {#if showsResetDetail}
+    <button
+      type="button"
+      class="value-reading value-reading--interactive"
+      aria-expanded={detailOpen}
+      aria-label={`${label}: ${reading}`}
+      onmouseenter={scheduleShow}
+      onmouseleave={scheduleHide}
+      onfocus={scheduleShow}
+      onblur={scheduleHide}
+      onclick={toggleDetail}
+    >
+      {#if expirySeverity}<i class="expiry-dot expiry-dot--{expirySeverity}" aria-hidden="true"
+        ></i>{/if}
+      {reading}
+    </button>
+  {:else}
+    <span class="value-reading" data-tooltip={tooltip}>{reading}</span>
+  {/if}
 </div>
+
+{#if detailOpen && metric}
+  <ResetCreditsDetail
+    title={label}
+    count={Math.max(0, Math.floor(metric.values[0]?.number ?? 0))}
+    expiries={metric.expiriesAt}
+    {now}
+    {timeFormat}
+    top={detailTop}
+    onEnter={keepOpen}
+    onLeave={scheduleHide}
+  />
+{/if}
 
 <style>
   :global {
@@ -85,6 +160,27 @@
       align-items: center;
       gap: 5px;
       text-align: right;
+    }
+
+    .value-reading--interactive {
+      padding: 0;
+      border: 0;
+      border-radius: 6px;
+      color: inherit;
+      background: none;
+      font: inherit;
+      cursor: default;
+      outline: none;
+      transition:
+        background-color 120ms ease,
+        box-shadow 120ms ease;
+    }
+
+    .value-reading--interactive:hover,
+    .value-reading--interactive:focus-visible,
+    .value-reading--interactive[aria-expanded='true'] {
+      background: var(--button-hover);
+      box-shadow: 0 0 0 4px var(--button-hover);
     }
 
     .expiry-dot {

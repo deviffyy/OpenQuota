@@ -12,6 +12,7 @@ const contracts = [
   'QuotaWindow',
   'MetricValue',
   'ValueMetric',
+  'ProviderNotice',
   'UsagePeriod',
   'ModelUsageEntry',
   'ModelUsageVariant',

@@ -83,6 +83,31 @@ describe('share card layout', () => {
     });
   });
 
+  it('keeps provider notices in exported cards', () => {
+    const snapshot = structuredClone(codexState.snapshot!);
+    snapshot.notices = [
+      {
+        id: 'rateLimited',
+        title: 'Live usage paused',
+        message: 'Retrying in about 5 minutes',
+        tone: 'warning',
+      },
+    ];
+    const rows = buildProviderShareRows(
+      'codex',
+      snapshot,
+      settingsState.settings.providers[0],
+      settingsState.settings,
+      Date.now(),
+    );
+
+    expect(rows[0]).toMatchObject({
+      kind: 'text',
+      label: 'Live usage paused',
+      value: 'Retrying in about 5 minutes',
+    });
+  });
+
   it('keeps always-visible rows ahead of expanded rows like the dashboard', () => {
     const snapshot = codexState.snapshot!;
     const settings = settingsState.settings;

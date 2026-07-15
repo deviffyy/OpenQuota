@@ -5,6 +5,7 @@
   import { reorderFlip, springMotion } from './motion';
   import { pointerReorder } from './pointerReorder';
   import ProviderIcon from './ProviderIcon.svelte';
+  import ProviderNoticeRow from './ProviderNoticeRow.svelte';
   import Icon from './Icon.svelte';
   import MetricRenderer from './MetricRenderer.svelte';
   import TotalSpend from './TotalSpend.svelte';
@@ -413,7 +414,9 @@
             >{/if}
           <span
             class="provider-status-slot"
-            class:active={state.refreshing || state.error !== null}
+            class:active={state.refreshing ||
+              state.error !== null ||
+              state.snapshot.warnings.length > 0}
           >
             {#if state.refreshing}
               <span class="provider-refreshing" aria-label="Refreshing"
@@ -429,11 +432,24 @@
                   >{state.error}</span
                 ></span
               >
+            {:else if state.snapshot.warnings.length > 0}
+              <span
+                class="provider-warning"
+                role="status"
+                data-tooltip={state.snapshot.warnings.join('\n')}
+                aria-label={state.snapshot.warnings.join(' ')}
+                ><Icon name="warning" size={12} strokeWidth={2} /><span class="sr-only"
+                  >{state.snapshot.warnings.join(' ')}</span
+                ></span
+              >
             {/if}
           </span>
           <span class="provider-mark"><ProviderIcon providerId={provider.id} size={17} /></span>
         </header>
         <section class="provider-card" aria-label={`${providerDisplayName(provider.id)} usage`}>
+          {#each state.snapshot.notices as notice (notice.id)}
+            <ProviderNoticeRow {notice} />
+          {/each}
           {#each alwaysMetrics as metric (metric.id)}
             <div
               class="metric-context-target"
@@ -535,7 +551,6 @@
             {/if}
           {/if}
         </section>
-        {#each state.snapshot.warnings as warning (warning)}<p class="warning">{warning}</p>{/each}
       </section>
     {:else if state?.error}
       <section

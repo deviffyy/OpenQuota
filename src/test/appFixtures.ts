@@ -51,6 +51,7 @@ export const codexState: ProviderViewState = {
         expiriesAt: [],
       },
     ],
+    notices: [],
     usage: {
       today: {
         tokens: 2100000,
@@ -115,6 +116,7 @@ export const claudeState: ProviderViewState = {
       },
     ],
     valueMetrics: [],
+    notices: [],
     usage: { today: null, yesterday: null, last30Days: null, daily: [], unknownModels: [] },
   },
 };
@@ -154,6 +156,7 @@ export const antigravityState: ProviderViewState = {
       },
     ],
     valueMetrics: [],
+    notices: [],
     usage: { today: null, yesterday: null, last30Days: null, daily: [], unknownModels: [] },
   },
 };

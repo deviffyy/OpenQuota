@@ -130,6 +130,7 @@ impl CodexProvider {
             plan: mapped.plan,
             quotas: mapped.quotas,
             value_metrics: mapped.value_metrics,
+            notices: Vec::new(),
             usage,
             warnings,
             refreshed_at: now,

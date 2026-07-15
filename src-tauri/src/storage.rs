@@ -294,6 +294,7 @@ mod tests {
             plan: Some("Plus".into()),
             quotas: Vec::new(),
             value_metrics: Vec::new(),
+            notices: Vec::new(),
             usage: UsageHistory {
                 today: Some(UsagePeriod {
                     tokens: 42,

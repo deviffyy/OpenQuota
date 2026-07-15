@@ -22,6 +22,13 @@ export interface ValueMetric {
   expiriesAt: string[];
 }
 
+export interface ProviderNotice {
+  id: string;
+  title: string;
+  message: string;
+  tone: 'info' | 'warning';
+}
+
 export interface UsagePeriod {
   tokens: number;
   estimatedCostUsd: number | null;
@@ -69,6 +76,7 @@ export interface ProviderSnapshot {
   plan: string | null;
   quotas: QuotaWindow[];
   valueMetrics: ValueMetric[];
+  notices: ProviderNotice[];
   usage: UsageHistory;
   warnings: string[];
   refreshedAt: string;
