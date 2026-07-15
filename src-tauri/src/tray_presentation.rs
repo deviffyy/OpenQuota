@@ -4,7 +4,9 @@ use tauri::AppHandle;
 use tauri::image::Image;
 
 use crate::{
-    models::{AppSettings, ProviderSnapshot, UsageDisplay, UsagePeriod},
+    models::{
+        AppSettings, MetricValue, MetricValueKind, ProviderSnapshot, UsageDisplay, UsagePeriod,
+    },
     service::UsageViewState,
 };
 
@@ -133,7 +135,13 @@ fn tray_metric(
         id if id.ends_with(".weekly") => quota("weekly", "W"),
         id if id.ends_with(".sonnet") => quota("sonnet", "Sn"),
         id if id.ends_with(".fable") => quota("fable", "F"),
-        id if id.ends_with(".extra") => quota("extra", "E"),
+        id if id.ends_with(".extra") => {
+            quota("extra", "E").or_else(|| value_metric("E", snapshot, "extra", None))
+        }
+        id if id.ends_with(".credits") => value_metric("E", snapshot, "credits", None),
+        id if id.ends_with(".rateLimitResets") => {
+            value_metric("R", snapshot, "rateLimitResets", Some("resets"))
+        }
         id if id.ends_with(".geminiPro") => quota("geminiPro", "S"),
         id if id.ends_with(".geminiWeekly") => quota("geminiWeekly", "W"),
         id if id.ends_with(".claude") => quota("claude", "C"),
@@ -147,6 +155,62 @@ fn tray_metric(
         }
         _ => None,
     }
+}
+
+fn value_metric(
+    short: &str,
+    snapshot: &ProviderSnapshot,
+    source_id: &str,
+    tray_suffix: Option<&str>,
+) -> Option<TrayMetric> {
+    let metric = snapshot
+        .value_metrics
+        .iter()
+        .find(|metric| metric.id == source_id)?;
+    let compact = metric
+        .values
+        .iter()
+        .map(format_tray_value)
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let detail = metric
+        .values
+        .iter()
+        .map(format_detail_value)
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let compact = tray_suffix
+        .map(|suffix| format!("{compact} {suffix}"))
+        .unwrap_or(compact);
+    Some(TrayMetric {
+        compact: format!("{short} {compact}"),
+        detail: format!("{} {detail}", metric.label),
+        fraction: None,
+    })
+}
+
+fn format_tray_value(value: &MetricValue) -> String {
+    let number = match value.kind {
+        MetricValueKind::Dollars => format!("${:.0}", value.number),
+        MetricValueKind::Count => format_tokens(value.number.max(0.0) as u64),
+    };
+    value
+        .label
+        .as_deref()
+        .map(|label| format!("{number} {label}"))
+        .unwrap_or(number)
+}
+
+fn format_detail_value(value: &MetricValue) -> String {
+    let number = match value.kind {
+        MetricValueKind::Dollars => format!("${:.2}", value.number),
+        MetricValueKind::Count => format!("{:.0}", value.number),
+    };
+    value
+        .label
+        .as_deref()
+        .map(|label| format!("{number} {label}"))
+        .unwrap_or(number)
 }
 
 fn provider_display_name(id: &str) -> &'static str {
@@ -246,7 +310,10 @@ mod tests {
     use chrono::Utc;
 
     use crate::{
-        models::{ProviderSnapshot, ProviderViewState, QuotaWindow, SnapshotSource, UsageHistory},
+        models::{
+            MetricValue, MetricValueKind, ProviderSnapshot, ProviderViewState, QuotaWindow,
+            SnapshotSource, UsageHistory, ValueMetric,
+        },
         settings::default_settings,
     };
 
@@ -280,6 +347,7 @@ mod tests {
                     limit_value: None,
                 },
             ],
+            value_metrics: Vec::new(),
             usage: UsageHistory::default(),
             warnings: Vec::new(),
             refreshed_at: Utc::now(),
@@ -308,5 +376,43 @@ mod tests {
         assert_eq!(format_tokens(999), "999");
         assert_eq!(format_tokens(12_340), "12.3K");
         assert_eq!(format_tokens(2_500_000), "2.5M");
+    }
+
+    #[test]
+    fn pinned_value_metrics_keep_numeric_values_outside_quota_bars() {
+        let snapshot = ProviderSnapshot {
+            provider_id: "codex".into(),
+            plan: None,
+            quotas: Vec::new(),
+            value_metrics: vec![ValueMetric {
+                id: "credits".into(),
+                label: "Extra Usage".into(),
+                values: vec![
+                    MetricValue {
+                        number: 32.84,
+                        kind: MetricValueKind::Dollars,
+                        label: None,
+                    },
+                    MetricValue {
+                        number: 821.0,
+                        kind: MetricValueKind::Count,
+                        label: Some("credits".into()),
+                    },
+                ],
+                expiries_at: Vec::new(),
+            }],
+            usage: UsageHistory::default(),
+            warnings: Vec::new(),
+            refreshed_at: Utc::now(),
+        };
+        let metric = super::tray_metric(
+            "codex.credits",
+            &snapshot,
+            crate::models::UsageDisplay::Left,
+        )
+        .unwrap();
+        assert_eq!(metric.compact, "E $33 · 821 credits");
+        assert_eq!(metric.detail, "Extra Usage $32.84 · 821 credits");
+        assert_eq!(metric.fraction, None);
     }
 }

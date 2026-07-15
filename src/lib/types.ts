@@ -9,6 +9,19 @@ export interface QuotaWindow {
   limitValue: number | null;
 }
 
+export interface MetricValue {
+  number: number;
+  kind: 'count' | 'dollars';
+  label?: string | null;
+}
+
+export interface ValueMetric {
+  id: string;
+  label: string;
+  values: MetricValue[];
+  expiriesAt: string[];
+}
+
 export interface UsagePeriod {
   tokens: number;
   estimatedCostUsd: number | null;
@@ -55,6 +68,7 @@ export interface ProviderSnapshot {
   providerId: string;
   plan: string | null;
   quotas: QuotaWindow[];
+  valueMetrics: ValueMetric[];
   usage: UsageHistory;
   warnings: string[];
   refreshedAt: string;

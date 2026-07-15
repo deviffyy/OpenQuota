@@ -10,6 +10,7 @@ use super::ClaudeError;
 const DEFAULT_API_BASE: &str = "https://api.anthropic.com";
 const DEFAULT_REFRESH_URL: &str = "https://platform.claude.com/v1/oauth/token";
 const DEFAULT_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
+const NON_PROD_CLIENT_ID: &str = "22422756-60c9-4084-8eb7-27705fd5cf9a";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -110,6 +111,26 @@ pub fn has_local_credentials() -> bool {
     !load_candidates().is_empty()
 }
 
+pub fn has_desktop_app_data() -> bool {
+    let home = home_directory();
+    let mut paths = vec![
+        home.join("Library")
+            .join("Application Support")
+            .join("Claude Code"),
+        home.join("Library")
+            .join("Application Support")
+            .join("Claude")
+            .join("claude-code"),
+        home.join(".config").join("Claude"),
+        home.join(".config").join("Claude Code"),
+    ];
+    if let Some(app_data) = std::env::var_os("APPDATA").map(PathBuf::from) {
+        paths.push(app_data.join("Claude"));
+        paths.push(app_data.join("Claude Code"));
+    }
+    paths.into_iter().any(|path| path.is_dir())
+}
+
 pub fn load_candidates() -> Vec<ClaudeCredential> {
     let mut stored = Vec::new();
     for (service, account) in keychain_candidates() {
@@ -161,26 +182,50 @@ pub fn load_candidates() -> Vec<ClaudeCredential> {
 }
 
 pub fn oauth_config() -> Result<ClaudeOAuthConfig, ClaudeError> {
-    let base = env_text("CLAUDE_CODE_CUSTOM_OAUTH_URL")
-        .unwrap_or_else(|| DEFAULT_API_BASE.into())
-        .trim_end_matches('/')
-        .to_owned();
+    let (base, refresh_url, default_client_id, _) = resolved_oauth_settings();
     let usage_url = format!("{base}/api/oauth/usage");
-    let refresh_url = env_text("CLAUDE_CODE_CUSTOM_OAUTH_URL")
-        .map(|value| format!("{}/v1/oauth/token", value.trim_end_matches('/')))
-        .unwrap_or_else(|| DEFAULT_REFRESH_URL.into());
-    if !usage_url.starts_with("http://") && !usage_url.starts_with("https://") {
-        return Err(ClaudeError::InvalidOAuthUrl);
-    }
-    if !refresh_url.starts_with("http://") && !refresh_url.starts_with("https://") {
-        return Err(ClaudeError::InvalidOAuthUrl);
-    }
+    validate_http_url(&usage_url)?;
+    validate_http_url(&refresh_url)?;
     Ok(ClaudeOAuthConfig {
         usage_url,
         refresh_url,
-        client_id: env_text("CLAUDE_CODE_OAUTH_CLIENT_ID")
-            .unwrap_or_else(|| DEFAULT_CLIENT_ID.into()),
+        client_id: env_text("CLAUDE_CODE_OAUTH_CLIENT_ID").unwrap_or(default_client_id),
     })
+}
+
+fn resolved_oauth_settings() -> (String, String, String, &'static str) {
+    let mut base = DEFAULT_API_BASE.to_owned();
+    let mut refresh = DEFAULT_REFRESH_URL.to_owned();
+    let mut client_id = DEFAULT_CLIENT_ID.to_owned();
+    let mut suffix = "";
+    if env_text("USER_TYPE").as_deref() == Some("ant") && env_flag("USE_LOCAL_OAUTH") {
+        base = env_text("CLAUDE_LOCAL_OAUTH_API_BASE")
+            .unwrap_or_else(|| "http://localhost:8000".into())
+            .trim_end_matches('/')
+            .to_owned();
+        refresh = format!("{base}/v1/oauth/token");
+        client_id = NON_PROD_CLIENT_ID.into();
+        suffix = "-local-oauth";
+    } else if env_text("USER_TYPE").as_deref() == Some("ant") && env_flag("USE_STAGING_OAUTH") {
+        base = "https://api-staging.anthropic.com".into();
+        refresh = "https://platform.staging.ant.dev/v1/oauth/token".into();
+        client_id = NON_PROD_CLIENT_ID.into();
+        suffix = "-staging-oauth";
+    }
+    if let Some(custom) = env_text("CLAUDE_CODE_CUSTOM_OAUTH_URL") {
+        base = custom.trim_end_matches('/').to_owned();
+        refresh = format!("{base}/v1/oauth/token");
+        suffix = "-custom-oauth";
+    }
+    (base, refresh, client_id, suffix)
+}
+
+fn validate_http_url(value: &str) -> Result<(), ClaudeError> {
+    let url = reqwest::Url::parse(value).map_err(|_| ClaudeError::InvalidOAuthUrl)?;
+    if !matches!(url.scheme(), "http" | "https") || url.host().is_none() {
+        return Err(ClaudeError::InvalidOAuthUrl);
+    }
+    Ok(())
 }
 
 fn parse_candidate(
@@ -228,15 +273,14 @@ pub fn claude_home() -> PathBuf {
 }
 
 fn keychain_candidates() -> Vec<(String, String)> {
+    let suffix = resolved_oauth_settings().3;
+    let service = format!("Claude Code{suffix}-credentials");
     let base = if let Some(config_dir) = env_text("CLAUDE_CONFIG_DIR") {
         let normalized = config_dir.replace('\\', "/");
         let hash = format!("{:x}", Sha256::digest(normalized.as_bytes()));
-        vec![
-            format!("Claude Code-credentials-{}", &hash[..8]),
-            "Claude Code-credentials".into(),
-        ]
+        vec![format!("{service}-{}", &hash[..8]), service]
     } else {
-        vec!["Claude Code-credentials".into()]
+        vec![service]
     };
     let user = env_text("USER")
         .or_else(|| env_text("USERNAME"))
@@ -254,6 +298,17 @@ fn env_text(name: &str) -> Option<String> {
         .ok()
         .map(|value| value.trim().to_owned())
         .filter(|value| !value.is_empty())
+}
+
+fn env_flag(name: &str) -> bool {
+    env_text(name)
+        .map(|value| {
+            !matches!(
+                value.to_ascii_lowercase().as_str(),
+                "0" | "false" | "no" | "off"
+            )
+        })
+        .unwrap_or(false)
 }
 
 fn home_directory() -> PathBuf {

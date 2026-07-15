@@ -43,21 +43,26 @@ impl CodexAuthState {
             || keychain_document().is_some_and(|document| auth_document_has_credentials(&document))
     }
 
-    pub fn load() -> Result<Self, CodexError> {
+    pub fn load_candidates() -> Result<Vec<Self>, CodexError> {
+        let mut candidates = Vec::new();
         let mut api_key_only = false;
         for path in auth_paths() {
             if !path.is_file() {
                 continue;
             }
-            let text = fs::read_to_string(&path).map_err(|_| CodexError::InvalidAuth)?;
-            let document = parse_auth_document(&text).ok_or(CodexError::InvalidAuth)?;
+            let Ok(text) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let Some(document) = parse_auth_document(&text) else {
+                continue;
+            };
             let access_token = document
                 .pointer("/tokens/access_token")
                 .and_then(Value::as_str)
                 .filter(|value| !value.is_empty())
                 .map(str::to_owned);
             if let Some(access_token) = access_token {
-                return Ok(Self {
+                candidates.push(Self {
                     source: AuthSource::File(path),
                     refresh_token: string_at(&document, "/tokens/refresh_token"),
                     account_id: string_at(&document, "/tokens/account_id"),
@@ -65,6 +70,7 @@ impl CodexAuthState {
                     document,
                     access_token,
                 });
+                continue;
             }
             api_key_only |= document
                 .get("OPENAI_API_KEY")
@@ -72,9 +78,11 @@ impl CodexAuthState {
                 .is_some_and(|value| !value.is_empty());
         }
         if let Some(state) = load_keychain_candidate() {
-            return Ok(state);
+            candidates.push(state);
         }
-        if api_key_only {
+        if !candidates.is_empty() {
+            Ok(candidates)
+        } else if api_key_only {
             Err(CodexError::ApiKeyOnly)
         } else {
             Err(CodexError::NotLoggedIn)
@@ -264,18 +272,10 @@ fn string_at(document: &Value, pointer: &str) -> Option<String> {
 }
 
 fn auth_document_has_credentials(document: &Value) -> bool {
-    [
-        "/tokens/access_token",
-        "/tokens/refresh_token",
-        "/OPENAI_API_KEY",
-    ]
-    .into_iter()
-    .any(|pointer| {
-        document
-            .pointer(pointer)
-            .and_then(Value::as_str)
-            .is_some_and(|value| !value.is_empty())
-    })
+    document
+        .pointer("/tokens/access_token")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
 }
 
 fn set_string(document: &mut Value, pointer: &str, value: &str) -> Result<(), CodexError> {
@@ -356,12 +356,15 @@ mod tests {
     }
 
     #[test]
-    fn local_detection_accepts_oauth_or_api_key_credentials() {
+    fn local_detection_only_accepts_a_usable_access_token() {
         assert!(auth_document_has_credentials(
             &json!({"tokens":{"access_token":"placeholder"}})
         ));
-        assert!(auth_document_has_credentials(
+        assert!(!auth_document_has_credentials(
             &json!({"OPENAI_API_KEY":"placeholder"})
+        ));
+        assert!(!auth_document_has_credentials(
+            &json!({"tokens":{"refresh_token":"placeholder"}})
         ));
         assert!(!auth_document_has_credentials(
             &json!({"tokens":{"access_token":""}})

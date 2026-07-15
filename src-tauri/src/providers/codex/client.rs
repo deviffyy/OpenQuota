@@ -9,6 +9,7 @@ use super::CodexError;
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const REFRESH_URL: &str = "https://auth.openai.com/oauth/token";
 const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
+const RESET_CREDITS_URL: &str = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits";
 
 #[derive(Debug, Clone)]
 pub struct UsageResponse {
@@ -28,15 +29,22 @@ pub struct CodexClient {
     client: Client,
     refresh_url: String,
     usage_url: String,
+    reset_credits_url: String,
 }
 
 impl CodexClient {
     pub fn new() -> Result<Self, CodexError> {
-        Self::with_endpoints(USAGE_URL, REFRESH_URL, Duration::from_secs(15))
+        Self::with_endpoints(
+            USAGE_URL,
+            RESET_CREDITS_URL,
+            REFRESH_URL,
+            Duration::from_secs(15),
+        )
     }
 
     fn with_endpoints(
         usage_url: &str,
+        reset_credits_url: &str,
         refresh_url: &str,
         timeout: Duration,
     ) -> Result<Self, CodexError> {
@@ -50,6 +58,7 @@ impl CodexClient {
             client,
             refresh_url: refresh_url.to_owned(),
             usage_url: usage_url.to_owned(),
+            reset_credits_url: reset_credits_url.to_owned(),
         })
     }
 
@@ -63,6 +72,36 @@ impl CodexClient {
             .get(&self.usage_url)
             .bearer_auth(access_token)
             .header("Accept", "application/json");
+        if let Some(account_id) = account_id.filter(|value| !value.is_empty()) {
+            request = request.header("ChatGPT-Account-Id", account_id);
+        }
+        let response = request.send().map_err(|_| CodexError::ConnectionFailed)?;
+        let status = response.status();
+        let headers = normalized_headers(response.headers());
+        let text = response.text().map_err(|_| CodexError::InvalidResponse)?;
+        let body = serde_json::from_str(&text).unwrap_or(Value::Null);
+        if status.is_success() && body.is_null() {
+            return Err(CodexError::InvalidResponse);
+        }
+        Ok(UsageResponse {
+            status,
+            headers,
+            body,
+        })
+    }
+
+    pub fn fetch_reset_credits(
+        &self,
+        access_token: &str,
+        account_id: Option<&str>,
+    ) -> Result<UsageResponse, CodexError> {
+        let mut request = self
+            .client
+            .get(&self.reset_credits_url)
+            .bearer_auth(access_token)
+            .header("Accept", "application/json")
+            .header("OpenAI-Beta", "codex-1")
+            .header("originator", "Codex Desktop");
         if let Some(account_id) = account_id.filter(|value| !value.is_empty()) {
             request = request.header("ChatGPT-Account-Id", account_id);
         }
@@ -155,6 +194,7 @@ mod tests {
     fn client(base: &str) -> CodexClient {
         CodexClient::with_endpoints(
             &format!("{base}/usage"),
+            &format!("{base}/reset-credits"),
             &format!("{base}/token"),
             Duration::from_secs(1),
         )
@@ -211,6 +251,7 @@ mod tests {
         );
         let client = CodexClient::with_endpoints(
             &format!("{base}/usage"),
+            &format!("{base}/reset-credits"),
             &format!("{base}/token"),
             test_http::TIMEOUT_TEST_CLIENT_LIMIT,
         )

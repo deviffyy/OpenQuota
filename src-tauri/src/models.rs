@@ -17,6 +17,32 @@ pub struct QuotaWindow {
     pub limit_value: Option<f64>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MetricValueKind {
+    Count,
+    Dollars,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MetricValue {
+    pub number: f64,
+    pub kind: MetricValueKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ValueMetric {
+    pub id: String,
+    pub label: String,
+    pub values: Vec<MetricValue>,
+    #[serde(default)]
+    pub expiries_at: Vec<DateTime<Utc>>,
+}
+
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum QuotaFormat {
@@ -93,6 +119,8 @@ pub struct ProviderSnapshot {
     pub provider_id: String,
     pub plan: Option<String>,
     pub quotas: Vec<QuotaWindow>,
+    #[serde(default)]
+    pub value_metrics: Vec<ValueMetric>,
     pub usage: UsageHistory,
     pub warnings: Vec<String>,
     pub refreshed_at: DateTime<Utc>,

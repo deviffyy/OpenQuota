@@ -26,6 +26,10 @@ use self::{
 pub enum ClaudeError {
     #[error("Not logged in. Run `claude` to authenticate.")]
     NotLoggedIn,
+    #[error(
+        "Signed in to the Claude desktop app? OpenQuota needs a CLI login — run `claude` in a terminal and sign in once."
+    )]
+    DesktopAppOnly,
     #[error("Your Claude session expired. Run `claude` to sign in again.")]
     SessionExpired,
     #[error("Your Claude token expired. Run `claude` to sign in again.")]
@@ -66,7 +70,11 @@ impl ClaudeProvider {
     fn refresh_inner(&self) -> Result<ProviderSnapshot, ClaudeError> {
         let candidates = load_candidates();
         if candidates.is_empty() {
-            return Err(ClaudeError::NotLoggedIn);
+            return Err(if auth::has_desktop_app_data() {
+                ClaudeError::DesktopAppOnly
+            } else {
+                ClaudeError::NotLoggedIn
+            });
         }
         let now = Utc::now();
         let config = oauth_config()?;
@@ -99,6 +107,7 @@ impl ClaudeProvider {
                 provider_id: "claude".into(),
                 plan: plan_name(credential),
                 quotas: Vec::new(),
+                value_metrics: Vec::new(),
                 usage,
                 warnings,
                 refreshed_at: now,
@@ -113,6 +122,7 @@ impl ClaudeProvider {
                 provider_id: "claude".into(),
                 plan: plan_name(credential),
                 quotas: Vec::new(),
+                value_metrics: Vec::new(),
                 usage,
                 warnings,
                 refreshed_at: now,
@@ -122,13 +132,14 @@ impl ClaudeProvider {
             refresh_credential(&self.client, credential, config, now, &mut warnings)?;
         }
 
-        if self
+        let cooldown_until = self
             .rate_limited_until
             .lock()
             .ok()
             .and_then(|value| *value)
-            .is_some_and(|until| now < until)
-        {
+            .filter(|until| now < *until);
+        if let Some(until) = cooldown_until {
+            let retry = until.signed_duration_since(now).num_seconds().max(0) as u64;
             if let Some(mut snapshot) = self.last_good.lock().ok().and_then(|value| value.clone()) {
                 snapshot.usage = usage;
                 snapshot.warnings.push(
@@ -137,12 +148,30 @@ impl ClaudeProvider {
                 snapshot.refreshed_at = now;
                 return Ok(snapshot);
             }
+            warnings.push(format!(
+                "Claude live usage is rate limited; retrying in about {} minutes.",
+                retry.div_ceil(60)
+            ));
+            return Ok(ProviderSnapshot {
+                provider_id: "claude".into(),
+                plan: plan_name(credential),
+                quotas: Vec::new(),
+                value_metrics: Vec::new(),
+                usage,
+                warnings,
+                refreshed_at: now,
+            });
         }
 
         let token = credential.access_token().ok_or(ClaudeError::NotLoggedIn)?;
-        let (status, body, retry_after) = self.client.fetch_usage(token, config)?;
+        let (mut status, mut body, mut retry_after) = self.client.fetch_usage(token, config)?;
+        if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+            refresh_credential(&self.client, credential, config, now, &mut warnings)?;
+            let token = credential.access_token().ok_or(ClaudeError::TokenExpired)?;
+            (status, body, retry_after) = self.client.fetch_usage(token, config)?;
+        }
         if status == StatusCode::TOO_MANY_REQUESTS {
-            let retry = retry_after.unwrap_or(5 * 60).max(60);
+            let retry = retry_after.unwrap_or(5 * 60);
             if let Ok(mut until) = self.rate_limited_until.lock() {
                 *until = Some(now + Duration::seconds(retry as i64));
             }
@@ -163,16 +192,11 @@ impl ClaudeProvider {
                 provider_id: "claude".into(),
                 plan: plan_name(credential),
                 quotas: Vec::new(),
+                value_metrics: Vec::new(),
                 usage,
                 warnings,
                 refreshed_at: now,
             });
-        }
-        if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
-            refresh_credential(&self.client, credential, config, now, &mut warnings)?;
-            let token = credential.access_token().ok_or(ClaudeError::TokenExpired)?;
-            let (status, body, _) = self.client.fetch_usage(token, config)?;
-            return self.build_snapshot(status, &body, credential, usage, warnings, now);
         }
         self.build_snapshot(status, &body, credential, usage, warnings, now)
     }
@@ -191,6 +215,7 @@ impl ClaudeProvider {
             provider_id: "claude".into(),
             plan: mapped.plan,
             quotas: mapped.quotas,
+            value_metrics: mapped.value_metrics,
             usage,
             warnings,
             refreshed_at: now,
@@ -260,6 +285,7 @@ impl crate::providers::UsageProvider for ClaudeProvider {
 
             let kind = match error {
                 ClaudeError::NotLoggedIn
+                | ClaudeError::DesktopAppOnly
                 | ClaudeError::SessionExpired
                 | ClaudeError::TokenExpired => Kind::Authentication,
                 ClaudeError::InvalidOAuthUrl | ClaudeError::InvalidResponse => {

@@ -108,16 +108,63 @@ export function buildProviderShareRows(
   for (const metric of visible) {
     const definition = metricDefinition(metric.id);
     if (!definition) continue;
-    if (definition.kind === 'quota') {
+    if (definition.kind === 'quota' || definition.kind === 'quotaOrValue') {
       if (!definition.sourceId) continue;
       const quota = snapshot.quotas.find((item) => item.id === definition.sourceId);
-      if (quota) rows.push(quotaShareRow(providerId, quota, settings, now));
+      if (quota) {
+        rows.push(quotaShareRow(providerId, quota, settings, now));
+      } else if (definition.kind === 'quotaOrValue') {
+        const valueMetric = snapshot.valueMetrics.find((item) => item.id === definition.sourceId);
+        rows.push({
+          kind: 'text',
+          label: definition.label,
+          value: valueMetric
+            ? valueMetric.values
+                .map((value) =>
+                  formatMetricValue(value.number, value.kind, 'row', value.label ?? undefined),
+                )
+                .join(' · ')
+            : 'No data',
+          condensed: previousTextSection === metric.section,
+        });
+        previousTextSection = metric.section;
+        continue;
+      } else {
+        rows.push({
+          kind: 'quota',
+          label: definition.label,
+          reading: 'No data',
+          trailing: 'Reset unavailable',
+          fillPercent: 0,
+          severity: 'normal',
+          paceLabel: null,
+        });
+      }
       previousTextSection = null;
       continue;
     }
     if (definition.kind === 'trend') {
       rows.push({ kind: 'trend', label: definition.label, daily: snapshot.usage.daily });
       previousTextSection = null;
+      continue;
+    }
+
+    if (definition.kind === 'value') {
+      if (!definition.sourceId) continue;
+      const valueMetric = snapshot.valueMetrics.find((item) => item.id === definition.sourceId);
+      rows.push({
+        kind: 'text',
+        label: definition.label,
+        value: valueMetric
+          ? valueMetric.values
+              .map((value) =>
+                formatMetricValue(value.number, value.kind, 'row', value.label ?? undefined),
+              )
+              .join(' · ')
+          : 'No data',
+        condensed: previousTextSection === metric.section,
+      });
+      previousTextSection = metric.section;
       continue;
     }
 

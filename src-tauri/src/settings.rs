@@ -33,10 +33,19 @@ const CLAUDE_METRICS: [MetricSpec; 9] = [
     metric("claude.last30", MetricSection::OnDemand, true, false),
 ];
 
-const CODEX_METRICS: [MetricSpec; 6] = [
+const CODEX_METRICS: [MetricSpec; 10] = [
     metric("codex.session", MetricSection::AlwaysVisible, true, true),
     metric("codex.weekly", MetricSection::AlwaysVisible, true, true),
+    metric("codex.spark", MetricSection::OnDemand, true, false),
+    metric("codex.sparkWeekly", MetricSection::OnDemand, true, false),
     metric("codex.trend", MetricSection::AlwaysVisible, true, false),
+    metric("codex.credits", MetricSection::OnDemand, true, false),
+    metric(
+        "codex.rateLimitResets",
+        MetricSection::OnDemand,
+        true,
+        false,
+    ),
     metric("codex.today", MetricSection::OnDemand, true, false),
     metric("codex.yesterday", MetricSection::OnDemand, true, false),
     metric("codex.last30", MetricSection::OnDemand, true, false),
@@ -375,6 +384,49 @@ mod tests {
             .metrics
             .iter()
             .any(|metric| metric.enabled && metric.section == MetricSection::AlwaysVisible));
+    }
+
+    #[test]
+    fn normalization_adds_new_codex_metrics_without_disturbing_existing_order() {
+        let detected = HashSet::from(["codex".to_owned()]);
+        let mut settings = default_settings(&detected);
+        let codex = settings
+            .providers
+            .iter_mut()
+            .find(|provider| provider.id == "codex")
+            .unwrap();
+        codex.metrics.retain(|metric| {
+            !matches!(
+                metric.id.as_str(),
+                "codex.spark" | "codex.sparkWeekly" | "codex.credits" | "codex.rateLimitResets"
+            )
+        });
+
+        normalize(&mut settings, &detected);
+
+        let codex = settings
+            .providers
+            .iter()
+            .find(|provider| provider.id == "codex")
+            .unwrap();
+        assert_eq!(
+            &codex.metrics[..2]
+                .iter()
+                .map(|metric| metric.id.as_str())
+                .collect::<Vec<_>>(),
+            &["codex.session", "codex.weekly"]
+        );
+        for id in [
+            "codex.spark",
+            "codex.sparkWeekly",
+            "codex.credits",
+            "codex.rateLimitResets",
+        ] {
+            let metric = codex.metrics.iter().find(|metric| metric.id == id).unwrap();
+            assert!(metric.enabled);
+            assert_eq!(metric.section, MetricSection::OnDemand);
+            assert!(!metric.pinned);
+        }
     }
 
     #[test]

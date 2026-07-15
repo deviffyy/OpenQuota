@@ -46,12 +46,16 @@ describe('share card layout', () => {
       'quota',
       'quota',
       'trend',
+      'quota',
+      'quota',
+      'text',
+      'text',
       'text',
       'text',
       'text',
     ]);
     expect(expandedRows.slice(-3)).toMatchObject([
-      { condensed: false },
+      { condensed: true },
       { condensed: true },
       { condensed: true },
     ]);
@@ -83,10 +87,16 @@ describe('share card layout', () => {
     const snapshot = codexState.snapshot!;
     const settings = settingsState.settings;
     const layout = settings.providers[0];
+    const metric = (id: string) => layout.metrics.find((item) => item.id === id)!;
     const interleaved = {
       ...layout,
       expanded: true,
-      metrics: [layout.metrics[3], layout.metrics[0], layout.metrics[4], layout.metrics[1]],
+      metrics: [
+        metric('codex.today'),
+        metric('codex.session'),
+        metric('codex.yesterday'),
+        metric('codex.weekly'),
+      ],
     };
 
     const rows = buildProviderShareRows('codex', snapshot, interleaved, settings, Date.now());

@@ -70,16 +70,37 @@ impl CodexProvider {
 
     pub fn refresh(&self) -> Result<ProviderSnapshot, CodexError> {
         let now = Utc::now();
-        let mut auth = CodexAuthState::load()?;
+        let candidates = CodexAuthState::load_candidates()?;
+        let mut last_auth_error = None;
+        for mut auth in candidates {
+            match self.refresh_candidate(&mut auth, now) {
+                Ok(snapshot) => return Ok(snapshot),
+                Err(
+                    error @ (CodexError::SessionExpired
+                    | CodexError::TokenConflict
+                    | CodexError::TokenRevoked
+                    | CodexError::TokenExpired),
+                ) => last_auth_error = Some(error),
+                Err(error) => return Err(error),
+            }
+        }
+        Err(last_auth_error.unwrap_or(CodexError::NotLoggedIn))
+    }
+
+    fn refresh_candidate(
+        &self,
+        auth: &mut CodexAuthState,
+        now: chrono::DateTime<Utc>,
+    ) -> Result<ProviderSnapshot, CodexError> {
         let mut warnings = Vec::new();
 
         if auth.needs_refresh(now) {
             if let Ok(live) = auth.reload() {
-                auth = live;
+                *auth = live;
             }
         }
         if auth.needs_refresh(now) {
-            self.refresh_access_token(&mut auth, now, &mut warnings)?;
+            self.refresh_access_token(auth, now, &mut warnings)?;
         }
 
         let mut response = self
@@ -89,18 +110,26 @@ impl CodexProvider {
             response.status,
             StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
         ) {
-            self.refresh_access_token(&mut auth, now, &mut warnings)?;
+            self.refresh_access_token(auth, now, &mut warnings)?;
             response = self
                 .client
                 .fetch_usage(&auth.access_token, auth.account_id.as_deref())?;
         }
-        let mapped = map_usage(&response, now)?;
+        let reset_credits = if response.status.is_success() {
+            self.client
+                .fetch_reset_credits(&auth.access_token, auth.account_id.as_deref())
+                .ok()
+        } else {
+            None
+        };
+        let mapped = map_usage(&response, reset_credits.as_ref(), now)?;
         let pricing = self.pricing.current();
         let usage = scan_local_usage(&self.storage, now, &pricing)?;
         Ok(ProviderSnapshot {
             provider_id: "codex".into(),
             plan: mapped.plan,
             quotas: mapped.quotas,
+            value_metrics: mapped.value_metrics,
             usage,
             warnings,
             refreshed_at: now,

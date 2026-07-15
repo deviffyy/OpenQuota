@@ -1,4 +1,4 @@
-export type MetricKind = 'quota' | 'trend' | 'usage';
+export type MetricKind = 'quota' | 'quotaOrValue' | 'trend' | 'usage' | 'value';
 
 export interface MetricDefinition {
   id: string;
@@ -13,7 +13,13 @@ export const metricDefinitions: MetricDefinition[] = [
   { id: 'claude.weekly', label: 'Weekly', kind: 'quota', sourceId: 'weekly', pinnable: true },
   { id: 'claude.sonnet', label: 'Sonnet', kind: 'quota', sourceId: 'sonnet', pinnable: true },
   { id: 'claude.fable', label: 'Fable', kind: 'quota', sourceId: 'fable', pinnable: true },
-  { id: 'claude.extra', label: 'Extra Usage', kind: 'quota', sourceId: 'extra', pinnable: true },
+  {
+    id: 'claude.extra',
+    label: 'Extra Usage',
+    kind: 'quotaOrValue',
+    sourceId: 'extra',
+    pinnable: true,
+  },
   { id: 'claude.trend', label: 'Usage Trend', kind: 'trend', pinnable: false },
   { id: 'claude.today', label: 'Today', kind: 'usage', sourceId: 'today', pinnable: true },
   {
@@ -32,7 +38,29 @@ export const metricDefinitions: MetricDefinition[] = [
   },
   { id: 'codex.session', label: 'Session', kind: 'quota', sourceId: 'session', pinnable: true },
   { id: 'codex.weekly', label: 'Weekly', kind: 'quota', sourceId: 'weekly', pinnable: true },
+  { id: 'codex.spark', label: 'Spark', kind: 'quota', sourceId: 'spark', pinnable: true },
+  {
+    id: 'codex.sparkWeekly',
+    label: 'Spark Weekly',
+    kind: 'quota',
+    sourceId: 'sparkWeekly',
+    pinnable: true,
+  },
   { id: 'codex.trend', label: 'Usage Trend', kind: 'trend', pinnable: false },
+  {
+    id: 'codex.credits',
+    label: 'Extra Usage',
+    kind: 'value',
+    sourceId: 'credits',
+    pinnable: true,
+  },
+  {
+    id: 'codex.rateLimitResets',
+    label: 'Rate Limit Resets',
+    kind: 'value',
+    sourceId: 'rateLimitResets',
+    pinnable: true,
+  },
   { id: 'codex.today', label: 'Today', kind: 'usage', sourceId: 'today', pinnable: true },
   {
     id: 'codex.yesterday',

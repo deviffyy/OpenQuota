@@ -2,13 +2,14 @@ use chrono::{DateTime, Utc};
 use reqwest::StatusCode;
 use serde_json::Value;
 
-use crate::models::{QuotaFormat, QuotaWindow};
+use crate::models::{MetricValue, MetricValueKind, QuotaFormat, QuotaWindow, ValueMetric};
 
 use super::{auth::ClaudeOAuth, ClaudeError};
 
 pub struct ClaudeMappedUsage {
     pub plan: Option<String>,
     pub quotas: Vec<QuotaWindow>,
+    pub value_metrics: Vec<ValueMetric>,
 }
 
 pub fn map_usage(
@@ -24,6 +25,7 @@ pub fn map_usage(
     }
     let object = body.as_object().ok_or(ClaudeError::InvalidResponse)?;
     let mut quotas = Vec::new();
+    let mut value_metrics = Vec::new();
     append_window(
         &mut quotas,
         "session",
@@ -83,6 +85,17 @@ pub fn map_usage(
                         used_value: Some(used),
                         limit_value: Some(limit_value),
                     });
+                } else if used > 0.0 {
+                    value_metrics.push(ValueMetric {
+                        id: "extra".into(),
+                        label: "Extra Usage".into(),
+                        values: vec![MetricValue {
+                            number: used,
+                            kind: MetricValueKind::Dollars,
+                            label: Some("spent".into()),
+                        }],
+                        expiries_at: Vec::new(),
+                    });
                 }
             }
         }
@@ -93,6 +106,7 @@ pub fn map_usage(
             credentials.rate_limit_tier.as_deref(),
         ),
         quotas,
+        value_metrics,
     })
 }
 
@@ -130,7 +144,7 @@ fn append_percent(
     output.push(QuotaWindow {
         id: id.into(),
         label: label.into(),
-        used_percent: percent.clamp(0.0, 100.0),
+        used_percent: percent,
         resets_at,
         period_seconds,
         format: QuotaFormat::Percent,
@@ -147,9 +161,14 @@ fn number(value: &Value) -> Option<f64> {
 
 fn reset_date(value: &Value) -> Option<DateTime<Utc>> {
     if let Some(text) = value.as_str() {
-        return DateTime::parse_from_rfc3339(text)
+        return DateTime::parse_from_rfc3339(text.trim())
             .ok()
-            .map(|date| date.to_utc());
+            .map(|date| date.to_utc())
+            .or_else(|| {
+                chrono::NaiveDateTime::parse_from_str(text.trim(), "%Y-%m-%dT%H:%M:%S%.f")
+                    .ok()
+                    .map(|date| date.and_utc())
+            });
     }
     let raw = number(value)?;
     let seconds = if raw.abs() < 10_000_000_000.0 {
@@ -166,6 +185,7 @@ fn format_plan(subscription: Option<&str>, tier: Option<&str>) -> Option<String>
         return None;
     }
     let mut plan = subscription
+        .to_ascii_lowercase()
         .split_whitespace()
         .map(|word| {
             let mut chars = word.chars();
@@ -212,5 +232,40 @@ mod tests {
         assert_eq!(mapped.quotas.len(), 5);
         assert_eq!(mapped.quotas[4].used_percent, 25.0);
         assert_eq!(mapped.quotas[4].used_value, Some(12.5));
+        assert!(mapped.value_metrics.is_empty());
+    }
+
+    #[test]
+    fn maps_uncapped_extra_usage_as_an_unbounded_value() {
+        let body = serde_json::json!({
+            "extra_usage": {
+                "is_enabled": true,
+                "used_credits": 123456,
+                "monthly_limit": null
+            }
+        });
+        let mapped = map_usage(StatusCode::OK, &body, &ClaudeOAuth::default()).unwrap();
+        assert!(mapped.quotas.is_empty());
+        assert_eq!(mapped.value_metrics[0].id, "extra");
+        assert_eq!(mapped.value_metrics[0].values[0].number, 1234.56);
+        assert_eq!(
+            mapped.value_metrics[0].values[0].label.as_deref(),
+            Some("spent")
+        );
+    }
+
+    #[test]
+    fn maps_microsecond_reset_without_a_timezone_as_utc() {
+        let body = serde_json::json!({
+            "five_hour": {
+                "utilization": 0,
+                "resets_at": "2099-06-01T12:00:00.123456"
+            }
+        });
+        let mapped = map_usage(StatusCode::OK, &body, &ClaudeOAuth::default()).unwrap();
+        assert_eq!(
+            mapped.quotas[0].resets_at.unwrap().to_rfc3339(),
+            "2099-06-01T12:00:00.123456+00:00"
+        );
     }
 }

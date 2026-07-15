@@ -37,9 +37,10 @@ download and install the latest package from the releases page.
 
 ## Supported providers
 
-- **Claude Code** — session, weekly, Sonnet, Fable, extra usage, local token history, and estimated
-  spend
-- **Codex** — session and weekly limits, local token history, model breakdown, and estimated spend
+- **Claude Code** — session, weekly, Sonnet, Fable, capped or uncapped extra usage, local token
+  history, and estimated spend
+- **Codex** — session, weekly, Spark and Spark Weekly limits, extra-usage credits, rate-limit reset
+  credits and expiries, local token history, model breakdown, and estimated spend
 - **Antigravity** — shared Gemini and Claude quota pools with session and weekly windows
 
 OpenQuota reuses the sign-in details already stored by each provider's app or CLI. Sign in to the

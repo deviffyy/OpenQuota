@@ -3,6 +3,7 @@
   import QuotaMetric from './QuotaMetric.svelte';
   import UsageMetric from './UsageMetric.svelte';
   import UsageTrend from './UsageTrend.svelte';
+  import ValueMetric from './ValueMetric.svelte';
   import type { AppSettings, MetricLayout, ProviderSnapshot } from './types';
 
   interface Props {
@@ -15,12 +16,12 @@
   let { layout, snapshot, settings, now, onSettingsChange }: Props = $props();
   const definition = $derived(metricDefinition(layout.id));
   const quota = $derived(
-    definition?.kind === 'quota'
+    definition?.kind === 'quota' || definition?.kind === 'quotaOrValue'
       ? snapshot.quotas.find((item) => item.id === definition.sourceId)
       : undefined,
   );
   const isSessionWindow = $derived(
-    definition?.kind === 'quota' &&
+    (definition?.kind === 'quota' || definition?.kind === 'quotaOrValue') &&
       ((snapshot.providerId === 'claude' && definition.sourceId === 'session') ||
         (snapshot.providerId === 'antigravity' &&
           (definition.sourceId === 'geminiPro' || definition.sourceId === 'claude'))),
@@ -31,6 +32,11 @@
     if (definition.sourceId === 'yesterday') return snapshot.usage.yesterday;
     return snapshot.usage.last30Days;
   });
+  const valueMetric = $derived(
+    definition?.kind === 'value' || definition?.kind === 'quotaOrValue'
+      ? (snapshot.valueMetrics.find((item) => item.id === definition.sourceId) ?? null)
+      : null,
+  );
   const usageSourceNote = $derived(
     snapshot.providerId === 'claude'
       ? 'From your Claude usage history (estimated)'
@@ -40,7 +46,7 @@
   );
 </script>
 
-{#if definition?.kind === 'quota' && quota}
+{#if (definition?.kind === 'quota' || definition?.kind === 'quotaOrValue') && quota}
   <QuotaMetric
     {quota}
     {now}
@@ -60,7 +66,15 @@
         resetDisplay: settings.resetDisplay === 'countdown' ? 'exact' : 'countdown',
       })}
   />
-{:else if definition?.kind === 'quota'}
+{:else if definition?.kind === 'quotaOrValue' && valueMetric}
+  <ValueMetric
+    label={definition.label}
+    metric={valueMetric}
+    {now}
+    resetDisplay={settings.resetDisplay}
+    timeFormat={settings.timeFormat}
+  />
+{:else if definition?.kind === 'quota' || definition?.kind === 'quotaOrValue'}
   <section class="metric metric--no-data" aria-label={`${definition.label} quota`}>
     <div class="metric__heading"><h2>{definition.label}</h2></div>
     <div class="meter-shell">
@@ -79,4 +93,12 @@
   <UsageTrend daily={snapshot.usage.daily} sourceNote={usageSourceNote} />
 {:else if definition?.kind === 'usage'}
   <UsageMetric label={definition.label} {period} />
+{:else if definition?.kind === 'value'}
+  <ValueMetric
+    label={definition.label}
+    metric={valueMetric}
+    {now}
+    resetDisplay={settings.resetDisplay}
+    timeFormat={settings.timeFormat}
+  />
 {/if}

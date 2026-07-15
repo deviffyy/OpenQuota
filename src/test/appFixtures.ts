@@ -34,6 +34,23 @@ export const codexState: ProviderViewState = {
         limitValue: null,
       },
     ],
+    valueMetrics: [
+      {
+        id: 'rateLimitResets',
+        label: 'Rate Limit Resets',
+        values: [{ number: 2, kind: 'count', label: 'available' }],
+        expiriesAt: ['2099-01-02T00:00:00Z', '2099-01-03T00:00:00Z'],
+      },
+      {
+        id: 'credits',
+        label: 'Extra Usage',
+        values: [
+          { number: 32.84, kind: 'dollars' },
+          { number: 821, kind: 'count', label: 'credits' },
+        ],
+        expiriesAt: [],
+      },
+    ],
     usage: {
       today: {
         tokens: 2100000,
@@ -97,6 +114,7 @@ export const claudeState: ProviderViewState = {
         limitValue: 50,
       },
     ],
+    valueMetrics: [],
     usage: { today: null, yesterday: null, last30Days: null, daily: [], unknownModels: [] },
   },
 };
@@ -135,6 +153,7 @@ export const antigravityState: ProviderViewState = {
         limitValue: null,
       },
     ],
+    valueMetrics: [],
     usage: { today: null, yesterday: null, last30Days: null, daily: [], unknownModels: [] },
   },
 };
@@ -173,7 +192,11 @@ export const settingsState: SettingsViewState = {
         metrics: [
           { id: 'codex.session', enabled: true, section: 'alwaysVisible', pinned: true },
           { id: 'codex.weekly', enabled: true, section: 'alwaysVisible', pinned: true },
+          { id: 'codex.spark', enabled: true, section: 'onDemand', pinned: false },
+          { id: 'codex.sparkWeekly', enabled: true, section: 'onDemand', pinned: false },
           { id: 'codex.trend', enabled: true, section: 'alwaysVisible', pinned: false },
+          { id: 'codex.credits', enabled: true, section: 'onDemand', pinned: false },
+          { id: 'codex.rateLimitResets', enabled: true, section: 'onDemand', pinned: false },
           { id: 'codex.today', enabled: true, section: 'onDemand', pinned: false },
           { id: 'codex.yesterday', enabled: true, section: 'onDemand', pinned: false },
           { id: 'codex.last30', enabled: true, section: 'onDemand', pinned: false },
