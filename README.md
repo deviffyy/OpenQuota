@@ -41,6 +41,8 @@ download and install the latest package from the releases page.
   history, and estimated spend
 - **Codex** — session, weekly, Spark and Spark Weekly limits, extra-usage credits, rate-limit reset
   credits and expiries, local token history, model breakdown, and estimated spend
+- **Cursor** — total, Auto and API usage, team/request fallback, extra usage, credits, and exported
+  30-day token history, model breakdown, and estimated spend
 - **Antigravity** — shared Gemini and Claude quota pools with session and weekly windows
 
 OpenQuota reuses the sign-in details already stored by each provider's app or CLI. Sign in to the
@@ -65,6 +67,8 @@ subscription quota endpoint.
   shareable usage cards.
 - **Customize.** Reorder providers and metrics, move metrics between Always Visible and On Demand,
   hide values, and reset individual provider layouts.
+- **Provider shortcuts.** Open supported providers' status and usage dashboards from each expanded
+  provider card.
 - **Desktop integration.** Toggle the panel with a global shortcut, launch at login, follow the
   system theme, or choose light/dark and default/compact density. Opening OpenQuota again activates
   the running app instead of starting a second tray process.
@@ -85,8 +89,8 @@ OpenQuota runs locally and has no cloud backend of its own.
 - Model prices are resolved locally from bundled catalogs. When pricing is used, OpenQuota starts at
   most one background check if the public LiteLLM, models.dev, or OpenQuota supplement feed is older
   than a day; these requests never include usage or log data.
-- Local Codex and Claude logs are read for token counts and cost estimates. OpenQuota does not store
-  your prompt content in its usage snapshots.
+- Local Codex and Claude logs plus Cursor's usage export are read for token counts and cost estimates.
+  OpenQuota does not store your prompt content in its usage snapshots.
 - Cached snapshots, parsed usage records, and application settings are stored in `openquota.db`
   inside the platform application-data directory.
 - Validated pricing catalogs and their ETags are cached atomically in the `pricing` folder beside
@@ -142,8 +146,8 @@ Svelte interface
 Provider API responses and credentials stay behind the Rust boundary. Each provider implements the
 same small runtime contract (definition, local credential detection, and refresh), owns its static
 metric metadata, and produces a shared snapshot model for the UI. A validated registry shares that
-catalog with settings, tray, pacing, and the frontend bootstrap path. One provider failure does not
-stop the others from refreshing.
+catalog—including allowlisted browser shortcuts—with settings, tray, pacing, and the frontend
+bootstrap path. One provider failure does not stop the others from refreshing.
 
 Local credential detection starts after Tauri setup and fans out across blocking workers, so
 credential-store access does not hold up the UI thread. Fresh installs show the established fallback

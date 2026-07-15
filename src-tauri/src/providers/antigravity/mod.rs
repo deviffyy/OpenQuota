@@ -30,6 +30,7 @@ pub(crate) fn definition() -> ProviderDefinition {
         short_name: "A".into(),
         fallback_enabled: false,
         local_usage_source_note: None,
+        links: vec![],
         metrics: vec![
             MetricDefinition::quota(
                 "antigravity.geminiPro",

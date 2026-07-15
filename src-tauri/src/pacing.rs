@@ -656,6 +656,7 @@ mod tests {
             short_name: "C".into(),
             fallback_enabled: true,
             local_usage_source_note: None,
+            links: vec![],
             metrics: vec![MetricDefinition::new(
                 "custom.rolling",
                 "Rolling",

@@ -37,7 +37,12 @@ impl ProviderRegistry {
         let mut metric_owners = BTreeMap::<String, String>::new();
 
         for provider in providers {
-            let definition = provider.definition();
+            let mut definition = provider.definition();
+            definition.links = definition
+                .links
+                .iter()
+                .filter_map(crate::models::ProviderLink::visible)
+                .collect();
             if runtimes.contains_key(&definition.id) {
                 return Err(invalid(format!(
                     "duplicate provider id `{}`",
@@ -271,6 +276,7 @@ mod tests {
             short_name: "P".into(),
             fallback_enabled: true,
             local_usage_source_note: None,
+            links: vec![],
             metrics: vec![MetricDefinition::new(
                 format!("{id}.session"),
                 "Session",
@@ -312,6 +318,26 @@ mod tests {
         assert!(registry.runtime("second").is_some());
         assert!(registry.definition("first").is_some());
         assert!(registry.metric("first.session").is_some());
+    }
+
+    #[test]
+    fn registry_exposes_only_trimmed_http_provider_links() {
+        let mut provider = definition("links");
+        provider.links = vec![
+            crate::models::ProviderLink::new(" Status ", " https://status.example.com/ "),
+            crate::models::ProviderLink::new("", "https://example.com/"),
+            crate::models::ProviderLink::new("File", "file:///tmp/private"),
+        ];
+
+        let registry = ProviderRegistry::new(vec![runtime(provider)]).unwrap();
+
+        assert_eq!(
+            registry.definition("links").unwrap().links,
+            vec![crate::models::ProviderLink::new(
+                "Status",
+                "https://status.example.com/"
+            )]
+        );
     }
 
     #[test]
@@ -413,11 +439,12 @@ mod tests {
 
     #[test]
     fn builtin_provider_catalog_keeps_the_product_defaults() {
-        use crate::providers::{antigravity, claude, codex};
+        use crate::providers::{antigravity, claude, codex, cursor};
 
         let registry = ProviderRegistry::new(vec![
             runtime(claude::definition()),
             runtime(codex::definition()),
+            runtime(cursor::definition()),
             runtime(antigravity::definition()),
         ])
         .unwrap();
@@ -429,7 +456,7 @@ mod tests {
                 .iter()
                 .map(|provider| provider.id.as_str())
                 .collect::<Vec<_>>(),
-            ["claude", "codex", "antigravity"]
+            ["claude", "codex", "cursor", "antigravity"]
         );
         assert_eq!(
             registry
@@ -454,6 +481,7 @@ mod tests {
         );
         assert!(registry.definition("codex").unwrap().fallback_enabled);
         assert!(registry.definition("claude").unwrap().fallback_enabled);
+        assert!(registry.definition("cursor").unwrap().fallback_enabled);
         assert!(!registry.definition("antigravity").unwrap().fallback_enabled);
         assert!(registry
             .metric("claude.session")

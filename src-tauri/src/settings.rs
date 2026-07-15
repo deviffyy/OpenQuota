@@ -459,7 +459,9 @@ mod tests {
 
     use crate::{
         models::{MetricSection, ProviderDefinition, ProviderSnapshot},
-        providers::{antigravity, claude, codex, ProviderError, ProviderRegistry, UsageProvider},
+        providers::{
+            antigravity, claude, codex, cursor, ProviderError, ProviderRegistry, UsageProvider,
+        },
         storage::Storage,
     };
 
@@ -485,6 +487,7 @@ mod tests {
         let providers = [
             claude::definition(),
             codex::definition(),
+            cursor::definition(),
             antigravity::definition(),
         ]
         .into_iter()
@@ -507,7 +510,7 @@ mod tests {
         let registry = catalog();
         let settings = default_settings(&registry, &HashSet::new());
 
-        assert_eq!(enabled_ids(&settings), ["claude", "codex"]);
+        assert_eq!(enabled_ids(&settings), ["claude", "codex", "cursor"]);
     }
 
     #[test]
@@ -515,7 +518,7 @@ mod tests {
         let directory = tempdir().unwrap();
         let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
         let (service, plan) = SettingsService::new_deferred(storage, catalog()).unwrap();
-        assert_eq!(enabled_ids(&service.get()), ["claude", "codex"]);
+        assert_eq!(enabled_ids(&service.get()), ["claude", "codex", "cursor"]);
 
         let outcome = service
             .apply_credential_detection(&plan, &HashSet::from(["antigravity".to_owned()]))
@@ -544,7 +547,10 @@ mod tests {
             .apply_credential_detection(&plan, &HashSet::new())
             .unwrap();
 
-        assert_eq!(enabled_ids(&outcome.settings), ["claude", "codex"]);
+        assert_eq!(
+            enabled_ids(&outcome.settings),
+            ["claude", "codex", "cursor"]
+        );
         assert!(outcome.newly_enabled_provider_ids.is_empty());
     }
 
@@ -566,7 +572,7 @@ mod tests {
             .apply_credential_detection(&plan, &HashSet::from(["antigravity".to_owned()]))
             .unwrap();
 
-        assert_eq!(enabled_ids(&outcome.settings), ["codex"]);
+        assert_eq!(enabled_ids(&outcome.settings), ["codex", "cursor"]);
         assert!(
             outcome
                 .settings
@@ -821,7 +827,7 @@ mod tests {
                 .iter()
                 .map(|provider| provider.id.as_str())
                 .collect::<Vec<_>>(),
-            ["claude", "codex", "antigravity"]
+            ["claude", "codex", "cursor", "antigravity"]
         );
     }
 

@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 describe('native visual contract', () => {
-  it.each(['claude', 'codex', 'antigravity'])(
+  it.each(['claude', 'codex', 'cursor', 'antigravity'])(
     'packages the exact %s provider icon',
     (providerId) => {
       const { container } = render(ProviderIcon, { providerId });
@@ -26,6 +26,9 @@ describe('native visual contract', () => {
     cleanup();
     const codex = render(ProviderIcon, { providerId: 'codex' });
     expect(codex.container.querySelector('path')).toHaveAttribute('fill', 'currentColor');
+    cleanup();
+    const cursor = render(ProviderIcon, { providerId: 'cursor' });
+    expect(cursor.container.querySelector('path')).toHaveAttribute('fill', 'currentColor');
     cleanup();
     const antigravity = render(ProviderIcon, { providerId: 'antigravity' });
     expect(antigravity.container.querySelector('path')).toHaveAttribute('fill', '#4285F4');

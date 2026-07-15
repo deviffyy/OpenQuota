@@ -6,7 +6,7 @@ use tauri::image::Image;
 use crate::{
     models::{
         AppSettings, MetricDefinition, MetricSource, MetricValue, MetricValueKind,
-        ProviderSnapshot, UsageDisplay, UsagePeriod, UsagePeriodSelection,
+        ProviderSnapshot, QuotaFormat, UsageDisplay, UsagePeriod, UsagePeriodSelection,
     },
     providers::ProviderRegistry,
     service::UsageViewState,
@@ -128,6 +128,23 @@ fn tray_metric(
             .iter()
             .find(|quota| quota.id == id)
             .map(|quota| {
+                if quota.format == QuotaFormat::Count {
+                    if let (Some(used), Some(limit)) = (quota.used_value, quota.limit_value) {
+                        let value = match display {
+                            UsageDisplay::Used => used,
+                            UsageDisplay::Left => (limit - used).max(0.0),
+                        };
+                        let word = match display {
+                            UsageDisplay::Used => "used",
+                            UsageDisplay::Left => "left",
+                        };
+                        return TrayMetric {
+                            compact: format!("{short} {value:.0}"),
+                            detail: format!("{} {value:.0} requests {word}", quota.label),
+                            fraction: (limit > 0.0).then(|| (value / limit).clamp(0.0, 1.0)),
+                        };
+                    }
+                }
                 let percent = match display {
                     UsageDisplay::Used => quota.used_percent,
                     UsageDisplay::Left => 100.0 - quota.used_percent,

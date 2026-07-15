@@ -4,7 +4,7 @@ export interface QuotaWindow {
   usedPercent: number;
   resetsAt: string | null;
   periodSeconds: number;
-  format: 'percent' | 'dollars';
+  format: 'percent' | 'dollars' | 'count';
   usedValue: number | null;
   limitValue: number | null;
 }
@@ -133,12 +133,18 @@ export interface MetricDefinition {
   tray: TrayMetricDefinition | null;
 }
 
+export interface ProviderLink {
+  label: string;
+  url: string;
+}
+
 export interface ProviderDefinition {
   id: string;
   displayName: string;
   shortName: string;
   fallbackEnabled: boolean;
   localUsageSourceNote: string | null;
+  links: ProviderLink[];
   metrics: MetricDefinition[];
 }
 

@@ -30,13 +30,25 @@ struct ModelAccumulator {
     tokens: u64,
     cost: f64,
     spellings: HashMap<String, u64>,
+    variants: HashMap<String, VariantAccumulator>,
+}
+
+#[derive(Default)]
+struct VariantAccumulator {
+    tokens: u64,
+    cost: f64,
 }
 
 impl ModelAccumulator {
-    fn add(&mut self, spelling: &str, tokens: u64, cost: f64) {
+    fn add(&mut self, spelling: &str, variant: Option<&str>, tokens: u64, cost: f64) {
         self.tokens = self.tokens.saturating_add(tokens);
         self.cost += cost;
         *self.spellings.entry(spelling.to_owned()).or_default() += tokens.max(1);
+        if let Some(variant) = variant {
+            let variant = self.variants.entry(variant.to_owned()).or_default();
+            variant.tokens = variant.tokens.saturating_add(tokens);
+            variant.cost += cost;
+        }
     }
 
     fn merge(&mut self, other: &Self) {
@@ -44,6 +56,11 @@ impl ModelAccumulator {
         self.cost += other.cost;
         for (spelling, weight) in &other.spellings {
             *self.spellings.entry(spelling.clone()).or_default() += weight;
+        }
+        for (name, other_variant) in &other.variants {
+            let variant = self.variants.entry(name.clone()).or_default();
+            variant.tokens = variant.tokens.saturating_add(other_variant.tokens);
+            variant.cost += other_variant.cost;
         }
     }
 
@@ -67,14 +84,37 @@ impl ModelAccumulator {
 
 impl DailyUsageAccumulator {
     pub fn add(&mut self, date: NaiveDate, tokens: u64, cost: f64, model: &str) {
-        let model = normalized_model_name(model);
+        self.add_internal(date, tokens, cost, model, None);
+    }
+
+    pub fn add_variant(
+        &mut self,
+        date: NaiveDate,
+        tokens: u64,
+        cost: f64,
+        family: &str,
+        variant: &str,
+    ) {
+        let variant = normalized_model_name(variant);
+        self.add_internal(date, tokens, cost, family, Some(variant));
+    }
+
+    fn add_internal(
+        &mut self,
+        date: NaiveDate,
+        tokens: u64,
+        cost: f64,
+        family: &str,
+        variant: Option<&str>,
+    ) {
+        let family = normalized_model_name(family);
         let day = self.days.entry(date).or_default();
         day.tokens = day.tokens.saturating_add(tokens);
         day.cost += cost;
         day.models
-            .entry(model.to_lowercase())
+            .entry(family.to_lowercase())
             .or_default()
-            .add(model, tokens, cost);
+            .add(family, variant, tokens, cost);
     }
 
     pub fn add_unknown_model(&mut self, date: NaiveDate, model: &str) {
@@ -191,11 +231,31 @@ fn model_breakdown(day: &DayAccumulator, source_note: &str) -> Option<ModelUsage
         .models
         .values()
         .filter(|model| model.tokens > 0 || model.cost > 0.0)
-        .map(|model| ModelUsageEntry {
-            model: model.display_name(),
-            total_tokens: model.tokens,
-            cost_usd: Some(round_to_cents(model.cost)),
-            variants: None,
+        .map(|model| {
+            let display_name = model.display_name();
+            let mut variants = model
+                .variants
+                .iter()
+                .map(|(name, variant)| ModelUsageVariant {
+                    model: name.clone(),
+                    total_tokens: variant.tokens,
+                    cost_usd: Some(round_to_cents(variant.cost)),
+                })
+                .collect::<Vec<_>>();
+            variants.sort_by(variant_sort);
+            let variants = if variants.is_empty()
+                || (variants.len() == 1 && variants[0].model == display_name)
+            {
+                None
+            } else {
+                Some(variants)
+            };
+            ModelUsageEntry {
+                model: display_name,
+                total_tokens: model.tokens,
+                cost_usd: Some(round_to_cents(model.cost)),
+                variants,
+            }
         })
         .collect::<Vec<_>>();
     entries.sort_by(|left, right| {

@@ -65,6 +65,7 @@ pub enum QuotaFormat {
     #[default]
     Percent,
     Dollars,
+    Count,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -423,12 +424,42 @@ impl MetricDefinition {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct ProviderLink {
+    pub label: String,
+    pub url: String,
+}
+
+impl ProviderLink {
+    pub fn new(label: &str, url: &str) -> Self {
+        Self {
+            label: label.into(),
+            url: url.into(),
+        }
+    }
+
+    pub fn visible(&self) -> Option<Self> {
+        let label = self.label.trim();
+        let url = self.url.trim();
+        if label.is_empty()
+            || url.is_empty()
+            || !(url.starts_with("https://") || url.starts_with("http://"))
+        {
+            return None;
+        }
+        Some(Self::new(label, url))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ProviderDefinition {
     pub id: String,
     pub display_name: String,
     pub short_name: String,
     pub fallback_enabled: bool,
     pub local_usage_source_note: Option<String>,
+    #[serde(default)]
+    pub links: Vec<ProviderLink>,
     pub metrics: Vec<MetricDefinition>,
 }
 
@@ -590,7 +621,10 @@ pub struct SettingsViewState {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppSettings, ProviderErrorKind, ProviderSnapshot, ProviderViewState, UsagePeriod};
+    use super::{
+        AppSettings, ProviderErrorKind, ProviderLink, ProviderSnapshot, ProviderViewState,
+        UsagePeriod,
+    };
 
     #[test]
     fn older_settings_default_new_update_state_fields() {
@@ -640,5 +674,30 @@ mod tests {
         .unwrap();
         assert!(snapshot.value_metrics.is_empty());
         assert!(snapshot.notices.is_empty());
+    }
+
+    #[test]
+    fn provider_link_visibility_matches_the_trimmed_http_contract() {
+        let links = [
+            ProviderLink::new(" Status ", " https://status.example.com/ "),
+            ProviderLink::new("HTTP", "http://example.com/dashboard"),
+            ProviderLink::new("", "https://example.com/"),
+            ProviderLink::new("No URL", " "),
+            ProviderLink::new("FTP", "ftp://example.com/"),
+            ProviderLink::new("JS", "javascript:alert(1)"),
+            ProviderLink::new("Mail", "mailto:a@example.com"),
+            ProviderLink::new("No scheme", "example.com"),
+        ];
+
+        assert_eq!(
+            links
+                .iter()
+                .filter_map(ProviderLink::visible)
+                .collect::<Vec<_>>(),
+            [
+                ProviderLink::new("Status", "https://status.example.com/"),
+                ProviderLink::new("HTTP", "http://example.com/dashboard"),
+            ]
+        );
     }
 }

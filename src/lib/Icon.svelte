@@ -12,6 +12,7 @@
     | 'flame-filled'
     | 'grip-dots'
     | 'grip-lines'
+    | 'external-link'
     | 'power'
     | 'refresh'
     | 'reset'
@@ -70,6 +71,8 @@
     />
   {:else if name === 'share'}
     <path d="M12 3v12M8 7l4-4 4 4" /><path d="M6 11H4v9h16v-9h-2" />
+  {:else if name === 'external-link'}
+    <path d="M14 5h5v5" /><path d="m19 5-8 8" /><path d="M17 13v6H5V7h6" />
   {:else if name === 'about'}
     <circle cx="12" cy="12" r="9" /><path d="M12 11v6" /><path d="M12 7h.01" />
   {:else if name === 'power'}

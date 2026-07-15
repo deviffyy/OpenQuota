@@ -11,8 +11,8 @@ use thiserror::Error;
 
 use crate::{
     models::{
-        MetricDefinition, MetricSection, ProviderDefinition, ProviderNotice, ProviderNoticeTone,
-        ProviderSnapshot, UsagePeriodSelection,
+        MetricDefinition, MetricSection, ProviderDefinition, ProviderLink, ProviderNotice,
+        ProviderNoticeTone, ProviderSnapshot, UsagePeriodSelection,
     },
     pricing::{ModelPricing, PricingStore},
     storage::Storage,
@@ -25,6 +25,10 @@ pub(crate) fn definition() -> ProviderDefinition {
         short_name: "Cl".into(),
         fallback_enabled: true,
         local_usage_source_note: Some("From your Claude usage history (estimated)".into()),
+        links: vec![
+            ProviderLink::new("Status", "https://status.anthropic.com/"),
+            ProviderLink::new("Dashboard", "https://claude.ai/settings/usage"),
+        ],
         metrics: vec![
             MetricDefinition::quota(
                 "claude.session",

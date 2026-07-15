@@ -20,7 +20,7 @@ const frontendConsumers = [
   'src/lib/metrics.ts',
   'src/lib/shareCard.ts',
 ];
-const providerLiteral = /["'](?:claude|codex|antigravity)["']/;
+const providerLiteral = /["'](?:claude|codex|cursor|antigravity)["']/;
 
 for (const file of rustConsumers) {
   const source = fs.readFileSync(new URL(file, root), 'utf8').split('#[cfg(test)]')[0];
@@ -73,6 +73,17 @@ const credentialDetection = fs.readFileSync(
 );
 if (!/spawn_blocking/.test(credentialDetection) || !/registry\.runtime/.test(credentialDetection)) {
   throw new Error('Credential detection must fan out registry runtimes on blocking workers.');
+}
+
+const providerCommands = fs.readFileSync(
+  new URL('src-tauri/src/commands/provider.rs', root),
+  'utf8',
+);
+if (!/registry\s*\.definition\(provider_id\)/s.test(providerCommands)) {
+  throw new Error('Provider links must resolve from registry metadata.');
+}
+if (/pub fn open_provider_link[\s\S]*?url:\s*String/.test(providerCommands)) {
+  throw new Error('The provider-link command must not accept an arbitrary URL.');
 }
 
 console.log(

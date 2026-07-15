@@ -14,6 +14,10 @@ describe('provider catalog index', () => {
     expect(catalog.supportsSpend('claude')).toBe(true);
     expect(catalog.supportsSpend('antigravity')).toBe(false);
     expect(catalog.localUsageSourceNote('codex')).toBe('From your Codex logs (estimated)');
+    expect(catalog.provider('codex')?.links).toEqual([
+      { label: 'Status', url: 'https://status.openai.com/' },
+      { label: 'Dashboard', url: 'https://chatgpt.com/codex/settings/usage' },
+    ]);
   });
 
   it('uses safe unknown-provider fallbacks without borrowing another provider identity', () => {

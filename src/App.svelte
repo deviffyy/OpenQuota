@@ -9,6 +9,7 @@
     onSettingsState,
     onUpdateProgress,
     onUsageState,
+    openProviderLink as openProviderLinkCommand,
     openNotificationSettings as openSystemNotificationSettings,
     quitApplication,
     refreshProviderUsage,
@@ -240,6 +241,9 @@
       }
       settingsError = `${providerDisplayName(providerId)} usage could not be refreshed.`;
     }
+  }
+  function openProviderLink(providerId: string, linkIndex: number) {
+    void openProviderLinkCommand(providerId, linkIndex).catch(() => {});
   }
   function requestCustomizationReset() {
     resetConfirmationOpen = true;
@@ -584,6 +588,7 @@
                 onShare={shareProvider}
                 onShareTotal={shareTotalSpend}
                 onRefresh={refreshProvider}
+                onOpenProviderLink={openProviderLink}
                 onContentMorph={beginContentMorph}
                 {reducedMotion}
                 updateStatus={updates.status}

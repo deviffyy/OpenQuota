@@ -2,6 +2,7 @@ pub mod antigravity;
 pub mod claude;
 pub mod codex;
 pub mod credential_store;
+pub mod cursor;
 mod daily_usage;
 mod detection;
 mod log_usage;
@@ -46,7 +47,7 @@ pub trait UsageProvider: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::ProviderError;
+    use super::{antigravity, claude, codex, cursor, ProviderError};
     use crate::models::ProviderErrorKind;
 
     #[test]
@@ -59,5 +60,48 @@ mod tests {
         assert_eq!(error.kind(), ProviderErrorKind::Network);
         assert_eq!(error.to_string(), "Could not connect to the provider.");
         assert!(!error.to_string().contains("secret-token"));
+    }
+
+    #[test]
+    fn provider_quick_links_match_the_declared_browser_destinations() {
+        let links = |definition: crate::models::ProviderDefinition| {
+            definition
+                .links
+                .into_iter()
+                .map(|link| (link.label, link.url))
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            links(claude::definition()),
+            [
+                ("Status".into(), "https://status.anthropic.com/".into()),
+                (
+                    "Dashboard".into(),
+                    "https://claude.ai/settings/usage".into()
+                ),
+            ]
+        );
+        assert_eq!(
+            links(codex::definition()),
+            [
+                ("Status".into(), "https://status.openai.com/".into()),
+                (
+                    "Dashboard".into(),
+                    "https://chatgpt.com/codex/settings/usage".into()
+                ),
+            ]
+        );
+        assert_eq!(
+            links(cursor::definition()),
+            [
+                ("Status".into(), "https://status.cursor.com/".into()),
+                (
+                    "Dashboard".into(),
+                    "https://www.cursor.com/dashboard".into()
+                ),
+            ]
+        );
+        assert!(links(antigravity::definition()).is_empty());
     }
 }

@@ -307,6 +307,7 @@ mod tests {
                 short_name: "T".into(),
                 fallback_enabled: true,
                 local_usage_source_note: None,
+                links: vec![],
                 metrics: vec![MetricDefinition::new(
                     format!("{}.session", self.id),
                     "Session",

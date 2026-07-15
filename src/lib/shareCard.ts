@@ -294,6 +294,13 @@ function quotaShareRow(
   const remaining = Math.max(0, 100 - used);
   let reading = `${(settings.usageDisplay === 'used' ? used : remaining).toFixed(0)}% ${settings.usageDisplay}`;
   let fillPercent = settings.usageDisplay === 'used' ? used : remaining;
+  if (quota.format === 'count' && quota.usedValue !== null && quota.limitValue !== null) {
+    const displayed =
+      settings.usageDisplay === 'left'
+        ? Math.max(0, quota.limitValue - quota.usedValue)
+        : quota.usedValue;
+    reading = `${displayed.toFixed(0)} requests ${settings.usageDisplay}`;
+  }
   if (quota.format === 'dollars' && quota.usedValue !== null) {
     const displayed =
       settings.usageDisplay === 'left' && quota.limitValue !== null

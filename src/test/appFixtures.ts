@@ -63,6 +63,10 @@ export const providerCatalog: ProviderCatalog = {
       shortName: 'Cl',
       fallbackEnabled: false,
       localUsageSourceNote: 'From your Claude usage history (estimated)',
+      links: [
+        { label: 'Status', url: 'https://status.anthropic.com/' },
+        { label: 'Dashboard', url: 'https://claude.ai/settings/usage' },
+      ],
       metrics: [
         quota('claude.session', 'Session', 'session', true),
         quota('claude.weekly', 'Weekly', 'weekly'),
@@ -84,6 +88,10 @@ export const providerCatalog: ProviderCatalog = {
       shortName: 'Cx',
       fallbackEnabled: true,
       localUsageSourceNote: 'From your Codex logs (estimated)',
+      links: [
+        { label: 'Status', url: 'https://status.openai.com/' },
+        { label: 'Dashboard', url: 'https://chatgpt.com/codex/settings/usage' },
+      ],
       metrics: [
         quota('codex.session', 'Session', 'session'),
         quota('codex.weekly', 'Weekly', 'weekly'),
@@ -110,6 +118,7 @@ export const providerCatalog: ProviderCatalog = {
       shortName: 'A',
       fallbackEnabled: false,
       localUsageSourceNote: null,
+      links: [],
       metrics: [
         quota('antigravity.geminiPro', 'Session', 'geminiPro', true),
         quota('antigravity.geminiWeekly', 'Weekly', 'geminiWeekly'),

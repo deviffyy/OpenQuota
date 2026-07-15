@@ -28,6 +28,10 @@ export function refreshProviderUsage(providerId: string) {
   return invoke<UsageViewState>('refresh_provider_usage', { providerId });
 }
 
+export function openProviderLink(providerId: string, linkIndex: number) {
+  return invoke<void>('open_provider_link', { providerId, linkIndex });
+}
+
 export function getAppSettings() {
   return invoke<SettingsViewState>('get_app_settings');
 }

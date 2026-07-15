@@ -5,6 +5,8 @@
   import { reorderFlip, springMotion } from './motion';
   import { pointerReorder } from './pointerReorder';
   import ProviderIcon from './ProviderIcon.svelte';
+  import ProviderLinks from './ProviderLinks.svelte';
+  import ProviderLinksExpander from './ProviderLinksExpander.svelte';
   import ProviderNoticeRow from './ProviderNoticeRow.svelte';
   import Icon from './Icon.svelte';
   import MetricRenderer from './MetricRenderer.svelte';
@@ -36,6 +38,7 @@
     onShare: (providerId: string) => void;
     onShareTotal: (projection: SpendProjection) => boolean | Promise<boolean>;
     onRefresh: (providerId: string) => void;
+    onOpenProviderLink: (providerId: string, linkIndex: number) => void;
     onContentMorph: () => void;
     reducedMotion: boolean;
     updateStatus: UpdateStatus | null;
@@ -59,6 +62,7 @@
     onShare,
     onShareTotal,
     onRefresh,
+    onOpenProviderLink,
     onContentMorph,
     reducedMotion,
     updateStatus,
@@ -95,6 +99,7 @@
       demandMetrics: provider.metrics.filter(
         (metric) => metric.enabled && metric.section === 'onDemand',
       ),
+      links: catalog.provider(provider.id)?.links ?? [],
     })),
   );
   const providerUsage = $derived(
@@ -370,7 +375,7 @@
   />
 {/if}
 
-{#each dashboardProviders as { provider, state, alwaysMetrics, demandMetrics } (provider.id)}
+{#each dashboardProviders as { provider, state, alwaysMetrics, demandMetrics, links } (provider.id)}
   <div
     class="provider-reorder-shell"
     class:provider-reorder-shell--content-morph={demandMorphing}
@@ -496,7 +501,7 @@
               />
             </div>
           {/each}
-          {#if demandMetrics.length > 0}
+          {#if demandMetrics.length > 0 || links.length > 0}
             <button
               class="demand-divider"
               data-reorder-group={`dashboard-metrics:${provider.id}`}
@@ -555,6 +560,12 @@
                     />
                   </div>
                 {/each}
+                {#if links.length > 0}
+                  <ProviderLinks
+                    {links}
+                    onOpen={(linkIndex) => onOpenProviderLink(provider.id, linkIndex)}
+                  />
+                {/if}
               </div>
             {/if}
           {/if}
@@ -610,7 +621,17 @@
           </span>
           <span class="provider-mark"><ProviderIcon providerId={provider.id} size={17} /></span>
         </header>
-        <section class="provider-card"><p class="empty-row">No usage data</p></section>
+        <section class="provider-card">
+          <p class="empty-row">No usage data</p>
+          <ProviderLinksExpander
+            providerId={provider.id}
+            {links}
+            expanded={provider.expanded}
+            {reducedMotion}
+            onToggle={() => toggleDemandMetrics(provider)}
+            onOpen={(linkIndex) => onOpenProviderLink(provider.id, linkIndex)}
+          />
+        </section>
       </section>
     {:else if state?.refreshing}
       <section
@@ -656,6 +677,14 @@
           aria-busy="true"
         >
           <p class="empty-row">Reading {providerDisplayName(provider.id)} usage…</p>
+          <ProviderLinksExpander
+            providerId={provider.id}
+            {links}
+            expanded={provider.expanded}
+            {reducedMotion}
+            onToggle={() => toggleDemandMetrics(provider)}
+            onOpen={(linkIndex) => onOpenProviderLink(provider.id, linkIndex)}
+          />
         </section>
       </section>
     {:else if !state?.error}
@@ -697,6 +726,14 @@
           aria-label={`${providerDisplayName(provider.id)} usage`}
         >
           <p class="provider-pending-copy">No {providerDisplayName(provider.id)} data yet.</p>
+          <ProviderLinksExpander
+            providerId={provider.id}
+            {links}
+            expanded={provider.expanded}
+            {reducedMotion}
+            onToggle={() => toggleDemandMetrics(provider)}
+            onOpen={(linkIndex) => onOpenProviderLink(provider.id, linkIndex)}
+          />
         </section>
       </section>
     {/if}

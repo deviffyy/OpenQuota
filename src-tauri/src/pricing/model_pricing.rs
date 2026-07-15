@@ -51,6 +51,18 @@ impl ModelPricing {
         )
     }
 
+    /// Returns the stable display family used for provider exports that contain one slug per model
+    /// variant. Alias rules are the same source of truth used for pricing; fast variants fold into
+    /// their base family without guessing at otherwise unknown names.
+    pub fn display_family(&self, model: &str) -> String {
+        let canonical = self.supplement.canonical_name(model).unwrap_or(model);
+        canonical
+            .strip_suffix("-fast")
+            .filter(|base| !base.is_empty())
+            .unwrap_or(canonical)
+            .to_owned()
+    }
+
     fn resolve_uncached(&self, model: &str) -> Option<ModelRates> {
         if let Some(canonical) = self.supplement.canonical_name(model) {
             if canonical != model {

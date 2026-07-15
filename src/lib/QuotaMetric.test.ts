@@ -91,4 +91,19 @@ describe('quota pacing presentation', () => {
     expect(container.querySelector('.pace-warning')).not.toBeInTheDocument();
     expect(container.querySelector('.meter-shell')).not.toHaveAttribute('data-tooltip');
   });
+
+  it('renders request quotas as counts instead of percentages', () => {
+    show({
+      ...quota(24),
+      id: 'requests',
+      label: 'Requests',
+      format: 'count',
+      usedValue: 120,
+      limitValue: 500,
+    });
+    expect(screen.getByRole('button', { name: '380 requests left' })).toHaveAttribute(
+      'data-tooltip',
+      '120 requests used',
+    );
+  });
 });

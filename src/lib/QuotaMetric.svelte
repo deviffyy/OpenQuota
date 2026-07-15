@@ -35,6 +35,11 @@
   const used = $derived(Math.min(100, Math.max(0, quota.usedPercent)));
   const remaining = $derived(Math.max(0, 100 - used));
   const reading = $derived.by(() => {
+    if (quota.format === 'count' && quota.usedValue !== null && quota.limitValue !== null) {
+      const value =
+        usageDisplay === 'left' ? Math.max(0, quota.limitValue - quota.usedValue) : quota.usedValue;
+      return `${value.toFixed(0)} requests ${usageDisplay}`;
+    }
     if (quota.format === 'dollars' && quota.usedValue !== null) {
       if (usageDisplay === 'left' && quota.limitValue !== null) {
         return `$${Math.max(0, quota.limitValue - quota.usedValue).toFixed(2)} left`;
@@ -44,6 +49,11 @@
     return `${(usageDisplay === 'used' ? used : remaining).toFixed(0)}% ${usageDisplay}`;
   });
   const readingTooltip = $derived.by(() => {
+    if (quota.format === 'count' && quota.usedValue !== null && quota.limitValue !== null) {
+      const opposite =
+        usageDisplay === 'left' ? quota.usedValue : Math.max(0, quota.limitValue - quota.usedValue);
+      return `${opposite.toFixed(0)} requests ${usageDisplay === 'left' ? 'used' : 'left'}`;
+    }
     if (quota.format === 'dollars' && quota.usedValue !== null) {
       if (usageDisplay === 'left') return `$${quota.usedValue.toFixed(2)} spent`;
       if (quota.limitValue !== null)

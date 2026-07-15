@@ -26,7 +26,11 @@ vi.mock('@tauri-apps/api/window', () => ({
   }),
 }));
 
-type InvokeArgs = { settings?: SettingsViewState['settings'] };
+type InvokeArgs = {
+  settings?: SettingsViewState['settings'];
+  providerId?: string;
+  linkIndex?: number;
+};
 type InvokeImplementation = (command: string, args?: InvokeArgs) => unknown;
 
 function mockInvoke(implementation: InvokeImplementation) {
@@ -65,6 +69,7 @@ describe('OpenQuota dashboard', () => {
       if (command === 'request_notification_permission')
         return Promise.resolve({ ...settingsState, notificationPermission: 'granted' });
       if (command === 'open_notification_settings') return Promise.resolve();
+      if (command === 'open_provider_link') return Promise.resolve();
       if (command === 'reset_customization') return Promise.resolve(settingsState);
       if (command === 'reset_provider_customization') return Promise.resolve(settingsState);
       if (command === 'resize_main_window') return Promise.resolve();
@@ -316,11 +321,45 @@ describe('OpenQuota dashboard', () => {
     expect(providerHeader).not.toHaveAttribute('draggable');
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
     expect(toggle).not.toHaveTextContent('On Demand');
+    expect(screen.queryByRole('button', { name: 'Status, opens in browser' })).toBeNull();
     await fireEvent.click(toggle);
     expect(screen.getByRole('button', { name: 'Show less' })).toHaveAttribute(
       'aria-expanded',
       'true',
     );
+    await fireEvent.click(screen.getByRole('button', { name: 'Status, opens in browser' }));
+    expect(mocks.invoke).toHaveBeenCalledWith('open_provider_link', {
+      providerId: 'codex',
+      linkIndex: 0,
+    });
+    expect(screen.getByRole('button', { name: 'Dashboard, opens in browser' })).toBeInTheDocument();
+  });
+
+  it('keeps the expander for a provider whose only expanded content is quick links', async () => {
+    const linksOnlySettings = structuredClone(settingsState);
+    linksOnlySettings.settings.providers[0].metrics =
+      linksOnlySettings.settings.providers[0].metrics.map((metric) =>
+        metric.section === 'onDemand' ? { ...metric, enabled: false } : metric,
+      );
+    mockInvoke((command: string, args?: InvokeArgs) => {
+      if (command === 'get_usage_state') return Promise.resolve(liveState);
+      if (command === 'get_app_settings') return Promise.resolve(linksOnlySettings);
+      if (command === 'save_app_settings')
+        return Promise.resolve({
+          ...linksOnlySettings,
+          settings: args?.settings ?? linksOnlySettings.settings,
+        });
+      return Promise.resolve();
+    });
+
+    render(App);
+    const toggle = await screen.findByRole('button', { name: 'Show more' });
+    expect(screen.queryByRole('button', { name: 'Status, opens in browser' })).toBeNull();
+
+    await fireEvent.click(toggle);
+
+    expect(screen.getByRole('button', { name: 'Status, opens in browser' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Dashboard, opens in browser' })).toBeInTheDocument();
   });
 
   it('renders the Total Spend ring as separated rounded SVG sectors', async () => {
@@ -722,6 +761,14 @@ describe('OpenQuota dashboard', () => {
     expect(within(card).getByText('Reading Claude usage…')).toBeInTheDocument();
     expect(card).toHaveClass('provider-card');
     expect(within(card).getByText('Reading Claude usage…')).toHaveClass('empty-row');
+    const toggle = within(card).getByRole('button', { name: 'Show more' });
+    expect(within(card).queryByRole('button', { name: 'Status, opens in browser' })).toBeNull();
+
+    await fireEvent.click(toggle);
+
+    expect(
+      within(card).getByRole('button', { name: 'Status, opens in browser' }),
+    ).toBeInTheDocument();
   });
 
   it('restores stable provider chrome when a refresh request fails to start', async () => {
