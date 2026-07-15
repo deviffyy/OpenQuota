@@ -298,7 +298,7 @@ export const settingsState: SettingsViewState = {
   standaloneWindow: false,
   platformSummary: null,
   settings: {
-    schemaVersion: 4,
+    schemaVersion: 5,
     knownProviderIds: ['claude', 'codex', 'antigravity'],
     showTotalSpend: true,
     theme: 'system',
@@ -313,6 +313,7 @@ export const settingsState: SettingsViewState = {
     dismissedUpdateVersion: null,
     lastUpdateCheckAt: null,
     globalShortcut: null,
+    logLevel: 'info',
     notifications: { almostOut: false, cuttingItClose: false, willRunOut: false },
     totalSpendMetric: 'cost',
     totalSpendPeriod: 'today',

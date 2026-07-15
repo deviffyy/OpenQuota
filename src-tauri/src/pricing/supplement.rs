@@ -43,7 +43,8 @@ impl PricingSupplement {
                     canonical: rule.canonical,
                 }),
                 Err(error) => {
-                    eprintln!(
+                    crate::app_warn!(
+                        "pricing",
                         "pricing supplement: invalid alias pattern '{}' skipped: {error}",
                         rule.pattern
                     );

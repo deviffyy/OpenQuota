@@ -50,12 +50,19 @@ pub fn finish_refresh(
 
 fn deliver(app: &AppHandle, alerts: &[PaceAlert]) -> Vec<PaceAlert> {
     if permission(app) != "granted" {
+        if !alerts.is_empty() {
+            crate::app_debug!(
+                "notifications",
+                "skipped {} alerts because permission is unavailable",
+                alerts.len()
+            );
+        }
         return alerts.to_vec();
     }
     alerts
         .iter()
         .filter_map(|alert| {
-            show(
+            let result = show(
                 app,
                 alert.milestone.title(),
                 &format!(
@@ -64,9 +71,14 @@ fn deliver(app: &AppHandle, alerts: &[PaceAlert]) -> Vec<PaceAlert> {
                     alert.metric,
                     alert.milestone.body()
                 ),
-            )
-            .is_err()
-            .then_some(alert.clone())
+            );
+            if result.is_ok() {
+                crate::app_info!("notifications", "pace alert delivered");
+                None
+            } else {
+                crate::app_error!("notifications", "pace alert delivery failed");
+                Some(alert.clone())
+            }
         })
         .collect()
 }

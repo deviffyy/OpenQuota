@@ -61,12 +61,18 @@ where
 {
     let metadata = match fs::metadata(path) {
         Ok(metadata) => metadata,
-        Err(_) => {
+        Err(error) => {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                crate::logging::local_usage_file_recovered(provider_id, path);
+            } else {
+                crate::logging::local_usage_file_failed(provider_id, path);
+            }
             storage.remove_log_events(provider_id, path)?;
             return Ok(None);
         }
     };
     let Some(fingerprint) = LogFileFingerprint::from_metadata(&metadata) else {
+        crate::logging::local_usage_file_failed(provider_id, path);
         storage.remove_log_events(provider_id, path)?;
         return Ok(None);
     };
@@ -82,16 +88,21 @@ where
         .filter(|cached| cached.schema_version == schema_version)
         .map(|cached| cached.events)
     {
+        crate::logging::local_usage_file_recovered(provider_id, path);
+        crate::app_debug!("cache", "local usage cache hit for {provider_id}");
         return Ok(Some(events));
     }
 
     let content = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(_) => {
+            crate::logging::local_usage_file_failed(provider_id, path);
             storage.remove_log_events(provider_id, path)?;
             return Ok(None);
         }
     };
+    crate::logging::local_usage_file_recovered(provider_id, path);
+    crate::app_debug!("cache", "local usage cache miss for {provider_id}");
     let events = parse(&content);
     let json = serde_json::to_string(&CachedLogEventsRef {
         schema_version,

@@ -56,8 +56,12 @@ export function openNotificationSettings() {
   return invoke<void>('open_notification_settings');
 }
 
-export function getAppDataPath() {
-  return invoke<string>('get_app_data_path');
+export function getLogPath() {
+  return invoke<string>('get_log_path');
+}
+
+export function openLogFolder() {
+  return invoke<void>('open_log_folder');
 }
 
 export function dismissMainWindow() {

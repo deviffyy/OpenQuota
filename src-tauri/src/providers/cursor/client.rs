@@ -77,19 +77,21 @@ impl CursorClient {
     }
 
     pub fn fetch_usage(&self, access_token: &str) -> Result<CursorResponse, CursorError> {
-        self.connect_post(&self.endpoints.usage, access_token)
+        self.connect_post("usage", &self.endpoints.usage, access_token)
     }
 
     pub fn fetch_plan(&self, access_token: &str) -> Result<CursorResponse, CursorError> {
-        self.connect_post(&self.endpoints.plan, access_token)
+        self.connect_post("plan", &self.endpoints.plan, access_token)
     }
 
     pub fn fetch_credits(&self, access_token: &str) -> Result<CursorResponse, CursorError> {
-        self.connect_post(&self.endpoints.credits, access_token)
+        self.connect_post("credits", &self.endpoints.credits, access_token)
     }
 
     pub fn refresh_token(&self, refresh_token: &str) -> Result<CursorResponse, CursorError> {
+        crate::app_info!("auth:cursor", "token refresh attempt");
         self.send(
+            "token-refresh",
             self.client
                 .post(&self.endpoints.refresh)
                 .header("Content-Type", "application/json")
@@ -113,6 +115,7 @@ impl CursorClient {
             Url::parse(&self.endpoints.rest_usage).map_err(|_| CursorError::InvalidResponse)?;
         url.query_pairs_mut().append_pair("user", &session.user_id);
         self.send(
+            "request-usage",
             self.client
                 .get(url)
                 .header(
@@ -132,6 +135,7 @@ impl CursorClient {
             return Ok(None);
         };
         self.send(
+            "stripe",
             self.client
                 .get(&self.endpoints.stripe)
                 .header(
@@ -158,6 +162,7 @@ impl CursorClient {
             .append_pair("endDate", &end_millis.to_string())
             .append_pair("strategy", "tokens");
         self.send(
+            "usage-csv",
             self.client
                 .get(url)
                 .header(
@@ -170,8 +175,14 @@ impl CursorClient {
         .map(Some)
     }
 
-    fn connect_post(&self, url: &str, access_token: &str) -> Result<CursorResponse, CursorError> {
+    fn connect_post(
+        &self,
+        label: &str,
+        url: &str,
+        access_token: &str,
+    ) -> Result<CursorResponse, CursorError> {
         self.send(
+            label,
             self.client
                 .post(url)
                 .bearer_auth(access_token)
@@ -184,10 +195,21 @@ impl CursorClient {
 
     fn send(
         &self,
+        label: &str,
         request: reqwest::blocking::RequestBuilder,
     ) -> Result<CursorResponse, CursorError> {
-        let response = request.send().map_err(|_| CursorError::ConnectionFailed)?;
+        let started = std::time::Instant::now();
+        let response = request.send().map_err(|_| {
+            crate::app_warn!("http", "cursor {label} request failed (transport)");
+            CursorError::ConnectionFailed
+        })?;
         let status = response.status();
+        crate::app_debug!(
+            "http",
+            "cursor {label} HTTP {} ({}ms)",
+            status.as_u16(),
+            started.elapsed().as_millis()
+        );
         let body = response
             .bytes()
             .map_err(|_| CursorError::InvalidResponse)?

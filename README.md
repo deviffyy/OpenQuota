@@ -74,6 +74,9 @@ subscription quota endpoint.
   the running app instead of starting a second tray process.
 - **Instant cached data.** Your latest values appear as soon as OpenQuota starts. Providers refresh
   in parallel every five minutes, and a failed refresh never wipes the last successful result.
+- **Private diagnostics.** A redacted, size-limited local log helps diagnose provider and desktop
+  integration problems. Choose Error, Warning, Info, or Debug in Settings and open the log folder
+  without using a terminal.
 - **Linux desktop support.** OpenQuota uses a StatusNotifier tray when one is available and falls
   back to a small standalone window on desktops without a tray host.
 
@@ -93,6 +96,9 @@ OpenQuota runs locally and has no cloud backend of its own.
   OpenQuota does not store your prompt content in its usage snapshots.
 - Cached snapshots, parsed usage records, and application settings are stored in `openquota.db`
   inside the platform application-data directory.
+- Diagnostic logs stay on the device, rotate at 10 MB, retain one archive, and redact credentials,
+  account identifiers, email addresses, and personal filesystem paths. OpenQuota contains no usage
+  telemetry or remote crash-report upload.
 - Validated pricing catalogs and their ETags are cached atomically in the `pricing` folder beside
   the database. Bundled catalogs remain available when the network or a feed is unavailable.
 

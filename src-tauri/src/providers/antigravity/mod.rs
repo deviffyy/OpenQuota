@@ -147,6 +147,7 @@ impl AntigravityProvider {
         {
             match self.client.refresh_google_token(refresh_token) {
                 RefreshOutcome::Refreshed { access_token } => {
+                    crate::app_info!("auth:antigravity", "token refresh succeeded");
                     let snapshot = self.fetch_remote(&access_token)?;
                     if let Ok(mut cached) = self.refreshed_access_token.lock() {
                         *cached = Some(access_token);

@@ -3,6 +3,7 @@ use std::{collections::HashSet, sync::Arc};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use tauri_plugin_notification::NotificationExt;
+use tauri_plugin_opener::OpenerExt;
 
 use crate::{
     apply_shortcut_change, autostart_is_enabled, child_process,
@@ -54,6 +55,7 @@ pub async fn save_app_settings(
     let updated = match settings_service.update(settings) {
         Ok(settings) => settings,
         Err(error) => {
+            crate::app_error!("config", "settings could not be persisted");
             if autostart_changed {
                 let _ = set_autostart(&app, previous.launch_at_login);
             }
@@ -65,6 +67,15 @@ pub async fn save_app_settings(
             return Err(error);
         }
     };
+    if previous.log_level != updated.log_level {
+        crate::logging::set_level(updated.log_level);
+        crate::app_info!(
+            "config",
+            "log level changed to {}",
+            updated.log_level.log_label()
+        );
+    }
+    crate::app_debug!("config", "application settings persisted");
     tray_presentation::update(
         &app,
         &service.state(),
@@ -105,6 +116,7 @@ pub async fn reset_customization(
     settings: State<'_, Arc<SettingsService>>,
     notifications: State<'_, Arc<NotificationEvaluator>>,
 ) -> Result<SettingsViewState, String> {
+    crate::app_info!("config", "reset all customization requested");
     let mut next = settings.get();
     next.providers = settings.default_settings(&HashSet::new()).providers;
     next.detection_notice_dismissed = false;
@@ -138,6 +150,7 @@ pub fn reset_provider_customization(
     settings: State<'_, Arc<SettingsService>>,
     provider_id: String,
 ) -> Result<SettingsViewState, String> {
+    crate::app_info!("config", "provider customization reset for {provider_id}");
     let updated = settings.reset_provider(&provider_id)?;
     tray_presentation::update(&app, &service.state(), &updated, settings.registry());
     let state = settings_view_state(&app, &settings);
@@ -150,11 +163,15 @@ pub fn request_notification_permission(
     app: AppHandle,
     settings: State<'_, Arc<SettingsService>>,
 ) -> SettingsViewState {
+    crate::app_info!("notifications", "notification permission requested");
     let error = app
         .notification()
         .request_permission()
         .err()
         .map(|_| "Notification permission could not be requested.".to_owned());
+    if error.is_some() {
+        crate::app_error!("notifications", "notification permission request failed");
+    }
     settings.view_state(
         notification_permission(&app),
         error,
@@ -191,6 +208,30 @@ pub fn open_notification_settings() -> Result<(), String> {
     result
         .map(|_| ())
         .map_err(|_| "Notification settings could not be opened on this system.".to_owned())
+}
+
+#[tauri::command]
+pub fn get_log_path() -> String {
+    crate::logging::log_path().to_string_lossy().into_owned()
+}
+
+#[tauri::command]
+pub fn open_log_folder(app: AppHandle) -> Result<(), String> {
+    let path = crate::logging::log_path();
+    let result = if path.is_file() {
+        app.opener().reveal_item_in_dir(&path)
+    } else if let Some(parent) = path.parent() {
+        app.opener()
+            .open_path(parent.to_string_lossy(), None::<&str>)
+    } else {
+        return Err("The OpenQuota log folder is unavailable.".to_owned());
+    };
+    result
+        .inspect(|_| crate::app_debug!("config", "log folder opened"))
+        .map_err(|_| {
+            crate::app_warn!("config", "log folder could not be opened");
+            "The OpenQuota log folder could not be opened.".to_owned()
+        })
 }
 
 pub(crate) fn settings_view_state(app: &AppHandle, service: &SettingsService) -> SettingsViewState {

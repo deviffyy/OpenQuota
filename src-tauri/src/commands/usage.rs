@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, State};
 
 use crate::{
     notifications::finish_refresh,
@@ -8,14 +8,6 @@ use crate::{
     service::{ProviderService, UsageViewState},
     settings::SettingsService,
 };
-
-#[tauri::command]
-pub fn get_app_data_path(app: AppHandle) -> Result<String, String> {
-    app.path()
-        .app_data_dir()
-        .map(|path| path.to_string_lossy().into_owned())
-        .map_err(|_| "OpenQuota data directory could not be resolved.".to_owned())
-}
 
 #[tauri::command]
 pub async fn refresh_usage(

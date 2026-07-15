@@ -245,7 +245,8 @@ impl PricingStore {
                 Ok(source_changed) => changed |= source_changed,
                 Err(error) => {
                     state.failed_at = Some(now);
-                    eprintln!(
+                    crate::app_warn!(
+                        "pricing",
                         "pricing {} refresh failed, keeping cached data: {error}",
                         source.file_name()
                     );
@@ -264,14 +265,21 @@ impl PricingStore {
                         .write()
                         .unwrap_or_else(std::sync::PoisonError::into_inner);
                     *current = Arc::new(pricing);
+                    crate::app_info!("pricing", "pricing catalogs refreshed");
                 }
                 Err(error) => {
-                    eprintln!("pricing rebuild failed, keeping current snapshot: {error}")
+                    crate::app_warn!(
+                        "pricing",
+                        "pricing rebuild failed, keeping current snapshot: {error}"
+                    )
                 }
             }
         }
         if let Err(error) = write_json_atomic(&state_file(&self.cache_directory), &states) {
-            eprintln!("pricing fetch state could not be persisted: {error}");
+            crate::app_warn!(
+                "pricing",
+                "pricing fetch state could not be persisted: {error}"
+            );
         }
     }
 
@@ -282,6 +290,12 @@ impl PricingStore {
         now: DateTime<Utc>,
     ) -> Result<bool, PricingStoreError> {
         let response = self.http.fetch(source.url(), state.etag.as_deref())?;
+        crate::app_debug!(
+            "http",
+            "pricing {} HTTP {}",
+            source.file_name(),
+            response.status.as_u16()
+        );
         match response.status {
             StatusCode::OK => {
                 let cache_data = validated_cache_data(source, &response.body)?;
@@ -325,7 +339,10 @@ fn load_pricing(
         Ok(cached) => match PricingSupplement::decode(&cached) {
             Ok(supplement) => supplement,
             Err(error) => {
-                eprintln!("cached pricing supplement unreadable, using bundled: {error}");
+                crate::app_warn!(
+                    "pricing",
+                    "cached pricing supplement unreadable, using bundled: {error}"
+                );
                 PricingSupplement::decode(&bundled.supplement)?
             }
         },
@@ -346,7 +363,8 @@ fn load_catalog(
     if let Ok(cached) = fs::read(cache_directory.join(source.file_name())) {
         match catalog_from_compact(&cached) {
             Ok(cache) => catalog = catalog.merging(cache),
-            Err(error) => eprintln!(
+            Err(error) => crate::app_warn!(
+                "pricing",
                 "cached {} catalog unreadable, using bundled: {error}",
                 source.file_name()
             ),

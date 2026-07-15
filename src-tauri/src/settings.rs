@@ -313,7 +313,7 @@ pub fn normalize(
 ) {
     let catalog = registry.catalog();
     let migrating_to_multi_provider = settings.schema_version < 3;
-    settings.schema_version = 4;
+    settings.schema_version = 5;
     settings.dismissed_update_version = settings
         .dismissed_update_version
         .take()
@@ -820,7 +820,7 @@ mod tests {
             &mut settings,
             &HashSet::from(["codex".to_owned(), "antigravity".to_owned()]),
         );
-        assert_eq!(settings.schema_version, 4);
+        assert_eq!(settings.schema_version, 5);
         assert_eq!(
             settings
                 .providers

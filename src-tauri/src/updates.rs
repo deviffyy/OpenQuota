@@ -169,6 +169,7 @@ pub async fn check_for_updates(
     app: AppHandle,
     coordinator: State<'_, UpdateCoordinator>,
 ) -> Result<UpdateStatus, UpdateFailure> {
+    crate::app_info!("updates", "update check started");
     let _operation = coordinator.operation.try_lock().map_err(|_| {
         UpdateFailure::new(
             "busy",
@@ -190,7 +191,19 @@ pub async fn check_for_updates(
         })?
         .check()
         .await
-        .map_err(|error| classify_updater_error(&error, "check for updates"))?;
+        .map_err(|error| {
+            crate::app_warn!("updates", "update check failed: {error}");
+            classify_updater_error(&error, "check for updates")
+        })?;
+    crate::app_info!(
+        "updates",
+        "update check finished ({})",
+        if update.is_some() {
+            "update available"
+        } else {
+            "up to date"
+        }
+    );
     Ok(match update {
         Some(update) => UpdateStatus {
             available: true,
@@ -216,6 +229,7 @@ pub async fn install_update(
     app: AppHandle,
     coordinator: State<'_, UpdateCoordinator>,
 ) -> Result<(), UpdateFailure> {
+    crate::app_info!("updates", "signed update installation started");
     if !supports_in_app_install() {
         return Err(UpdateFailure::new(
             "manual_install_required",
@@ -257,22 +271,32 @@ pub async fn install_update(
     let _ = app.emit("update-progress", progress(0, None, "downloading"));
     if let Err(first_error) = download_and_install_once(&app, &update).await {
         if !retryable_download_error(&first_error) {
+            crate::app_warn!("updates", "update installation failed: {first_error}");
             return Err(classify_updater_error(
                 &first_error,
                 "install the signed update",
             ));
         }
+        crate::app_warn!(
+            "updates",
+            "update download failed; retrying once: {first_error}"
+        );
         let _ = app.emit("update-progress", progress(0, None, "retrying"));
         tokio::time::sleep(Duration::from_millis(1200)).await;
         download_and_install_once(&app, &update)
             .await
-            .map_err(|error| classify_updater_error(&error, "install the signed update"))?;
+            .map_err(|error| {
+                crate::app_warn!("updates", "update retry failed: {error}");
+                classify_updater_error(&error, "install the signed update")
+            })?;
     }
+    crate::app_info!("updates", "signed update installed; restarting");
     app.restart();
 }
 
 #[tauri::command]
 pub fn open_update_page() -> Result<(), String> {
+    crate::app_info!("updates", "opening release download page");
     #[cfg(target_os = "windows")]
     let (program, arguments) = ("explorer.exe", vec![RELEASE_URL]);
     #[cfg(target_os = "macos")]

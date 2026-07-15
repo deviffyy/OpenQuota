@@ -533,6 +533,38 @@ pub enum TimeFormatPreference {
     TwentyFourHour,
 }
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[repr(u8)]
+pub enum LogLevel {
+    Error = 0,
+    Warn = 1,
+    Debug = 3,
+    #[default]
+    #[serde(other)]
+    Info = 2,
+}
+
+impl LogLevel {
+    pub fn from_severity(value: u8) -> Self {
+        match value {
+            0 => Self::Error,
+            1 => Self::Warn,
+            3 => Self::Debug,
+            _ => Self::Info,
+        }
+    }
+
+    pub fn log_label(self) -> &'static str {
+        match self {
+            Self::Error => "ERROR",
+            Self::Warn => "WARN",
+            Self::Info => "INFO",
+            Self::Debug => "DEBUG",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum TotalSpendMetric {
@@ -576,6 +608,7 @@ pub struct AppSettings {
     pub dismissed_update_version: Option<String>,
     pub last_update_check_at: Option<DateTime<Utc>>,
     pub global_shortcut: Option<String>,
+    pub log_level: LogLevel,
     pub notifications: NotificationPreferences,
     pub total_spend_metric: TotalSpendMetric,
     pub total_spend_period: UsagePeriodSelection,
@@ -585,7 +618,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
-            schema_version: 4,
+            schema_version: 5,
             providers: Vec::new(),
             known_provider_ids: Vec::new(),
             show_total_spend: true,
@@ -601,6 +634,7 @@ impl Default for AppSettings {
             dismissed_update_version: None,
             last_update_check_at: None,
             global_shortcut: None,
+            log_level: LogLevel::Info,
             notifications: NotificationPreferences::default(),
             total_spend_metric: TotalSpendMetric::Cost,
             total_spend_period: UsagePeriodSelection::Today,
@@ -622,8 +656,8 @@ pub struct SettingsViewState {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppSettings, ProviderErrorKind, ProviderLink, ProviderSnapshot, ProviderViewState,
-        UsagePeriod,
+        AppSettings, LogLevel, ProviderErrorKind, ProviderLink, ProviderSnapshot,
+        ProviderViewState, UsagePeriod,
     };
 
     #[test]
@@ -632,10 +666,20 @@ mod tests {
         let object = value.as_object_mut().unwrap();
         object.remove("dismissedUpdateVersion");
         object.remove("lastUpdateCheckAt");
+        object.remove("logLevel");
 
         let settings: AppSettings = serde_json::from_value(value).unwrap();
         assert_eq!(settings.dismissed_update_version, None);
         assert_eq!(settings.last_update_check_at, None);
+        assert_eq!(settings.log_level, LogLevel::Info);
+    }
+
+    #[test]
+    fn unknown_persisted_log_levels_fall_back_to_info() {
+        let mut value = serde_json::to_value(AppSettings::default()).unwrap();
+        value["logLevel"] = serde_json::json!("trace");
+        let settings: AppSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(settings.log_level, LogLevel::Info);
     }
 
     #[test]

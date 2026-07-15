@@ -8,7 +8,7 @@ import type { AppSettings } from './types';
 afterEach(cleanup);
 
 const settings: AppSettings = {
-  schemaVersion: 4,
+  schemaVersion: 5,
   knownProviderIds: ['codex', 'claude', 'antigravity'],
   showTotalSpend: false,
   theme: 'system',
@@ -23,6 +23,7 @@ const settings: AppSettings = {
   dismissedUpdateVersion: null,
   lastUpdateCheckAt: null,
   globalShortcut: null,
+  logLevel: 'info',
   notifications: { almostOut: false, cuttingItClose: false, willRunOut: false },
   totalSpendMetric: 'cost',
   totalSpendPeriod: 'today',

@@ -67,6 +67,7 @@ impl CodexClient {
         access_token: &str,
         account_id: Option<&str>,
     ) -> Result<UsageResponse, CodexError> {
+        let started = std::time::Instant::now();
         let mut request = self
             .client
             .get(&self.usage_url)
@@ -75,8 +76,17 @@ impl CodexClient {
         if let Some(account_id) = account_id.filter(|value| !value.is_empty()) {
             request = request.header("ChatGPT-Account-Id", account_id);
         }
-        let response = request.send().map_err(|_| CodexError::ConnectionFailed)?;
+        let response = request.send().map_err(|_| {
+            crate::app_warn!("http", "codex usage request failed (transport)");
+            CodexError::ConnectionFailed
+        })?;
         let status = response.status();
+        crate::app_debug!(
+            "http",
+            "codex usage HTTP {} ({}ms)",
+            status.as_u16(),
+            started.elapsed().as_millis()
+        );
         let headers = normalized_headers(response.headers());
         let text = response.text().map_err(|_| CodexError::InvalidResponse)?;
         let body = serde_json::from_str(&text).unwrap_or(Value::Null);
@@ -95,6 +105,7 @@ impl CodexClient {
         access_token: &str,
         account_id: Option<&str>,
     ) -> Result<UsageResponse, CodexError> {
+        let started = std::time::Instant::now();
         let mut request = self
             .client
             .get(&self.reset_credits_url)
@@ -105,8 +116,17 @@ impl CodexClient {
         if let Some(account_id) = account_id.filter(|value| !value.is_empty()) {
             request = request.header("ChatGPT-Account-Id", account_id);
         }
-        let response = request.send().map_err(|_| CodexError::ConnectionFailed)?;
+        let response = request.send().map_err(|_| {
+            crate::app_warn!("http", "codex reset-credit request failed (transport)");
+            CodexError::ConnectionFailed
+        })?;
         let status = response.status();
+        crate::app_debug!(
+            "http",
+            "codex reset-credit HTTP {} ({}ms)",
+            status.as_u16(),
+            started.elapsed().as_millis()
+        );
         let headers = normalized_headers(response.headers());
         let text = response.text().map_err(|_| CodexError::InvalidResponse)?;
         let body = serde_json::from_str(&text).unwrap_or(Value::Null);
@@ -121,6 +141,8 @@ impl CodexClient {
     }
 
     pub fn refresh_token(&self, refresh_token: &str) -> Result<TokenRefresh, CodexError> {
+        let started = std::time::Instant::now();
+        crate::app_info!("auth:codex", "token refresh attempt");
         let response = self
             .client
             .post(&self.refresh_url)
@@ -130,8 +152,17 @@ impl CodexClient {
                 ("refresh_token", refresh_token),
             ])
             .send()
-            .map_err(|_| CodexError::ConnectionFailed)?;
+            .map_err(|_| {
+                crate::app_warn!("auth:codex", "token refresh failed (transport)");
+                CodexError::ConnectionFailed
+            })?;
         let status = response.status();
+        crate::app_debug!(
+            "http",
+            "codex token refresh HTTP {} ({}ms)",
+            status.as_u16(),
+            started.elapsed().as_millis()
+        );
         let body: Value = response.json().map_err(|_| {
             if status.is_success() {
                 CodexError::InvalidResponse
@@ -154,6 +185,7 @@ impl CodexClient {
         if refreshed.access_token.is_empty() {
             return Err(CodexError::SessionExpired);
         }
+        crate::app_info!("auth:codex", "token refresh succeeded");
         Ok(refreshed)
     }
 }

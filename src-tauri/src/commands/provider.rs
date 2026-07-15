@@ -24,6 +24,11 @@ pub fn open_provider_link(
     link_index: usize,
 ) -> Result<(), String> {
     let link = resolve_provider_link(&registry, &provider_id, link_index)?;
+    crate::app_debug!(
+        "http",
+        "opening {provider_id} provider link {}",
+        crate::logging::redact_url(&link.url)
+    );
     app.opener()
         .open_url(&link.url, None::<&str>)
         .map_err(|_| "That provider link could not be opened.".to_owned())

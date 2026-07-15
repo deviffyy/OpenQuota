@@ -38,6 +38,7 @@ impl ClaudeClient {
         token: &str,
         config: &ClaudeOAuthConfig,
     ) -> Result<(StatusCode, Value, Option<u64>), ClaudeError> {
+        let started = std::time::Instant::now();
         let response = self
             .client
             .get(&config.usage_url)
@@ -46,8 +47,17 @@ impl ClaudeClient {
             .header("anthropic-beta", "oauth-2025-04-20")
             .header("User-Agent", "claude-code/2.1.69")
             .send()
-            .map_err(|_| ClaudeError::ConnectionFailed)?;
+            .map_err(|_| {
+                crate::app_warn!("http", "claude usage request failed (transport)");
+                ClaudeError::ConnectionFailed
+            })?;
         let status = response.status();
+        crate::app_debug!(
+            "http",
+            "claude usage HTTP {} ({}ms)",
+            status.as_u16(),
+            started.elapsed().as_millis()
+        );
         let retry_after = response
             .headers()
             .get("retry-after")
@@ -62,6 +72,8 @@ impl ClaudeClient {
         token: &str,
         config: &ClaudeOAuthConfig,
     ) -> Result<ClaudeRefreshResponse, ClaudeError> {
+        let started = std::time::Instant::now();
+        crate::app_info!("auth:claude", "token refresh attempt");
         let response = self
             .client
             .post(&config.refresh_url)
@@ -72,8 +84,17 @@ impl ClaudeClient {
                 "scope": OAUTH_SCOPES
             }))
             .send()
-            .map_err(|_| ClaudeError::ConnectionFailed)?;
+            .map_err(|_| {
+                crate::app_warn!("auth:claude", "token refresh failed (transport)");
+                ClaudeError::ConnectionFailed
+            })?;
         let status = response.status();
+        crate::app_debug!(
+            "http",
+            "claude token refresh HTTP {} ({}ms)",
+            status.as_u16(),
+            started.elapsed().as_millis()
+        );
         if !status.is_success() {
             if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::BAD_REQUEST) {
                 let body = response.json::<Value>().ok();
@@ -93,6 +114,7 @@ impl ClaudeClient {
         if refreshed.access_token.trim().is_empty() {
             return Err(ClaudeError::TokenExpired);
         }
+        crate::app_info!("auth:claude", "token refresh succeeded");
         Ok(refreshed)
     }
 }

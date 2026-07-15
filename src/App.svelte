@@ -2,8 +2,8 @@
   import { onMount } from 'svelte';
   import {
     dismissMainWindow,
-    getAppDataPath,
     getBootstrapState,
+    getLogPath,
     onOpenScreen,
     onPopupHidden,
     onSettingsState,
@@ -11,6 +11,7 @@
     onUsageState,
     openProviderLink as openProviderLinkCommand,
     openNotificationSettings as openSystemNotificationSettings,
+    openLogFolder as openSystemLogFolder,
     quitApplication,
     refreshProviderUsage,
     refreshUsage,
@@ -323,14 +324,13 @@
       return false;
     }
   }
-  async function copyDataPath() {
-    try {
-      const path = await getAppDataPath();
-      await navigator.clipboard.writeText(path);
-      showConfirmation('Data path copied');
-    } catch {
-      settingsError = 'OpenQuota data path could not be copied.';
-    }
+  async function copyLogPath() {
+    const path = await getLogPath();
+    await navigator.clipboard.writeText(path);
+    showConfirmation('Log path copied');
+  }
+  async function openLogFolder() {
+    await openSystemLogFolder();
   }
   function topBarTitle() {
     if (screen.startsWith('provider:')) return providerDisplayName(screen.slice(9));
@@ -601,6 +601,7 @@
             {:else if screen === 'settings'}
               <SettingsScreen
                 settingsView={settingsState}
+                {platform}
                 onChange={saveSettings}
                 onRequestNotifications={requestNotifications}
                 onOpenNotificationSettings={openNotificationSettings}
@@ -608,7 +609,8 @@
                 checkingUpdate={updates.checking}
                 onCheckForUpdates={() => void checkForUpdates(true)}
                 onCustomize={() => navigate('customize')}
-                onCopyDataPath={copyDataPath}
+                onCopyLogPath={copyLogPath}
+                onOpenLogFolder={openLogFolder}
               />
             {:else if screen === 'customize'}
               <CustomizeProviderList

@@ -16,7 +16,7 @@ function settingsView(theme: AppSettings['theme'] = 'system'): SettingsViewState
     standaloneWindow: false,
     platformSummary: null,
     settings: {
-      schemaVersion: 4,
+      schemaVersion: 5,
       providers: [],
       knownProviderIds: [],
       showTotalSpend: true,
@@ -32,6 +32,7 @@ function settingsView(theme: AppSettings['theme'] = 'system'): SettingsViewState
       dismissedUpdateVersion: null,
       lastUpdateCheckAt: null,
       globalShortcut: null,
+      logLevel: 'info',
       notifications: { almostOut: false, cuttingItClose: false, willRunOut: false },
       totalSpendMetric: 'cost',
       totalSpendPeriod: 'today',

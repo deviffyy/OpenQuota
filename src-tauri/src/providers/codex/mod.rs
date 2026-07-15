@@ -176,6 +176,11 @@ impl CodexProvider {
     pub fn refresh(&self) -> Result<ProviderSnapshot, CodexError> {
         let now = Utc::now();
         let candidates = CodexAuthState::load_candidates()?;
+        crate::app_debug!(
+            "auth:codex",
+            "credential candidates loaded ({})",
+            candidates.len()
+        );
         let mut last_auth_error = None;
         for mut auth in candidates {
             match self.refresh_candidate(&mut auth, now) {
@@ -263,6 +268,10 @@ impl CodexProvider {
             )
             .is_err()
         {
+            crate::app_error!(
+                "auth:codex",
+                "failed to persist rotated credentials; using them for this session only"
+            );
             warnings.push(
                 "The refreshed Codex login is active for this session but could not be saved."
                     .into(),

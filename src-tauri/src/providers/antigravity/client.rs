@@ -97,8 +97,17 @@ impl AntigravityClient {
                 }}))
                 .send();
             let Ok(response) = response else {
+                crate::app_debug!(
+                    "http",
+                    "antigravity local language-server request unavailable"
+                );
                 continue;
             };
+            crate::app_debug!(
+                "http",
+                "antigravity local language-server HTTP {}",
+                response.status().as_u16()
+            );
             if response.status().is_success() {
                 if let Ok(body) = response.json() {
                     return Some(body);
@@ -119,8 +128,14 @@ impl AntigravityClient {
                 .json(&body)
                 .send();
             let Ok(response) = response else {
+                crate::app_warn!("http", "antigravity cloud request failed (transport)");
                 continue;
             };
+            crate::app_debug!(
+                "http",
+                "antigravity cloud request HTTP {}",
+                response.status().as_u16()
+            );
             if matches!(
                 response.status(),
                 StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
@@ -137,6 +152,7 @@ impl AntigravityClient {
     }
 
     pub fn refresh_google_token(&self, refresh_token: &str) -> RefreshOutcome {
+        crate::app_info!("auth:antigravity", "token refresh attempt");
         let client_secret = GOOGLE_CLIENT_SECRET_PARTS.concat();
         let response = self
             .remote
@@ -149,8 +165,14 @@ impl AntigravityClient {
             ])
             .send();
         let Ok(response) = response else {
+            crate::app_warn!("auth:antigravity", "token refresh failed (transport)");
             return RefreshOutcome::Unavailable;
         };
+        crate::app_debug!(
+            "http",
+            "antigravity token refresh HTTP {}",
+            response.status().as_u16()
+        );
         if response.status().is_success() {
             return response
                 .json::<GoogleTokenResponse>()

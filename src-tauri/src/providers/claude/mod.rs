@@ -160,12 +160,18 @@ impl ClaudeProvider {
     fn refresh_inner(&self) -> Result<ProviderSnapshot, ClaudeError> {
         let candidates = load_candidates();
         if candidates.is_empty() {
+            crate::app_info!("auth:claude", "no reusable CLI credentials found");
             return Err(if auth::has_desktop_app_data() {
                 ClaudeError::DesktopAppOnly
             } else {
                 ClaudeError::NotLoggedIn
             });
         }
+        crate::app_debug!(
+            "auth:claude",
+            "credential candidates loaded ({})",
+            candidates.len()
+        );
         let now = Utc::now();
         let config = oauth_config()?;
         let pricing = self.pricing.current();
@@ -376,6 +382,10 @@ fn refresh_credential(
         )
         .is_err()
     {
+        crate::app_error!(
+            "auth:claude",
+            "failed to persist rotated credentials; using them for this session only"
+        );
         warnings.push(
             "The refreshed Claude login is active for this session but could not be saved.".into(),
         );

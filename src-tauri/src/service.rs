@@ -38,12 +38,20 @@ impl ProviderService {
         let mut refresh_gates = HashMap::new();
         for definition in &registry.catalog().providers {
             let id = definition.id.clone();
-            let state = storage
-                .load_snapshot(&id)
-                .ok()
-                .flatten()
-                .map(ProviderViewState::from_cache)
-                .unwrap_or_default();
+            let state = match storage.load_snapshot(&id) {
+                Ok(Some(snapshot)) => {
+                    crate::app_debug!("cache", "loaded cached snapshot for {id}");
+                    ProviderViewState::from_cache(snapshot)
+                }
+                Ok(None) => ProviderViewState::default(),
+                Err(error) => {
+                    crate::app_warn!(
+                        "cache",
+                        "cached snapshot for {id} could not be loaded: {error}"
+                    );
+                    ProviderViewState::default()
+                }
+            };
             states.insert(id.clone(), state);
             refresh_gates.insert(id.clone(), Arc::new(AsyncMutex::new(())));
         }
@@ -82,6 +90,10 @@ impl ProviderService {
 
     pub async fn refresh(&self, provider_id: &str, force: bool) -> ProviderViewState {
         let Some(provider) = self.registry.runtime(provider_id) else {
+            crate::app_error!(
+                "refresh",
+                "refresh requested for unknown provider {provider_id}"
+            );
             return ProviderViewState {
                 error: Some("Unknown provider.".into()),
                 error_kind: Some(ProviderErrorKind::Internal),
@@ -93,8 +105,12 @@ impl ProviderService {
         };
         let _guard = gate.lock().await;
         if !force && self.is_fresh_this_session(provider_id) {
+            crate::app_debug!("refresh", "cache hit {provider_id}");
             return self.provider_state(provider_id);
         }
+        let started = Instant::now();
+        let tag = format!("plugin:{provider_id}");
+        crate::app_info!(&tag, "refresh start (force={force})");
         self.update_state(provider_id, |state| {
             state.refreshing = true;
             state.error = None;
@@ -105,13 +121,25 @@ impl ProviderService {
         let result = tauri::async_runtime::spawn_blocking(move || provider.refresh()).await;
         let refresh_result = match result {
             Ok(result) => result,
-            Err(_) => Err(ProviderError::new(
-                ProviderErrorKind::Internal,
-                "Provider refresh stopped unexpectedly.",
-            )),
+            Err(_) => {
+                crate::app_error!(&tag, "refresh worker stopped unexpectedly");
+                Err(ProviderError::new(
+                    ProviderErrorKind::Internal,
+                    "Provider refresh stopped unexpectedly.",
+                ))
+            }
         };
         let refresh_result = refresh_result
             .and_then(|snapshot| validate_snapshot(&self.registry, provider_id, snapshot));
+        match &refresh_result {
+            Ok(_) => crate::app_info!(&tag, "refresh end ({}ms)", started.elapsed().as_millis()),
+            Err(error) => crate::app_warn!(
+                &tag,
+                "refresh failed ({}ms, kind={:?}): {error}",
+                started.elapsed().as_millis(),
+                error.kind()
+            ),
+        }
         let state = self.apply_refresh_result(provider_id, refresh_result);
         if state.error.is_none() {
             if let Ok(mut last) = self.last_live_refresh.lock() {
@@ -126,6 +154,12 @@ impl ProviderService {
         provider_ids: &[String],
         force: bool,
     ) -> UsageViewState {
+        let started = Instant::now();
+        crate::app_info!(
+            "refresh",
+            "batch start ({} providers, force={force})",
+            provider_ids.len()
+        );
         let mut tasks = Vec::with_capacity(provider_ids.len());
         for provider_id in provider_ids {
             let service = self.clone();
@@ -134,9 +168,19 @@ impl ProviderService {
                 service.refresh(&provider_id, force).await
             }));
         }
+        let mut succeeded = 0;
+        let mut failed = 0;
         for task in tasks {
-            let _ = task.await;
+            match task.await {
+                Ok(state) if state.error.is_none() => succeeded += 1,
+                _ => failed += 1,
+            }
         }
+        crate::app_info!(
+            "refresh",
+            "batch end ({}ms, {succeeded} ok / {failed} failed)",
+            started.elapsed().as_millis()
+        );
         self.state()
     }
 
@@ -169,6 +213,11 @@ impl ProviderService {
             .as_ref()
             .ok()
             .is_some_and(|snapshot| self.storage.save_snapshot(snapshot).is_err());
+        if cache_error {
+            crate::app_warn!("cache", "snapshot for {provider_id} could not be persisted");
+        } else if result.is_ok() {
+            crate::app_debug!("cache", "snapshot for {provider_id} persisted");
+        }
         self.update_state(provider_id, |state| {
             merge_refresh_result(state, result);
             if cache_error {

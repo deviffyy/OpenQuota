@@ -73,7 +73,8 @@ describe('OpenQuota dashboard', () => {
       if (command === 'reset_customization') return Promise.resolve(settingsState);
       if (command === 'reset_provider_customization') return Promise.resolve(settingsState);
       if (command === 'resize_main_window') return Promise.resolve();
-      if (command === 'get_app_data_path') return Promise.resolve('C:\\OpenQuota\\Data');
+      if (command === 'get_log_path') return Promise.resolve('C:\\OpenQuota\\logs\\OpenQuota.log');
+      if (command === 'open_log_folder') return Promise.resolve();
       if (command === 'dismiss_main_window') return Promise.resolve();
       if (command === 'check_for_updates')
         return Promise.resolve({
@@ -444,7 +445,7 @@ describe('OpenQuota dashboard', () => {
     );
   });
 
-  it('copies the real application data path', async () => {
+  it('persists the log level and exposes only the backend-owned log location', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -454,9 +455,53 @@ describe('OpenQuota dashboard', () => {
     await screen.findByText('Plus');
     await fireEvent.click(screen.getByLabelText('Open options'));
     await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    await fireEvent.click(screen.getByRole('button', { name: 'Copy Path' }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('C:\\OpenQuota\\Data'));
-    expect(screen.getByRole('status')).toHaveTextContent('Data path copied');
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Log Level' }));
+    await fireEvent.click(screen.getByRole('option', { name: 'Debug' }));
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith(
+        'save_app_settings',
+        expect.objectContaining({ settings: expect.objectContaining({ logLevel: 'debug' }) }),
+      ),
+    );
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Copy Log Path' }));
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith('C:\\OpenQuota\\logs\\OpenQuota.log'),
+    );
+    expect(mocks.invoke).toHaveBeenCalledWith('get_log_path');
+    expect(screen.getByRole('status')).toHaveTextContent('Log path copied');
+
+    const headings = screen
+      .getAllByRole('heading', { level: 2 })
+      .map((heading) => heading.textContent?.trim());
+    expect(headings.indexOf('Advanced')).toBeLessThan(headings.indexOf('Updates'));
+    expect(headings).not.toContain('Data');
+    expect(screen.queryByText('Application Data')).not.toBeInTheDocument();
+
+    await fireEvent.click(
+      screen.getByRole('button', {
+        name: /Reveal in Finder|Reveal in File Explorer|Open Containing Folder/,
+      }),
+    );
+    expect(mocks.invoke).toHaveBeenCalledWith('open_log_folder');
+  });
+
+  it('shows log action failures inside the Advanced card', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: vi.fn().mockResolvedValue(undefined) },
+    });
+    render(App);
+    await screen.findByText('Plus');
+    await fireEvent.click(screen.getByLabelText('Open options'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    mocks.invoke.mockRejectedValueOnce(new Error('log path unavailable'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Copy Log Path' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      "Couldn't copy the log path to the clipboard.",
+    );
   });
 
   it('shows the detected Linux fallback mode in Settings', async () => {

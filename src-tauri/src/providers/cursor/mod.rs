@@ -296,10 +296,12 @@ impl CursorProvider {
         if let Some(access_token) = access_token {
             if auth.save_access_token(access_token.clone()).is_err() {
                 auth.access_token = Some(access_token.clone());
-                eprintln!(
-                    "Cursor authentication: failed to persist rotated access token; using it for this session only"
+                crate::app_error!(
+                    "auth:cursor",
+                    "failed to persist rotated access token; using it for this session only"
                 );
             }
+            crate::app_info!("auth:cursor", "token refresh succeeded");
             return Ok(Some(access_token));
         }
         Ok(None)

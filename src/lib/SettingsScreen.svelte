@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
+  import type { DesktopPlatform } from './platform';
   import SelectMenu from './SelectMenu.svelte';
   import type {
     AppSettings,
@@ -10,6 +11,7 @@
 
   interface Props {
     settingsView: SettingsViewState;
+    platform: DesktopPlatform;
     onChange: (settings: AppSettings) => void;
     onRequestNotifications: () => void;
     onOpenNotificationSettings: () => void;
@@ -17,10 +19,12 @@
     checkingUpdate: boolean;
     onCheckForUpdates: () => void;
     onCustomize: () => void;
-    onCopyDataPath: () => void;
+    onCopyLogPath: () => Promise<void>;
+    onOpenLogFolder: () => Promise<void>;
   }
   let {
     settingsView,
+    platform,
     onChange,
     onRequestNotifications,
     onOpenNotificationSettings,
@@ -28,10 +32,19 @@
     checkingUpdate,
     onCheckForUpdates,
     onCustomize,
-    onCopyDataPath,
+    onCopyLogPath,
+    onOpenLogFolder,
   }: Props = $props();
   let recording = $state(false);
+  let logActionError = $state<string | null>(null);
   const settings = $derived(settingsView.settings);
+  const revealLogLabel = $derived(
+    platform === 'macos'
+      ? 'Reveal in Finder'
+      : platform === 'windows'
+        ? 'Reveal in File Explorer'
+        : 'Open Containing Folder',
+  );
   const anyNotificationEnabled = $derived(
     settings.notifications.almostOut ||
       settings.notifications.cuttingItClose ||
@@ -47,6 +60,22 @@
   function patchNotification(key: keyof NotificationPreferences, enabled: boolean) {
     patch({ notifications: { ...settings.notifications, [key]: enabled } });
     if (enabled && settingsView.notificationPermission === 'prompt') onRequestNotifications();
+  }
+  async function copyLogPath() {
+    try {
+      await onCopyLogPath();
+      logActionError = null;
+    } catch {
+      logActionError = "Couldn't copy the log path to the clipboard.";
+    }
+  }
+  async function revealLogFile() {
+    try {
+      await onOpenLogFolder();
+      logActionError = null;
+    } catch {
+      logActionError = "Couldn't reveal the log file.";
+    }
   }
   function record(event: KeyboardEvent) {
     if (!recording) return;
@@ -298,12 +327,31 @@
   <div class="settings-section">
     <h2>Advanced</h2>
     <div class="setting-row">
-      <span><b>Application Data</b></span><button
-        class="secondary-button"
-        type="button"
-        onclick={onCopyDataPath}>Copy Path</button
+      <span><b>Log Level</b></span><SelectMenu
+        label="Log Level"
+        value={settings.logLevel}
+        options={[
+          { value: 'error', label: 'Error' },
+          { value: 'warn', label: 'Warning' },
+          { value: 'info', label: 'Info' },
+          { value: 'debug', label: 'Debug' },
+        ]}
+        onChange={(value) => patch({ logLevel: value as AppSettings['logLevel'] })}
+      />
+    </div>
+    <div class="setting-row setting-row--button">
+      <button class="secondary-button settings-wide-button" type="button" onclick={copyLogPath}
+        >Copy Log Path</button
       >
     </div>
+    <div class="setting-row setting-row--button">
+      <button class="secondary-button settings-wide-button" type="button" onclick={revealLogFile}
+        >{revealLogLabel}</button
+      >
+    </div>
+    {#if logActionError}<p class="settings-note log-action-error" role="alert">
+        {logActionError}
+      </p>{/if}
   </div>
 
   <div class="settings-section">
@@ -566,8 +614,7 @@
       font-size: 12px;
     }
 
-    .settings-note.notice-text {
-      border-radius: 0 0 12px 12px;
+    .settings-note.log-action-error {
       background: var(--card);
     }
 

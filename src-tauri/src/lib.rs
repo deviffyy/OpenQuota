@@ -1,6 +1,7 @@
 mod child_process;
 mod commands;
 mod desktop_integration;
+mod logging;
 mod models;
 mod notifications;
 mod pacing;
@@ -53,10 +54,21 @@ fn spawn_startup_credential_detection(
     plan: CredentialDetectionPlan,
 ) {
     tauri::async_runtime::spawn(async move {
+        app_info!("config", "startup credential detection began");
         let detected = detect_local_credentials(registry, plan.provider_ids()).await;
         let Ok(outcome) = settings.apply_credential_detection(&plan, &detected) else {
+            app_error!(
+                "config",
+                "startup credential detection could not be applied"
+            );
             return;
         };
+        app_info!(
+            "config",
+            "startup credential detection completed ({} detected, {} newly enabled)",
+            detected.len(),
+            outcome.newly_enabled_provider_ids.len()
+        );
 
         tray_presentation::update(
             &app,
@@ -87,7 +99,10 @@ fn register_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), String> {
                 toggle_popup(app);
             }
         })
-        .map_err(|_| "That global shortcut is invalid or already in use.".to_owned())
+        .map_err(|_| {
+            crate::app_warn!("config", "global shortcut registration failed");
+            "That global shortcut is invalid or already in use.".to_owned()
+        })
 }
 
 pub(crate) fn apply_shortcut_change(
@@ -109,6 +124,7 @@ pub(crate) fn apply_shortcut_change(
             return Err(error);
         }
     }
+    crate::app_debug!("config", "global shortcut configuration updated");
     Ok(())
 }
 
@@ -163,15 +179,23 @@ pub fn run() {
         .manage(PopupDismissGuard::default())
         .manage(updates::UpdateCoordinator::default())
         .setup(|app| {
+            logging::init(logging::default_log_path(), models::LogLevel::Info);
+
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             app.handle().plugin(tauri_plugin_positioner::init())?;
             let desktop_integration = DesktopIntegration::detect();
+            app_info!(
+                "lifecycle",
+                "desktop integration detected (standalone={})",
+                desktop_integration.standalone_window
+            );
             app.manage(desktop_integration.clone());
 
             let database_path = app.path().app_data_dir()?.join("openquota.db");
             let storage = Arc::new(Storage::open(&database_path)?);
+            app_debug!("cache", "application database opened");
             let pricing = Arc::new(PricingStore::new(
                 app.path().app_data_dir()?.join("pricing"),
             )?);
@@ -186,6 +210,13 @@ pub fn run() {
             let (settings_service, credential_detection_plan) =
                 SettingsService::new_deferred(storage, registry.clone())?;
             let settings = Arc::new(settings_service);
+            logging::set_level(settings.get().log_level);
+            app_info!(
+                "config",
+                "OpenQuota v{} starting (level={}, log=OpenQuota.log)",
+                app.package_info().version,
+                logging::current_level().log_label()
+            );
             let notifications = Arc::new(NotificationEvaluator::default());
             app.manage(registry.clone());
             app.manage(service.clone());
@@ -246,6 +277,7 @@ pub fn run() {
                     }
                 })
                 .build(app)?;
+                app_info!("lifecycle", "system tray integration ready");
             }
 
             if desktop_integration.standalone_window {
@@ -274,6 +306,7 @@ pub fn run() {
                 credential_detection_plan,
             );
             refresh_loop::spawn(app.handle().clone(), service, settings, notifications);
+            app_info!("lifecycle", "OpenQuota startup completed");
 
             Ok(())
         })
@@ -288,7 +321,8 @@ pub fn run() {
             commands::settings::reset_provider_customization,
             commands::settings::request_notification_permission,
             commands::settings::open_notification_settings,
-            commands::usage::get_app_data_path,
+            commands::settings::get_log_path,
+            commands::settings::open_log_folder,
             commands::window::dismiss_main_window,
             commands::window::resize_main_window,
             commands::window::quit_app,

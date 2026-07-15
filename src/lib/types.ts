@@ -190,6 +190,7 @@ export interface AppSettings {
   dismissedUpdateVersion: string | null;
   lastUpdateCheckAt: string | null;
   globalShortcut: string | null;
+  logLevel: 'error' | 'warn' | 'info' | 'debug';
   notifications: NotificationPreferences;
   totalSpendMetric: 'cost' | 'costPerMillion' | 'tokens';
   totalSpendPeriod: 'today' | 'yesterday' | 'last30Days';
