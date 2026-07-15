@@ -22,6 +22,7 @@ describe('Total Spend projection', () => {
         usage: usage({
           tokens: 164_800_000,
           estimatedCostUsd: null,
+          costEstimated: true,
           estimateComplete: false,
         }),
       },
@@ -39,11 +40,21 @@ describe('Total Spend projection', () => {
     const providers = [
       {
         id: 'claude',
-        usage: usage({ tokens: 1_000_000, estimatedCostUsd: 4, estimateComplete: true }),
+        usage: usage({
+          tokens: 1_000_000,
+          estimatedCostUsd: 4,
+          costEstimated: true,
+          estimateComplete: true,
+        }),
       },
       {
         id: 'codex',
-        usage: usage({ tokens: 9_000_000, estimatedCostUsd: null, estimateComplete: false }),
+        usage: usage({
+          tokens: 9_000_000,
+          estimatedCostUsd: null,
+          costEstimated: true,
+          estimateComplete: false,
+        }),
       },
     ];
 
@@ -57,14 +68,47 @@ describe('Total Spend projection', () => {
     const providers = [
       {
         id: 'claude',
-        usage: usage({ tokens: 1_000_000, estimatedCostUsd: 10, estimateComplete: true }),
+        usage: usage({
+          tokens: 1_000_000,
+          estimatedCostUsd: 10,
+          costEstimated: true,
+          estimateComplete: true,
+        }),
       },
       {
         id: 'codex',
-        usage: usage({ tokens: 3_000_000, estimatedCostUsd: 60, estimateComplete: true }),
+        usage: usage({
+          tokens: 3_000_000,
+          estimatedCostUsd: 60,
+          costEstimated: true,
+          estimateComplete: true,
+        }),
       },
     ];
 
     expect(projectSpend(providers, 'today', 'costPerMillion').centerValue).toBe(17.5);
+  });
+
+  it('tracks local estimation independently from pricing coverage', () => {
+    const providers = [
+      {
+        id: 'claude',
+        usage: usage({
+          tokens: 1_000,
+          estimatedCostUsd: 2,
+          costEstimated: true,
+          estimateComplete: false,
+        }),
+      },
+    ];
+
+    expect(projectSpend(providers, 'today', 'cost')).toMatchObject({
+      costEstimated: true,
+      estimateComplete: false,
+    });
+    expect(projectSpend(providers, 'today', 'tokens')).toMatchObject({
+      costEstimated: false,
+      estimateComplete: false,
+    });
   });
 });

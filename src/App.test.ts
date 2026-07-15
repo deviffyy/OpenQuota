@@ -84,7 +84,7 @@ describe('OpenQuota dashboard', () => {
   afterEach(cleanup);
 
   it('renders quota, total spend, and the 30-day trend from backend data', async () => {
-    render(App);
+    const { container } = render(App);
     expect(await screen.findByText('Plus')).toBeInTheDocument();
     expect(screen.getByRole('progressbar', { name: 'Session used' })).toHaveAttribute(
       'aria-valuenow',
@@ -93,6 +93,10 @@ describe('OpenQuota dashboard', () => {
     expect(screen.getByRole('progressbar', { name: 'Weekly used' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Total Spend' })).toBeInTheDocument();
     expect(screen.getByRole('region', { name: 'Usage Trend' })).toBeInTheDocument();
+    expect(container.querySelector('.spend-ring__label')).toHaveAttribute(
+      'data-tooltip',
+      '$3.84 · Estimated locally, so it may be off',
+    );
     expect(screen.getByText(`OpenQuota ${import.meta.env.APP_VERSION}`)).toBeInTheDocument();
   });
 
@@ -206,6 +210,7 @@ describe('OpenQuota dashboard', () => {
                   today: {
                     tokens: 2_100_000,
                     estimatedCostUsd: null,
+                    costEstimated: true,
                     estimateComplete: false,
                   },
                 },

@@ -2,7 +2,6 @@ use std::{
     collections::HashSet,
     fs,
     path::{Path, PathBuf},
-    time::UNIX_EPOCH,
 };
 
 use chrono::{DateTime, Days, Local, NaiveDate, Utc};
@@ -13,7 +12,10 @@ use walkdir::WalkDir;
 use crate::{models::UsageHistory, pricing::ModelPricing, storage::Storage};
 
 use super::CodexError;
-use crate::providers::daily_usage::DailyUsageAccumulator;
+use crate::providers::{
+    daily_usage::DailyUsageAccumulator,
+    log_usage::{load_or_parse_log, parse_log_timestamp, LogCacheError},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct TokenEvent {
@@ -25,6 +27,8 @@ pub struct TokenEvent {
     pub reasoning: u64,
     pub total: u64,
 }
+
+const LOG_CACHE_SCHEMA_VERSION: u8 = 1;
 
 pub fn scan_local_usage(
     storage: &Storage,
@@ -43,28 +47,20 @@ pub fn scan_local_usage(
     let mut seen_paths = HashSet::with_capacity(paths.len());
 
     for path in paths {
-        let metadata = match fs::metadata(&path) {
-            Ok(metadata) => metadata,
-            Err(_) => continue,
-        };
         seen_paths.insert(path.clone());
-        let modified_millis = metadata
-            .modified()
-            .ok()
-            .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
-            .map(|value| value.as_millis() as i64)
-            .unwrap_or_default();
-        let cached = storage.load_log_events("codex", &path, metadata.len(), modified_millis)?;
-        let parsed = if let Some(parsed) = cached
-            .as_deref()
-            .and_then(|json| serde_json::from_str::<Vec<TokenEvent>>(json).ok())
-        {
-            parsed
-        } else {
-            let parsed = parse_path(&path);
-            let json = serde_json::to_string(&parsed).map_err(|_| CodexError::LocalUsage)?;
-            storage.save_log_events("codex", &path, metadata.len(), modified_millis, &json)?;
-            parsed
+        let Some(parsed) = load_or_parse_log(
+            storage,
+            "codex",
+            &path,
+            LOG_CACHE_SCHEMA_VERSION,
+            parse_jsonl,
+        )
+        .map_err(|error| match error {
+            LogCacheError::Storage(_) => CodexError::Storage,
+            LogCacheError::Encode(_) => CodexError::LocalUsage,
+        })?
+        else {
+            continue;
         };
         events.extend(
             parsed
@@ -131,19 +127,19 @@ fn discover_session_files(homes: &[PathBuf]) -> Vec<PathBuf> {
             if !seen_directories.insert(source.clone()) {
                 continue;
             }
-            for entry in WalkDir::new(&source)
+            let mut source_files = WalkDir::new(&source)
                 .follow_links(false)
                 .into_iter()
                 .filter_map(Result::ok)
                 .filter(|entry| entry.file_type().is_file())
-            {
-                let path = entry.path();
-                if path.extension().and_then(|value| value.to_str()) != Some("jsonl") {
-                    continue;
-                }
-                let relative = path.strip_prefix(&source).unwrap_or(path).to_path_buf();
+                .map(|entry| entry.into_path())
+                .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("jsonl"))
+                .collect::<Vec<_>>();
+            source_files.sort();
+            for path in source_files {
+                let relative = path.strip_prefix(&source).unwrap_or(&path).to_path_buf();
                 if seen_relative.insert(relative) {
-                    output.push(path.to_path_buf());
+                    output.push(path);
                 }
             }
         }
@@ -165,12 +161,6 @@ fn uses_fast_service_tier(home: &Path) -> bool {
     })
 }
 
-fn parse_path(path: &Path) -> Vec<TokenEvent> {
-    fs::read_to_string(path)
-        .map(|content| parse_jsonl(&content))
-        .unwrap_or_default()
-}
-
 pub fn parse_jsonl(content: &str) -> Vec<TokenEvent> {
     let subagent = content.as_bytes()[..content.len().min(16 * 1024)]
         .windows("thread_spawn".len())
@@ -182,7 +172,8 @@ pub fn parse_jsonl(content: &str) -> Vec<TokenEvent> {
     let mut events = Vec::new();
 
     for line in content.lines() {
-        if !line.contains("\"turn_context\"") && !line.contains("\"token_count\"") {
+        if !line.contains("\"type\":\"turn_context\"") && !line.contains("\"type\":\"token_count\"")
+        {
             continue;
         }
         let Ok(object) = serde_json::from_str::<Value>(line) else {
@@ -202,10 +193,14 @@ pub fn parse_jsonl(content: &str) -> Vec<TokenEvent> {
         {
             continue;
         }
-        let Some(timestamp_raw) = object.get("timestamp").and_then(Value::as_str) else {
+        let Some(timestamp_raw) = object
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .map(str::trim)
+        else {
             continue;
         };
-        let Ok(timestamp) = DateTime::parse_from_rfc3339(timestamp_raw) else {
+        let Some(timestamp) = parse_log_timestamp(timestamp_raw) else {
             continue;
         };
         let info = payload.get("info");
@@ -239,7 +234,7 @@ pub fn parse_jsonl(content: &str) -> Vec<TokenEvent> {
         let parsed_model = model_name(Some(payload)).or_else(|| model_name(info));
         let model = resolve_model(parsed_model, timestamp_raw, &mut current_model);
         events.push(TokenEvent {
-            timestamp: timestamp.to_utc(),
+            timestamp,
             model,
             input: usage.input,
             cached: usage.cached.min(usage.input),
@@ -308,11 +303,7 @@ impl RawUsage {
 
 fn integer(value: &Value, keys: &[&str]) -> u64 {
     keys.iter()
-        .find_map(|key| {
-            value
-                .get(*key)
-                .and_then(|value| value.as_u64().or_else(|| value.as_str()?.parse().ok()))
-        })
+        .find_map(|key| value.get(*key).and_then(Value::as_u64))
         .unwrap_or_default()
 }
 
@@ -340,7 +331,7 @@ fn detect_replay_second(content: &str) -> Option<String> {
     let mut first = None;
     for line in content
         .lines()
-        .filter(|line| line.contains("\"token_count\""))
+        .filter(|line| line.contains("\"type\":\"token_count\""))
     {
         let Ok(object) = serde_json::from_str::<Value>(line) else {
             continue;
@@ -357,7 +348,11 @@ fn detect_replay_second(content: &str) -> Option<String> {
         {
             continue;
         }
-        let Some(timestamp) = object.get("timestamp").and_then(Value::as_str) else {
+        let Some(timestamp) = object
+            .get("timestamp")
+            .and_then(Value::as_str)
+            .map(str::trim)
+        else {
             continue;
         };
         let Some(second) = timestamp.get(..19).map(str::to_owned) else {
@@ -457,11 +452,12 @@ fn estimate_cost(event: &TokenEvent, fast_tier: bool, pricing: &ModelPricing) ->
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, fs};
 
     use chrono::{TimeZone, Utc};
+    use tempfile::tempdir;
 
-    use super::{aggregate, estimate_cost, parse_jsonl, TokenEvent};
+    use super::{aggregate, discover_session_files, estimate_cost, parse_jsonl, TokenEvent};
     use crate::pricing::{
         test_bundled_pricing, ModelPricing, ModelRates, PricingCatalog, PricingSupplement,
     };
@@ -485,6 +481,62 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[1].input, 60);
         assert_eq!(events[1].output, 10);
+    }
+
+    #[test]
+    fn auto_review_model_uses_the_event_date() {
+        let content = r#"{"timestamp":"2026-03-10T08:00:00Z","type":"turn_context","payload":{"model":"codex-auto-review"}}
+{"timestamp":"2026-03-10T08:01:00Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}}"#;
+        let events = parse_jsonl(content);
+        assert_eq!(events[0].model, "gpt-5.4");
+    }
+
+    #[test]
+    fn subagent_replay_seeds_the_cumulative_baseline() {
+        let content = r#"{"timestamp":"2026-05-12T08:03:00Z","type":"session_meta","payload":{"source":{"subagent":{"thread_spawn":true}}}}
+{"timestamp":"2026-05-12T08:03:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":100,"output_tokens":200,"total_tokens":1200}}}}
+{"timestamp":"2026-05-12T08:03:00.500Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1500,"cached_input_tokens":150,"output_tokens":300,"total_tokens":1800}}}}
+{"timestamp":"2026-05-12T08:04:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1600,"cached_input_tokens":160,"output_tokens":320,"total_tokens":1920}}}}"#;
+        let events = parse_jsonl(content);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].input, 100);
+        assert_eq!(events[0].cached, 10);
+        assert_eq!(events[0].output, 20);
+        assert_eq!(events[0].total, 120);
+    }
+
+    #[test]
+    fn accepts_trimmed_timestamps_and_rejects_numeric_strings() {
+        let content = r#"{"timestamp":" 2026-07-10T08:00:00Z ","type":"event_msg","payload":{"type":"token_count","model":"gpt-5.5","info":{"last_token_usage":{"input_tokens":100,"output_tokens":10,"total_tokens":110}}}}
+{"timestamp":"2026-07-10T08:01:00Z","type":"event_msg","payload":{"type":"token_count","model":"gpt-5.5","info":{"last_token_usage":{"input_tokens":"100","output_tokens":"10","total_tokens":"110"}}}}"#;
+        let events = parse_jsonl(content);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].total, 110);
+    }
+
+    #[test]
+    fn parses_cross_device_timestamp_offsets() {
+        let content = r#"{"timestamp":"2026-07-15 15:00:00.123456+03:00","type":"event_msg","payload":{"type":"token_count","model":"gpt-5.5","info":{"last_token_usage":{"input_tokens":100,"output_tokens":10,"total_tokens":110}}}}"#;
+        let events = parse_jsonl(content);
+        assert_eq!(
+            events[0].timestamp.to_rfc3339(),
+            "2026-07-15T12:00:00.123+00:00"
+        );
+    }
+
+    #[test]
+    fn active_sessions_win_over_matching_archived_paths() {
+        let directory = tempdir().unwrap();
+        let home = directory.path();
+        let relative = "2026/07/rollout.jsonl";
+        let active = home.join("sessions").join(relative);
+        let archived = home.join("archived_sessions").join(relative);
+        fs::create_dir_all(active.parent().unwrap()).unwrap();
+        fs::create_dir_all(archived.parent().unwrap()).unwrap();
+        fs::write(&active, "active").unwrap();
+        fs::write(&archived, "archived").unwrap();
+
+        assert_eq!(discover_session_files(&[home.to_path_buf()]), vec![active]);
     }
 
     #[test]

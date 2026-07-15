@@ -3,6 +3,7 @@ pub mod claude;
 pub mod codex;
 pub mod credential_store;
 mod daily_usage;
+mod log_usage;
 #[cfg(test)]
 pub mod test_http;
 

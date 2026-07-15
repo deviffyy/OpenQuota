@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { formatMetricNumber, formatMetricValue } from './metricFormat';
   import type { ModelUsageBreakdown } from './types';
 
   interface Props {
@@ -38,12 +39,6 @@
     }
     return result;
   });
-
-  function compact(value: number) {
-    return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(
-      value,
-    );
-  }
 </script>
 
 <div
@@ -60,10 +55,16 @@
       <div class="model-usage-row">
         <div class="model-usage-primary">
           <strong title={model.model}>{model.model}</strong>
-          <span>{model.costUsd === null ? '—' : `$${model.costUsd.toFixed(2)}`}</span>
+          <span
+            >{model.costUsd === null
+              ? '—'
+              : formatMetricNumber(model.costUsd, 'dollars', 'row')}</span
+          >
         </div>
         <div class="model-usage-secondary">
-          <span>{percents[index]}%</span><span>{compact(model.totalTokens)} tokens</span>
+          <span>{percents[index]}%</span><span
+            >{formatMetricValue(model.totalTokens, 'count', 'row', 'tokens')}</span
+          >
         </div>
         <div class="model-usage-meter" aria-hidden="true">
           <i style={`width:${Math.min(shares[index] * 100, 100)}%`}></i>

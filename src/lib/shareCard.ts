@@ -1,4 +1,10 @@
 import { metricDefinition, providerDisplayName } from './metrics';
+import {
+  formatMetricNumber,
+  formatMetricValue,
+  formatSpendValue,
+  totalSpendRingCenter,
+} from './metricFormat';
 import { formatLimit, formatReset, projectPace } from './pacing';
 import { providerIconPath } from './providerIconPaths';
 import { fillRingSector, spendRingArcs } from './spendRing';
@@ -288,9 +294,9 @@ function usagePeriod(snapshot: ProviderSnapshot, sourceId: string) {
 
 function usageReading(period: UsagePeriod | null) {
   if (!period) return 'No data';
-  const tokens = `${compact(period.tokens)} tokens`;
+  const tokens = formatMetricValue(period.tokens, 'count', 'row', 'tokens');
   if (period.estimatedCostUsd === null) return tokens;
-  return `${period.estimateComplete ? '' : '~'}$${period.estimatedCostUsd.toFixed(2)} · ${tokens}`;
+  return `${formatMetricNumber(period.estimatedCostUsd, 'dollars', 'row')} · ${tokens}`;
 }
 
 function shareRowHeight(row: ShareRow) {
@@ -529,7 +535,7 @@ function drawSpendBody(
     fillRingSector(context, arc, TOTAL_SPEND_GEOMETRY, ringLeft, top);
   });
 
-  const center = ringCenter(projection.centerValue, metric);
+  const center = totalSpendRingCenter(projection.centerValue, metric);
   context.fillStyle = palette.text;
   context.font = `600 ${TOTAL_SPEND_GEOMETRY.centerFontSize}px system-ui`;
   context.textAlign = 'center';
@@ -560,7 +566,7 @@ function drawSpendBody(
     context.fillStyle = palette.secondary;
     context.font = `600 ${TOTAL_SPEND_GEOMETRY.legendFontSize}px system-ui`;
     context.textAlign = 'right';
-    fitTextRight(context, spendValue(slice.value, metric), legendRight, baseline, 72);
+    fitTextRight(context, formatSpendValue(slice.value, metric), legendRight, baseline, 72);
     context.textAlign = 'left';
   });
 }
@@ -625,35 +631,6 @@ function ellipsize(context: CanvasRenderingContext2D, value: string, maxWidth: n
     result = result.slice(0, -1);
   }
   return `${result}…`;
-}
-
-function compact(value: number) {
-  return new Intl.NumberFormat('en-US', {
-    notation: 'compact',
-    maximumFractionDigits: 1,
-  }).format(value);
-}
-
-function spendValue(value: number, metric: AppSettings['totalSpendMetric']) {
-  if (metric === 'tokens') return compact(value);
-  const dollars = `$${value >= 1000 ? compact(value) : value.toFixed(2)}`;
-  return metric === 'costPerMillion' ? `${dollars}/MTok` : dollars;
-}
-
-function ringCenter(value: number, metric: AppSettings['totalSpendMetric']) {
-  if (metric === 'cost') {
-    return {
-      primary: value >= 1000 ? `$${compact(value)}` : `$${value.toFixed(0)}`,
-      unit: 'dollars',
-    };
-  }
-  if (metric === 'costPerMillion') {
-    return {
-      primary: value >= 1000 ? `$${compact(value)}` : `$${value.toFixed(2)}`,
-      unit: 'MTok',
-    };
-  }
-  return { primary: compact(value), unit: 'tokens' };
 }
 
 function clamp(value: number, minimum: number, maximum: number) {

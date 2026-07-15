@@ -14,6 +14,7 @@ export interface SpendSlice {
 export interface SpendProjection {
   slices: SpendSlice[];
   centerValue: number | null;
+  costEstimated: boolean;
   estimateComplete: boolean;
 }
 
@@ -50,7 +51,7 @@ export function projectSpend(
     .sort((left, right) => right.value - left.value || left.id.localeCompare(right.id));
 
   if (slices.length === 0) {
-    return { slices, centerValue: null, estimateComplete: true };
+    return { slices, centerValue: null, costEstimated: false, estimateComplete: true };
   }
 
   const centerValue =
@@ -68,6 +69,7 @@ export function projectSpend(
   return {
     slices,
     centerValue,
+    costEstimated: metric !== 'tokens' && slices.some((slice) => slice.period.costEstimated),
     estimateComplete: slices.every((slice) => slice.period.estimateComplete),
   };
 }

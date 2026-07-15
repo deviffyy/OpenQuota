@@ -30,6 +30,8 @@ pub enum QuotaFormat {
 pub struct UsagePeriod {
     pub tokens: u64,
     pub estimated_cost_usd: Option<f64>,
+    #[serde(default = "default_true")]
+    pub cost_estimated: bool,
     pub estimate_complete: bool,
     #[serde(default)]
     pub model_breakdown: Option<ModelUsageBreakdown>,
@@ -37,9 +39,23 @@ pub struct UsagePeriod {
     pub unknown_models: Vec<String>,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelUsageEntry {
+    pub model: String,
+    pub total_tokens: u64,
+    pub cost_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variants: Option<Vec<ModelUsageVariant>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelUsageVariant {
     pub model: String,
     pub total_tokens: u64,
     pub cost_usd: Option<f64>,
@@ -300,7 +316,7 @@ pub struct SettingsViewState {
 
 #[cfg(test)]
 mod tests {
-    use super::{AppSettings, ProviderErrorKind, ProviderViewState};
+    use super::{AppSettings, ProviderErrorKind, ProviderViewState, UsagePeriod};
 
     #[test]
     fn older_settings_default_new_update_state_fields() {
@@ -324,5 +340,14 @@ mod tests {
 
         let value = serde_json::to_value(state).unwrap();
         assert_eq!(value["errorKind"], "network");
+    }
+
+    #[test]
+    fn cached_usage_periods_default_to_local_cost_estimates() {
+        let period: UsagePeriod = serde_json::from_str(
+            r#"{"tokens":42,"estimatedCostUsd":0.12,"estimateComplete":true,"unknownModels":[]}"#,
+        )
+        .unwrap();
+        assert!(period.cost_estimated);
     }
 }

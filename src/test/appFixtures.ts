@@ -35,9 +35,24 @@ export const codexState: ProviderViewState = {
       },
     ],
     usage: {
-      today: { tokens: 2100000, estimatedCostUsd: 3.84, estimateComplete: true },
-      yesterday: { tokens: 684000, estimatedCostUsd: 1.27, estimateComplete: true },
-      last30Days: { tokens: 3000000, estimatedCostUsd: 5.11, estimateComplete: true },
+      today: {
+        tokens: 2100000,
+        estimatedCostUsd: 3.84,
+        costEstimated: true,
+        estimateComplete: true,
+      },
+      yesterday: {
+        tokens: 684000,
+        estimatedCostUsd: 1.27,
+        costEstimated: true,
+        estimateComplete: true,
+      },
+      last30Days: {
+        tokens: 3000000,
+        estimatedCostUsd: 5.11,
+        costEstimated: true,
+        estimateComplete: true,
+      },
       daily: [
         { date: '2026-07-10', tokens: 2100000, estimatedCostUsd: 3.84, estimateComplete: true },
       ],

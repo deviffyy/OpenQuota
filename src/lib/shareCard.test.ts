@@ -57,6 +57,28 @@ describe('share card layout', () => {
     ]);
   });
 
+  it('does not encode unknown pricing as an approximation prefix', () => {
+    const snapshot = structuredClone(codexState.snapshot!);
+    snapshot.usage.today = {
+      tokens: 500,
+      estimatedCostUsd: 0.03,
+      costEstimated: true,
+      estimateComplete: false,
+      unknownModels: ['future-unpriced-model'],
+    };
+    const rows = buildProviderShareRows(
+      'codex',
+      snapshot,
+      { ...settingsState.settings.providers[0], expanded: true },
+      settingsState.settings,
+      Date.now(),
+    );
+
+    expect(rows.find((row) => row.kind === 'text' && row.label === 'Today')).toMatchObject({
+      value: '$0.03 · 500 tokens',
+    });
+  });
+
   it('keeps always-visible rows ahead of expanded rows like the dashboard', () => {
     const snapshot = codexState.snapshot!;
     const settings = settingsState.settings;
@@ -144,11 +166,13 @@ describe('share card layout', () => {
             period: {
               tokens: 1_000_000,
               estimatedCostUsd: 12,
+              costEstimated: true,
               estimateComplete: true,
             },
           },
         ],
         centerValue: 12,
+        costEstimated: true,
         estimateComplete: true,
       },
       metric: 'cost',

@@ -15,6 +15,7 @@ describe('UsageMetric model detail', () => {
       period: {
         tokens: 2_000,
         estimatedCostUsd: 0.04,
+        costEstimated: true,
         estimateComplete: true,
         unknownModels: [],
         modelBreakdown: {
@@ -45,6 +46,7 @@ describe('UsageMetric model detail', () => {
       period: {
         tokens: 0,
         estimatedCostUsd: null,
+        costEstimated: true,
         estimateComplete: false,
         unknownModels: ['future-unpriced-model'],
         modelBreakdown: null,
@@ -56,5 +58,67 @@ describe('UsageMetric model detail', () => {
       'Unknown model found\n- future-unpriced-model',
     );
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+  });
+
+  it('keeps incomplete cost text ordinary and reports local estimation separately', () => {
+    render(UsageMetric, {
+      label: 'Today',
+      period: {
+        tokens: 500,
+        estimatedCostUsd: 0.03,
+        costEstimated: true,
+        estimateComplete: false,
+        unknownModels: ['future-unpriced-model'],
+        modelBreakdown: null,
+      },
+    });
+
+    const reading = screen.getByRole('button', { name: '$0.03 · 500 tokens' });
+    expect(reading).toHaveAttribute(
+      'data-tooltip',
+      '$0.03\n500 tokens\nEstimated locally, so it may be off',
+    );
+    expect(reading).not.toHaveTextContent('~');
+    expect(screen.getByLabelText('This period used a model with unknown pricing')).toBeVisible();
+  });
+
+  it('compacts large row values while keeping exact tooltip figures', () => {
+    render(UsageMetric, {
+      label: 'Last 30 Days',
+      period: {
+        tokens: 1_506_025_363,
+        estimatedCostUsd: 2_059.07,
+        costEstimated: true,
+        estimateComplete: true,
+        unknownModels: [],
+        modelBreakdown: null,
+      },
+    });
+
+    expect(screen.getByRole('button', { name: '$2.1K · 1.5B tokens' })).toHaveAttribute(
+      'data-tooltip',
+      '$2,059.07\n1,506,025,363 tokens\nEstimated locally, so it may be off',
+    );
+  });
+
+  it('lets the model detail replace the generic estimate tooltip', () => {
+    render(UsageMetric, {
+      label: 'Today',
+      period: {
+        tokens: 500,
+        estimatedCostUsd: 0.03,
+        costEstimated: true,
+        estimateComplete: true,
+        unknownModels: [],
+        modelBreakdown: {
+          sourceNote: 'From local logs (estimated)',
+          models: [{ model: 'gpt-5.4', totalTokens: 500, costUsd: 0.03 }],
+        },
+      },
+    });
+
+    expect(screen.getByRole('button', { name: '$0.03 · 500 tokens' })).not.toHaveAttribute(
+      'data-tooltip',
+    );
   });
 });

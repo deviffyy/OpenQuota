@@ -49,21 +49,32 @@ impl Storage {
                PRIMARY KEY(provider_id, date)
              );
              CREATE TABLE IF NOT EXISTS log_file_cache (
-               path TEXT PRIMARY KEY,
+               provider_id TEXT NOT NULL,
+               path TEXT NOT NULL,
                size INTEGER NOT NULL,
-               modified_millis INTEGER NOT NULL,
+               modified_nanos INTEGER NOT NULL,
                events_json TEXT NOT NULL,
-               provider_id TEXT NOT NULL DEFAULT ''
+               PRIMARY KEY(provider_id, path)
              );
              CREATE TABLE IF NOT EXISTS app_settings (
                id INTEGER PRIMARY KEY CHECK (id = 1),
                payload TEXT NOT NULL
              );",
         )?;
-        if !Self::has_column(&connection, "log_file_cache", "provider_id")? {
-            connection.execute(
-                "ALTER TABLE log_file_cache ADD COLUMN provider_id TEXT NOT NULL DEFAULT ''",
-                [],
+        if !Self::has_column(&connection, "log_file_cache", "modified_nanos")? {
+            // Parsed log rows are disposable. Rebuilding the table is safer than converting the old
+            // millisecond timestamp because the conversion would preserve the very collisions this
+            // migration removes. The next refresh repopulates it from the source logs.
+            connection.execute_batch(
+                "DROP TABLE log_file_cache;
+                 CREATE TABLE log_file_cache (
+                   provider_id TEXT NOT NULL,
+                   path TEXT NOT NULL,
+                   size INTEGER NOT NULL,
+                   modified_nanos INTEGER NOT NULL,
+                   events_json TEXT NOT NULL,
+                   PRIMARY KEY(provider_id, path)
+                 );",
             )?;
         }
         Ok(Self {
@@ -120,18 +131,18 @@ impl Storage {
         provider_id: &str,
         path: &Path,
         size: u64,
-        modified_millis: i64,
+        modified_nanos: i64,
     ) -> Result<Option<String>, StorageError> {
         let connection = self.connection()?;
         connection
             .query_row(
                 "SELECT events_json FROM log_file_cache
-                 WHERE provider_id = ?1 AND path = ?2 AND size = ?3 AND modified_millis = ?4",
+                 WHERE provider_id = ?1 AND path = ?2 AND size = ?3 AND modified_nanos = ?4",
                 params![
                     provider_id,
                     path.to_string_lossy(),
                     size as i64,
-                    modified_millis
+                    modified_nanos
                 ],
                 |row| row.get(0),
             )
@@ -144,25 +155,32 @@ impl Storage {
         provider_id: &str,
         path: &Path,
         size: u64,
-        modified_millis: i64,
+        modified_nanos: i64,
         events_json: &str,
     ) -> Result<(), StorageError> {
         let connection = self.connection()?;
         connection.execute(
-            "INSERT INTO log_file_cache(path, size, modified_millis, events_json, provider_id)
+            "INSERT INTO log_file_cache(path, size, modified_nanos, events_json, provider_id)
              VALUES (?1, ?2, ?3, ?4, ?5)
-             ON CONFLICT(path) DO UPDATE SET
+             ON CONFLICT(provider_id, path) DO UPDATE SET
                size = excluded.size,
-               modified_millis = excluded.modified_millis,
-               events_json = excluded.events_json,
-               provider_id = excluded.provider_id",
+               modified_nanos = excluded.modified_nanos,
+               events_json = excluded.events_json",
             params![
                 path.to_string_lossy(),
                 size as i64,
-                modified_millis,
+                modified_nanos,
                 events_json,
                 provider_id
             ],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_log_events(&self, provider_id: &str, path: &Path) -> Result<(), StorageError> {
+        self.connection()?.execute(
+            "DELETE FROM log_file_cache WHERE provider_id = ?1 AND path = ?2",
+            params![provider_id, path.to_string_lossy()],
         )?;
         Ok(())
     }
@@ -258,6 +276,7 @@ mod tests {
     use std::{collections::HashSet, path::PathBuf};
 
     use chrono::Utc;
+    use rusqlite::Connection;
     use tempfile::tempdir;
 
     use super::Storage;
@@ -278,12 +297,14 @@ mod tests {
                 today: Some(UsagePeriod {
                     tokens: 42,
                     estimated_cost_usd: Some(0.12),
+                    cost_estimated: true,
                     estimate_complete: true,
                     model_breakdown: Some(ModelUsageBreakdown {
                         models: vec![ModelUsageEntry {
                             model: "gpt-5.4".into(),
                             total_tokens: 42,
                             cost_usd: Some(0.12),
+                            variants: None,
                         }],
                         source_note: "From your Codex logs (estimated)".into(),
                     }),
@@ -361,5 +382,58 @@ mod tests {
                 .unwrap(),
             Some("[]".to_owned())
         );
+    }
+
+    #[test]
+    fn providers_can_cache_the_same_path_independently() {
+        let directory = tempdir().unwrap();
+        let storage = Storage::open(&directory.path().join("openquota.db")).unwrap();
+        let shared = PathBuf::from("/synced/session.jsonl");
+        storage
+            .save_log_events("claude", &shared, 10, 20, "claude")
+            .unwrap();
+        storage
+            .save_log_events("codex", &shared, 10, 20, "codex")
+            .unwrap();
+
+        assert_eq!(
+            storage.load_log_events("claude", &shared, 10, 20).unwrap(),
+            Some("claude".to_owned())
+        );
+        assert_eq!(
+            storage.load_log_events("codex", &shared, 10, 20).unwrap(),
+            Some("codex".to_owned())
+        );
+    }
+
+    #[test]
+    fn legacy_millisecond_log_cache_is_safely_rebuilt() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("openquota.db");
+        let legacy = Connection::open(&path).unwrap();
+        legacy
+            .execute_batch(
+                "CREATE TABLE log_file_cache (
+                   path TEXT PRIMARY KEY,
+                   size INTEGER NOT NULL,
+                   modified_millis INTEGER NOT NULL,
+                   events_json TEXT NOT NULL,
+                   provider_id TEXT NOT NULL DEFAULT ''
+                 );
+                 INSERT INTO log_file_cache VALUES ('old.jsonl', 10, 20, '[]', 'codex');",
+            )
+            .unwrap();
+        drop(legacy);
+
+        let storage = Storage::open(&path).unwrap();
+        assert_eq!(
+            storage
+                .load_log_events("codex", PathBuf::from("old.jsonl").as_path(), 10, 20)
+                .unwrap(),
+            None
+        );
+        storage
+            .save_log_events("codex", PathBuf::from("new.jsonl").as_path(), 10, 20, "[]")
+            .unwrap();
     }
 }

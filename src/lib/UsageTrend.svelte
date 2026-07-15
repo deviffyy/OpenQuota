@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import { SvelteDate } from 'svelte/reactivity';
+  import { formatMetricNumber } from './metricFormat';
   import type { DailyUsage } from './types';
 
   interface Props {
@@ -38,9 +39,7 @@
   }
 
   function compact(value: number) {
-    return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(
-      value,
-    );
+    return formatMetricNumber(value, 'count', 'row');
   }
 
   function dayLabel(value: string) {

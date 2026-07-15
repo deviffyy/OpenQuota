@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import Icon from './Icon.svelte';
+  import { formatSpendValue, totalSpendRingCenter } from './metricFormat';
   import SelectMenu from './SelectMenu.svelte';
   import { providerDisplayName } from './metrics';
   import { TOTAL_SPEND_GEOMETRY } from './shareCard';
@@ -30,38 +31,21 @@
     if (shareTimer) clearTimeout(shareTimer);
   });
 
-  function compact(value: number) {
-    return new Intl.NumberFormat('en-US', {
-      notation: 'compact',
-      maximumFractionDigits: 1,
-    }).format(value);
-  }
   function display(value: number | null) {
     if (value === null) return '—';
-    if (settings.totalSpendMetric === 'tokens') return compact(value);
-    const dollars = `$${value >= 1000 ? compact(value) : value.toFixed(2)}`;
-    return settings.totalSpendMetric === 'costPerMillion' ? `${dollars}/MTok` : dollars;
+    return formatSpendValue(value, settings.totalSpendMetric);
   }
   function ringCenter(value: number | null) {
     if (value === null) return { primary: '—', unit: '' };
-    if (settings.totalSpendMetric === 'cost') {
-      return {
-        primary: value >= 1000 ? `$${compact(value)}` : `$${value.toFixed(0)}`,
-        unit: 'dollars',
-      };
+    return totalSpendRingCenter(value, settings.totalSpendMetric);
+  }
+  function centerTooltip(value: number | null) {
+    if (value === null) return undefined;
+    const exact = formatSpendValue(value, settings.totalSpendMetric, 'full');
+    if (projection.costEstimated && settings.totalSpendMetric !== 'tokens') {
+      return `${exact} · Estimated locally, so it may be off`;
     }
-    if (settings.totalSpendMetric === 'costPerMillion') {
-      return {
-        primary: value >= 1000 ? `$${compact(value)}` : `$${value.toFixed(2)}`,
-        unit: 'MTok',
-      };
-    }
-    const magnitude = Math.abs(value);
-    if (magnitude >= 1_000_000_000)
-      return { primary: compact(value / 1_000_000_000), unit: 'billion' };
-    if (magnitude >= 1_000_000) return { primary: compact(value / 1_000_000), unit: 'million' };
-    if (magnitude >= 1_000) return { primary: compact(value / 1_000), unit: 'thousand' };
-    return { primary: compact(value), unit: 'tokens' };
+    return exact;
   }
   function metricTitle() {
     if (settings.totalSpendMetric === 'tokens') return 'Tokens';
@@ -150,7 +134,7 @@
               />
             {/each}
           </svg>
-          <div class="spend-ring__label">
+          <div class="spend-ring__label" data-tooltip={centerTooltip(projection.centerValue)}>
             <strong>{ringCenter(projection.centerValue).primary}</strong><span
               >{ringCenter(projection.centerValue).unit}</span
             >

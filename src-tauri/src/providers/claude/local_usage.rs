@@ -1,8 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    path::PathBuf,
-    time::UNIX_EPOCH,
+    path::{Path, PathBuf},
 };
 
 use chrono::{DateTime, Days, Local, NaiveDate, Utc};
@@ -16,8 +15,11 @@ use crate::{
     storage::Storage,
 };
 
-use super::{auth::claude_home, ClaudeError};
-use crate::providers::daily_usage::DailyUsageAccumulator;
+use super::ClaudeError;
+use crate::providers::{
+    daily_usage::DailyUsageAccumulator,
+    log_usage::{load_or_parse_log, parse_log_timestamp},
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ClaudeTokenEvent {
@@ -38,13 +40,7 @@ pub struct ClaudeTokenEvent {
     pub cost_usd: Option<f64>,
 }
 
-const LOG_CACHE_SCHEMA_VERSION: u8 = 1;
-
-#[derive(Serialize, Deserialize)]
-struct CachedClaudeEvents {
-    schema_version: u8,
-    events: Vec<ClaudeTokenEvent>,
-}
+const LOG_CACHE_SCHEMA_VERSION: u8 = 2;
 
 impl ClaudeTokenEvent {
     fn total_tokens(&self) -> u64 {
@@ -66,39 +62,17 @@ pub fn scan_local_usage(
     let paths = discover_files();
     let mut seen_paths = HashSet::with_capacity(paths.len());
     for path in paths {
-        let Ok(metadata) = fs::metadata(&path) else {
-            continue;
-        };
         seen_paths.insert(path.clone());
-        let modified_millis = metadata
-            .modified()
-            .ok()
-            .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
-            .map(|value| value.as_millis() as i64)
-            .unwrap_or_default();
-        let cached = storage
-            .load_log_events("claude", &path, metadata.len(), modified_millis)
-            .map_err(|_| ClaudeError::LocalUsage)?;
-        let parsed = if let Some(parsed) = cached.as_deref().and_then(|json| {
-            serde_json::from_str::<CachedClaudeEvents>(json)
-                .ok()
-                .filter(|cache| cache.schema_version == LOG_CACHE_SCHEMA_VERSION)
-                .map(|cache| cache.events)
-        }) {
-            parsed
-        } else {
-            let parsed = fs::read_to_string(&path)
-                .map(|content| parse_jsonl(&content))
-                .unwrap_or_default();
-            let json = serde_json::to_string(&CachedClaudeEvents {
-                schema_version: LOG_CACHE_SCHEMA_VERSION,
-                events: parsed.clone(),
-            })
-            .map_err(|_| ClaudeError::LocalUsage)?;
-            storage
-                .save_log_events("claude", &path, metadata.len(), modified_millis, &json)
-                .map_err(|_| ClaudeError::LocalUsage)?;
-            parsed
+        let Some(parsed) = load_or_parse_log(
+            storage,
+            "claude",
+            &path,
+            LOG_CACHE_SCHEMA_VERSION,
+            parse_jsonl,
+        )
+        .map_err(|_| ClaudeError::LocalUsage)?
+        else {
+            continue;
         };
         events.extend(
             parsed
@@ -113,36 +87,155 @@ pub fn scan_local_usage(
 }
 
 fn discover_files() -> Vec<PathBuf> {
-    let projects = claude_home().join("projects");
-    if !projects.is_dir() {
-        return Vec::new();
-    }
-    WalkDir::new(projects)
-        .follow_links(false)
+    let home = home_directory();
+    let config = env_text("CLAUDE_CONFIG_DIR");
+    let xdg = env_text("XDG_CONFIG_HOME");
+    let mut paths = claude_roots(config.as_deref(), xdg.as_deref(), &home)
         .into_iter()
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry.file_type().is_file()
-                && entry.path().extension().and_then(|value| value.to_str()) == Some("jsonl")
+        .flat_map(|root| {
+            WalkDir::new(root.join("projects"))
+                .follow_links(false)
+                .into_iter()
+                .filter_map(Result::ok)
+                .filter(|entry| {
+                    entry.file_type().is_file()
+                        && entry.path().extension().and_then(|value| value.to_str())
+                            == Some("jsonl")
+                })
+                .map(|entry| entry.into_path())
         })
-        .map(|entry| entry.into_path())
-        .collect()
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn claude_roots(config: Option<&str>, xdg: Option<&str>, home: &Path) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    let mut seen = HashSet::new();
+    let mut add_if_valid = |root: PathBuf| {
+        if root.join("projects").is_dir() && seen.insert(root.clone()) {
+            roots.push(root);
+        }
+    };
+
+    if let Some(config) = config.map(str::trim).filter(|value| !value.is_empty()) {
+        for value in config
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            let mut root = expand_home(value, home);
+            if root.file_name().and_then(|name| name.to_str()) == Some("projects") && root.is_dir()
+            {
+                root.pop();
+            }
+            add_if_valid(root);
+        }
+    } else {
+        let xdg = xdg
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| expand_home(value, home))
+            .unwrap_or_else(|| home.join(".config"));
+        add_if_valid(xdg.join("claude"));
+        add_if_valid(home.join(".claude"));
+    }
+
+    for root in cowork_claude_roots(home) {
+        add_if_valid(root);
+    }
+    roots
+}
+
+fn cowork_claude_roots(home: &Path) -> Vec<PathBuf> {
+    let base = home.join("Library/Application Support/Claude/local-agent-mode-sessions");
+    let mut roots = Vec::new();
+    for group in child_directories(&base) {
+        for subgroup in child_directories(&group) {
+            let mut sessions = child_directories(&subgroup);
+            let nested_agent_sessions = sessions
+                .iter()
+                .filter(|path| path.file_name().and_then(|name| name.to_str()) == Some("agent"))
+                .flat_map(|agent| child_directories(agent))
+                .collect::<Vec<_>>();
+            sessions.extend(nested_agent_sessions);
+            roots.extend(sessions.into_iter().map(|session| session.join(".claude")));
+        }
+    }
+    roots.sort();
+    roots
+}
+
+fn child_directories(path: &Path) -> Vec<PathBuf> {
+    let mut directories = fs::read_dir(path)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .collect::<Vec<_>>();
+    directories.sort();
+    directories
+}
+
+fn env_text(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+}
+
+fn home_directory() -> PathBuf {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_default()
+}
+
+fn expand_home(value: &str, home: &Path) -> PathBuf {
+    if value == "~" {
+        return home.to_path_buf();
+    }
+    if let Some(rest) = value
+        .strip_prefix("~/")
+        .or_else(|| value.strip_prefix("~\\"))
+    {
+        return home.join(rest);
+    }
+    PathBuf::from(value)
 }
 
 pub fn parse_jsonl(content: &str) -> Vec<ClaudeTokenEvent> {
     content
         .lines()
-        .filter(|line| line.contains("\"usage\""))
+        .filter(|line| line.contains("\"usage\":{"))
+        .filter(|line| !has_unsupported_null_field(line))
         .filter_map(parse_line)
         .collect()
 }
 
 fn parse_line(line: &str) -> Option<ClaudeTokenEvent> {
     let object: Value = serde_json::from_str(line).ok()?;
-    let timestamp = DateTime::parse_from_rfc3339(object.get("timestamp")?.as_str()?)
-        .ok()?
-        .to_utc();
+    let timestamp = parse_log_timestamp(object.get("timestamp")?.as_str()?)?;
     let message = object.get("message")?;
+    if object
+        .get("version")
+        .and_then(Value::as_str)
+        .is_some_and(|version| !is_semver_prefix(version))
+        || [
+            object.get("sessionId"),
+            object.get("requestId"),
+            message.get("id"),
+            message.get("model"),
+        ]
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .any(str::is_empty)
+    {
+        return None;
+    }
     let usage = message.get("usage")?;
     let input = integer(usage.get("input_tokens"))?;
     let output = integer(usage.get("output_tokens"))?;
@@ -219,6 +312,11 @@ fn deduplicate(events: Vec<ClaudeTokenEvent>) -> Vec<ClaudeTokenEvent> {
                             && event.has_speed
                             && !existing.has_speed)));
             if replace {
+                if let Some(old) = output.get(index) {
+                    if let Some(old_message_id) = &old.message_id {
+                        exact.remove(&(old_message_id.clone(), old.request_id.clone()));
+                    }
+                }
                 output[index] = event;
                 exact.insert(key, index);
             }
@@ -281,21 +379,63 @@ fn aggregate(
 }
 
 fn integer(value: Option<&Value>) -> Option<u64> {
-    value?.as_u64().or_else(|| value?.as_str()?.parse().ok())
+    value?.as_u64()
 }
 
 fn number(value: &Value) -> Option<f64> {
-    value
-        .as_f64()
-        .or_else(|| value.as_str().and_then(|text| text.parse().ok()))
+    value.as_f64()
+}
+
+fn is_semver_prefix(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    for component in 0..3 {
+        let start = index;
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        if index == start {
+            return false;
+        }
+        if component < 2 {
+            if bytes.get(index) != Some(&b'.') {
+                return false;
+            }
+            index += 1;
+        }
+    }
+    true
+}
+
+fn has_unsupported_null_field(line: &str) -> bool {
+    const FIELDS: [&str; 11] = [
+        "id",
+        "cwd",
+        "model",
+        "speed",
+        "costUSD",
+        "version",
+        "sessionId",
+        "requestId",
+        "isApiErrorMessage",
+        "cache_read_input_tokens",
+        "cache_creation_input_tokens",
+    ];
+    FIELDS
+        .iter()
+        .any(|field| line.contains(&format!("\"{field}\":null")))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use chrono::{TimeZone, Utc};
+    use tempfile::tempdir;
 
     use super::{
-        aggregate, deduplicate, parse_jsonl, CachedClaudeEvents, LOG_CACHE_SCHEMA_VERSION,
+        aggregate, claude_roots, deduplicate, has_unsupported_null_field, is_semver_prefix,
+        parse_jsonl, parse_line, ClaudeTokenEvent,
     };
     use crate::pricing::test_bundled_pricing;
 
@@ -308,6 +448,113 @@ mod tests {
         assert_eq!(events[0].total_tokens(), 170);
         let history = aggregate(events, chrono::Utc::now(), &test_bundled_pricing());
         assert!(history.last_30_days.unwrap().estimated_cost_usd.is_some());
+    }
+
+    #[test]
+    fn parses_modern_cache_split_and_speed_fields() {
+        let line = r#"{"timestamp":"2026-02-20T12:00:00.000Z","sessionId":"s","requestId":"req_1","version":"1.0.24","isSidechain":true,"costUSD":0.5,"message":{"id":"msg_1","model":"claude-opus-4-6","usage":{"input_tokens":100,"output_tokens":50,"cache_read_input_tokens":30,"cache_creation":{"ephemeral_5m_input_tokens":20,"ephemeral_1h_input_tokens":10},"speed":"fast"}}}"#;
+        let event = parse_line(line).unwrap();
+        assert_eq!(event.input, 100);
+        assert_eq!(event.cache_write_5m, 20);
+        assert_eq!(event.cache_write_1h, 10);
+        assert_eq!(event.cache_read, 30);
+        assert_eq!(event.output, 50);
+        assert_eq!(event.message_id.as_deref(), Some("msg_1"));
+        assert_eq!(event.request_id.as_deref(), Some("req_1"));
+        assert!(event.sidechain);
+        assert!(event.is_fast);
+        assert!(event.has_speed);
+        assert_eq!(event.cost_usd, Some(0.5));
+    }
+
+    #[test]
+    fn parses_cross_device_timestamp_variants() {
+        let content = r#"{"timestamp":"2026-07-15 12:00:00.123456 UTC","message":{"model":"claude-opus-4-6","usage":{"input_tokens":10,"output_tokens":5}}}"#;
+        let event = parse_jsonl(content).pop().unwrap();
+        assert_eq!(
+            event.timestamp.to_rfc3339(),
+            "2026-07-15T12:00:00.123+00:00"
+        );
+    }
+
+    #[test]
+    fn rejects_foreign_empty_and_null_schema_fields() {
+        let missing_input =
+            r#"{"timestamp":"2026-02-20T12:00:00Z","message":{"usage":{"output_tokens":5}}}"#;
+        let invalid_version = r#"{"timestamp":"2026-02-20T12:00:00Z","version":"unknown","message":{"usage":{"input_tokens":1,"output_tokens":2}}}"#;
+        let empty_model = r#"{"timestamp":"2026-02-20T12:00:00Z","message":{"model":"","usage":{"input_tokens":1,"output_tokens":2}}}"#;
+        let null_speed = r#"{"timestamp":"2026-02-20T12:00:00Z","message":{"usage":{"input_tokens":1,"output_tokens":2,"speed":null}}}"#;
+        let string_tokens = r#"{"timestamp":"2026-02-20T12:00:00Z","message":{"usage":{"input_tokens":"1","output_tokens":2}}}"#;
+        for line in [missing_input, invalid_version, empty_model, string_tokens] {
+            assert!(parse_line(line).is_none(), "unexpectedly accepted: {line}");
+        }
+        assert!(parse_jsonl(null_speed).is_empty());
+        assert!(is_semver_prefix("1.0.24-beta.1"));
+        assert!(!is_semver_prefix("1.0"));
+        assert!(!has_unsupported_null_field(
+            r#"{"message":{"content":null}}"#
+        ));
+        assert!(!has_unsupported_null_field(
+            r#"{"message":{"usage":{"speed": null}}}"#
+        ));
+    }
+
+    #[test]
+    fn parent_replacement_removes_the_stale_dedup_key() {
+        fn event(request_id: &str, sidechain: bool, cache_read: u64) -> ClaudeTokenEvent {
+            ClaudeTokenEvent {
+                timestamp: Utc.with_ymd_and_hms(2026, 2, 20, 12, 0, 0).unwrap(),
+                model: Some("claude-opus-4-6".into()),
+                input: 0,
+                cache_write_5m: 0,
+                cache_write_1h: 0,
+                cache_read,
+                output: 10,
+                message_id: Some("msg-parent".into()),
+                request_id: Some(request_id.into()),
+                sidechain,
+                is_fast: false,
+                has_speed: false,
+                cost_usd: None,
+            }
+        }
+        let events = deduplicate(vec![
+            event("req-sidechain", true, 50_000),
+            event("req-parent", false, 20),
+            event("req-sidechain", false, 5),
+        ]);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].request_id.as_deref(), Some("req-parent"));
+        assert_eq!(events[0].cache_read, 20);
+    }
+
+    #[test]
+    fn discovers_default_xdg_and_cowork_roots() {
+        let directory = tempdir().unwrap();
+        let home = directory.path();
+        let xdg = home.join(".config/claude");
+        let standard = home.join(".claude");
+        let cowork = home.join(
+            "Library/Application Support/Claude/local-agent-mode-sessions/group/sub/local_1/.claude",
+        );
+        for root in [&xdg, &standard, &cowork] {
+            fs::create_dir_all(root.join("projects")).unwrap();
+        }
+        let roots = claude_roots(None, None, home);
+        assert_eq!(roots, vec![xdg, standard, cowork]);
+    }
+
+    #[test]
+    fn discovers_each_config_root_and_accepts_a_projects_alias() {
+        let directory = tempdir().unwrap();
+        let home = directory.path().join("home");
+        let first = directory.path().join("first");
+        let second = directory.path().join("second");
+        fs::create_dir_all(first.join("projects")).unwrap();
+        fs::create_dir_all(second.join("projects")).unwrap();
+        let config = format!("{}, {}", first.display(), second.join("projects").display());
+        let roots = claude_roots(Some(&config), None, &home);
+        assert_eq!(roots, vec![first, second]);
     }
 
     #[test]
@@ -340,23 +587,5 @@ mod tests {
         let event = parse_jsonl(content).pop().unwrap();
         assert!(event.is_fast);
         assert!(event.has_speed);
-    }
-
-    #[test]
-    fn old_log_cache_shape_is_rejected_after_speed_support() {
-        let events = parse_jsonl(
-            r#"{"timestamp":"2026-07-15T08:00:00Z","message":{"model":"claude-opus-4-6","usage":{"input_tokens":100,"output_tokens":10,"speed":"fast"}}}"#,
-        );
-        let old_cache = serde_json::to_string(&events).unwrap();
-        assert!(serde_json::from_str::<CachedClaudeEvents>(&old_cache).is_err());
-
-        let current = serde_json::to_string(&CachedClaudeEvents {
-            schema_version: LOG_CACHE_SCHEMA_VERSION,
-            events,
-        })
-        .unwrap();
-        let decoded = serde_json::from_str::<CachedClaudeEvents>(&current).unwrap();
-        assert_eq!(decoded.schema_version, LOG_CACHE_SCHEMA_VERSION);
-        assert!(decoded.events[0].is_fast);
     }
 }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import Icon from './Icon.svelte';
+  import { formatMetricNumber, formatMetricValue } from './metricFormat';
   import ModelUsageDetail from './ModelUsageDetail.svelte';
   import type { UsagePeriod } from './types';
 
@@ -14,16 +15,29 @@
   let showTimer: ReturnType<typeof setTimeout> | undefined;
   let hideTimer: ReturnType<typeof setTimeout> | undefined;
 
-  function compact(value: number) {
-    return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(
-      value,
-    );
-  }
   function reading(value: UsagePeriod | null) {
     if (!value) return 'No data';
-    const tokens = `${compact(value.tokens)} tokens`;
+    const tokens = formatMetricValue(value.tokens, 'count', 'row', 'tokens');
     if (value.estimatedCostUsd === null) return tokens;
-    return `${value.estimateComplete ? '' : '~'}$${value.estimatedCostUsd.toFixed(2)} · ${tokens}`;
+    return `${formatMetricNumber(value.estimatedCostUsd, 'dollars', 'row')} · ${tokens}`;
+  }
+  function valueTooltip(value: UsagePeriod | null) {
+    if (!value) return undefined;
+    if (value.modelBreakdown?.models.length) return undefined;
+    const note =
+      value.estimatedCostUsd !== null && value.costEstimated
+        ? 'Estimated locally, so it may be off'
+        : undefined;
+    const abbreviated =
+      Math.abs(value.tokens) >= 1000 || Math.abs(value.estimatedCostUsd ?? 0) >= 1000;
+    if (!abbreviated && !note) return undefined;
+    const figures = [
+      value.estimatedCostUsd === null
+        ? undefined
+        : formatMetricNumber(value.estimatedCostUsd, 'dollars', 'full'),
+      formatMetricValue(value.tokens, 'count', 'full', 'tokens'),
+    ].filter(Boolean);
+    return [...figures, note].filter(Boolean).join('\n');
   }
   function unknownModelTooltip(models: string[]) {
     const heading = models.length === 1 ? 'Unknown model found' : 'Unknown models found';
@@ -72,6 +86,7 @@
   <button
     type="button"
     class:usage-reading-interactive={period?.modelBreakdown?.models.length}
+    data-tooltip={valueTooltip(period)}
     disabled={!period?.modelBreakdown?.models.length}
     onmouseenter={scheduleShow}
     onmouseleave={scheduleHide}

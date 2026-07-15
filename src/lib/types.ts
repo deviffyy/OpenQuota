@@ -12,12 +12,20 @@ export interface QuotaWindow {
 export interface UsagePeriod {
   tokens: number;
   estimatedCostUsd: number | null;
+  costEstimated: boolean;
   estimateComplete: boolean;
   modelBreakdown?: ModelUsageBreakdown | null;
   unknownModels?: string[];
 }
 
 export interface ModelUsageEntry {
+  model: string;
+  totalTokens: number;
+  costUsd: number | null;
+  variants?: ModelUsageVariant[] | null;
+}
+
+export interface ModelUsageVariant {
   model: string;
   totalTokens: number;
   costUsd: number | null;

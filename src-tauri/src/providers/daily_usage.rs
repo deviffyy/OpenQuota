@@ -1,8 +1,13 @@
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::{
+    cmp::Ordering,
+    collections::{BTreeMap, HashMap, HashSet},
+};
 
 use chrono::{DateTime, Days, Local, NaiveDate, Utc};
 
-use crate::models::{DailyUsage, ModelUsageBreakdown, ModelUsageEntry, UsageHistory, UsagePeriod};
+use crate::models::{
+    DailyUsage, ModelUsageBreakdown, ModelUsageEntry, ModelUsageVariant, UsageHistory, UsagePeriod,
+};
 
 /// Provider-neutral accumulator for priced local-log usage. Claude and Codex keep their own parsing
 /// and cost rules, then feed only priced events into this type. Unknown models are tracked beside the
@@ -49,8 +54,8 @@ impl ModelAccumulator {
                 right_weight
                     .cmp(left_weight)
                     .then_with(|| {
-                        let left_lower = *left_name == &left_name.to_ascii_lowercase();
-                        let right_lower = *right_name == &right_name.to_ascii_lowercase();
+                        let left_lower = *left_name == &left_name.to_lowercase();
+                        let right_lower = *right_name == &right_name.to_lowercase();
                         right_lower.cmp(&left_lower)
                     })
                     .then_with(|| left_name.cmp(right_name))
@@ -67,7 +72,7 @@ impl DailyUsageAccumulator {
         day.tokens = day.tokens.saturating_add(tokens);
         day.cost += cost;
         day.models
-            .entry(model.to_ascii_lowercase())
+            .entry(model.to_lowercase())
             .or_default()
             .add(model, tokens, cost);
     }
@@ -160,6 +165,7 @@ impl DailyUsageAccumulator {
         Some(UsagePeriod {
             tokens: total.tokens,
             estimated_cost_usd: Some(total.cost),
+            cost_estimated: true,
             estimate_complete: unknown_models.is_empty(),
             model_breakdown: model_breakdown(&total, source_note),
             unknown_models,
@@ -189,6 +195,7 @@ fn model_breakdown(day: &DayAccumulator, source_note: &str) -> Option<ModelUsage
             model: model.display_name(),
             total_tokens: model.tokens,
             cost_usd: Some(round_to_cents(model.cost)),
+            variants: None,
         })
         .collect::<Vec<_>>();
     entries.sort_by(|left, right| {
@@ -197,7 +204,7 @@ fn model_breakdown(day: &DayAccumulator, source_note: &str) -> Option<ModelUsage
             .partial_cmp(&left.cost_usd)
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| right.total_tokens.cmp(&left.total_tokens))
-            .then_with(|| left.model.cmp(&right.model))
+            .then_with(|| natural_model_cmp(&left.model, &right.model))
     });
     if entries.is_empty() {
         return None;
@@ -211,6 +218,7 @@ fn model_breakdown(day: &DayAccumulator, source_note: &str) -> Option<ModelUsage
     let mut visible = Vec::new();
     let mut other_tokens = 0_u64;
     let mut other_cost = 0.0;
+    let mut other_variants = Vec::new();
     let mut named_count = 0;
     for entry in entries {
         let share = if total_cost > 0.0 {
@@ -220,26 +228,102 @@ fn model_breakdown(day: &DayAccumulator, source_note: &str) -> Option<ModelUsage
         } else {
             0.0
         };
-        let unattributed = entry.model.eq_ignore_ascii_case("Unattributed");
+        let unattributed = entry.model.to_lowercase() == "unattributed";
         if unattributed || share < 0.05 || named_count >= 5 {
             other_tokens = other_tokens.saturating_add(entry.total_tokens);
             other_cost += entry.cost_usd.unwrap_or_default();
+            other_variants.push(ModelUsageVariant {
+                model: entry.model,
+                total_tokens: entry.total_tokens,
+                cost_usd: entry.cost_usd,
+            });
         } else {
             visible.push(entry);
             named_count += 1;
         }
     }
     if other_tokens > 0 || other_cost > 0.0 {
+        other_variants.sort_by(variant_sort);
         visible.push(ModelUsageEntry {
             model: "Other".to_owned(),
             total_tokens: other_tokens,
             cost_usd: Some(round_to_cents(other_cost)),
+            variants: Some(other_variants),
         });
     }
     Some(ModelUsageBreakdown {
         models: visible,
         source_note: source_note.to_owned(),
     })
+}
+
+fn variant_sort(left: &ModelUsageVariant, right: &ModelUsageVariant) -> Ordering {
+    right
+        .cost_usd
+        .partial_cmp(&left.cost_usd)
+        .unwrap_or(Ordering::Equal)
+        .then_with(|| right.total_tokens.cmp(&left.total_tokens))
+        .then_with(|| natural_model_cmp(&left.model, &right.model))
+}
+
+fn natural_model_cmp(left: &str, right: &str) -> Ordering {
+    let left_folded = left.to_lowercase();
+    let right_folded = right.to_lowercase();
+    let mut left_chars = left_folded.chars().peekable();
+    let mut right_chars = right_folded.chars().peekable();
+
+    loop {
+        match (left_chars.peek().copied(), right_chars.peek().copied()) {
+            (Some(left_char), Some(right_char))
+                if left_char.is_ascii_digit() && right_char.is_ascii_digit() =>
+            {
+                let left_digits = take_ascii_digits(&mut left_chars);
+                let right_digits = take_ascii_digits(&mut right_chars);
+                let left_significant = left_digits.trim_start_matches('0');
+                let right_significant = right_digits.trim_start_matches('0');
+                let left_significant = if left_significant.is_empty() {
+                    "0"
+                } else {
+                    left_significant
+                };
+                let right_significant = if right_significant.is_empty() {
+                    "0"
+                } else {
+                    right_significant
+                };
+                let ordering = left_significant
+                    .len()
+                    .cmp(&right_significant.len())
+                    .then_with(|| left_significant.cmp(right_significant))
+                    .then_with(|| left_digits.len().cmp(&right_digits.len()));
+                if ordering != Ordering::Equal {
+                    return ordering;
+                }
+            }
+            (Some(left_char), Some(right_char)) => {
+                left_chars.next();
+                right_chars.next();
+                let ordering = left_char.cmp(&right_char);
+                if ordering != Ordering::Equal {
+                    return ordering;
+                }
+            }
+            (None, None) => return left.cmp(right),
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+        }
+    }
+}
+
+fn take_ascii_digits<I>(chars: &mut std::iter::Peekable<I>) -> String
+where
+    I: Iterator<Item = char>,
+{
+    let mut digits = String::new();
+    while chars.peek().is_some_and(char::is_ascii_digit) {
+        digits.push(chars.next().expect("peeked digit must exist"));
+    }
+    digits
 }
 
 fn round_to_cents(value: f64) -> f64 {
@@ -277,6 +361,7 @@ mod tests {
         accumulator.add_unknown_model(day(2026, 6, 25), "mystery");
         let history = accumulator.build(now, "From test logs");
         assert!(history.today.as_ref().unwrap().estimate_complete);
+        assert!(history.today.as_ref().unwrap().cost_estimated);
         assert!(!history.yesterday.as_ref().unwrap().estimate_complete);
         assert_eq!(
             history.yesterday.as_ref().unwrap().unknown_models,
@@ -321,6 +406,10 @@ mod tests {
             ["big", "mid", "Other"]
         );
         assert_eq!(models.last().unwrap().total_tokens, 430);
+        assert_eq!(
+            models.last().unwrap().variants.as_ref().unwrap()[0].model,
+            "Unattributed"
+        );
     }
 
     #[test]
@@ -334,5 +423,66 @@ mod tests {
         let models = history.today.unwrap().model_breakdown.unwrap().models;
         assert_eq!(models[0].model, "glm-5.2");
         assert_eq!(models[0].total_tokens, 400);
+        assert!(models[0].variants.is_none());
+    }
+
+    #[test]
+    fn unicode_case_variants_collapse_into_one_model() {
+        let now = Utc.with_ymd_and_hms(2026, 6, 26, 12, 0, 0).unwrap();
+        let date = day(2026, 6, 26);
+        let mut accumulator = DailyUsageAccumulator::default();
+        accumulator.add(date, 100, 1.0, "MÖDEL-2");
+        accumulator.add(date, 300, 3.0, "mödel-2");
+        let models = accumulator
+            .build(now, "From test logs")
+            .today
+            .unwrap()
+            .model_breakdown
+            .unwrap()
+            .models;
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].model, "mödel-2");
+        assert_eq!(models[0].total_tokens, 400);
+    }
+
+    #[test]
+    fn tied_model_names_use_natural_numeric_order() {
+        let now = Utc.with_ymd_and_hms(2026, 6, 26, 12, 0, 0).unwrap();
+        let date = day(2026, 6, 26);
+        let mut accumulator = DailyUsageAccumulator::default();
+        accumulator.add(date, 100, 1.0, "model-10");
+        accumulator.add(date, 100, 1.0, "model-2");
+        let models = accumulator
+            .build(now, "From test logs")
+            .today
+            .unwrap()
+            .model_breakdown
+            .unwrap()
+            .models;
+        assert_eq!(models[0].model, "model-2");
+        assert_eq!(models[1].model, "model-10");
+    }
+
+    #[test]
+    fn an_exact_five_percent_model_remains_visible() {
+        let now = Utc.with_ymd_and_hms(2026, 6, 26, 12, 0, 0).unwrap();
+        let date = day(2026, 6, 26);
+        let mut accumulator = DailyUsageAccumulator::default();
+        accumulator.add(date, 950, 95.0, "large");
+        accumulator.add(date, 50, 5.0, "edge");
+        let models = accumulator
+            .build(now, "From test logs")
+            .today
+            .unwrap()
+            .model_breakdown
+            .unwrap()
+            .models;
+        assert_eq!(
+            models
+                .iter()
+                .map(|entry| entry.model.as_str())
+                .collect::<Vec<_>>(),
+            ["large", "edge"]
+        );
     }
 }
