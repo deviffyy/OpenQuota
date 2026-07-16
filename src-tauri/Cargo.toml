@@ -41,6 +41,7 @@ walkdir = "2"
 tauri-plugin-single-instance = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+fontdue = { version = "0.9.3", default-features = false, features = ["std"] }
 security-framework = "3.7"
 
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -49,3 +50,6 @@ windows-sys = { version = "0.61", features = ["Win32_Security_Credentials", "Win
 [target.'cfg(target_os = "linux")'.dependencies]
 secret-service = { version = "5.1", default-features = false, features = ["rt-async-io-crypto-rust"] }
 zbus = "5.13"
+
+[dev-dependencies]
+fontdue = { version = "0.9.3", default-features = false, features = ["std"] }

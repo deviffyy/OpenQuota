@@ -435,7 +435,7 @@ fn normalize_metrics(metrics: &mut Vec<MetricLayout>, definitions: &[MetricDefin
             .iter()
             .find(|definition| definition.id == metric.id)
             .is_some_and(|definition| definition.pinnable);
-        metric.pinned &= metric.enabled && pinnable && pin_count < MAX_PINS_PER_PROVIDER;
+        metric.pinned &= pinnable && pin_count < MAX_PINS_PER_PROVIDER;
         if metric.pinned {
             pin_count += 1;
         }
@@ -700,6 +700,39 @@ mod tests {
             .iter()
             .find(|metric| metric.id.ends_with(".trend"))
             .is_none_or(|metric| !metric.pinned));
+    }
+
+    #[test]
+    fn normalization_preserves_valid_pins_for_dashboard_hidden_metrics() {
+        let detected = HashSet::from(["codex".to_owned()]);
+        let catalog = catalog();
+        let mut settings = default_settings(&catalog, &detected);
+        let codex = settings
+            .providers
+            .iter_mut()
+            .find(|provider| provider.id == "codex")
+            .unwrap();
+        let pinned = codex
+            .metrics
+            .iter_mut()
+            .find(|metric| metric.pinned)
+            .unwrap();
+        pinned.enabled = false;
+        let pinned_id = pinned.id.clone();
+
+        normalize(&catalog, &mut settings, &detected);
+
+        let pinned = settings
+            .providers
+            .iter()
+            .find(|provider| provider.id == "codex")
+            .unwrap()
+            .metrics
+            .iter()
+            .find(|metric| metric.id == pinned_id)
+            .unwrap();
+        assert!(!pinned.enabled);
+        assert!(pinned.pinned);
     }
 
     #[test]

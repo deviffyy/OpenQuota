@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onDestroy } from 'svelte';
   import { flip } from 'svelte/animate';
   import type { ProviderCatalogIndex } from './metrics';
   import type { AppSettings, MetricLayout, MetricSection, ProviderLayout } from './types';
@@ -29,6 +30,9 @@
   let message = $state('');
   let messageKind = $state<'success' | 'denied'>('success');
   let messageTimer: ReturnType<typeof setTimeout> | undefined;
+  onDestroy(() => {
+    if (messageTimer) clearTimeout(messageTimer);
+  });
   const provider = $derived(settings.providers.find((item) => item.id === providerId));
 
   function updateProvider(next: ProviderLayout) {
@@ -44,20 +48,34 @@
       metrics: provider.metrics.map((item) => (item.id === metric.id ? metric : item)),
     });
   }
-  function togglePin(metric: MetricLayout) {
+  function togglePin(metric: MetricLayout, button: HTMLButtonElement) {
     if (!provider || !metricDefinition(metric.id)?.pinnable) return;
     if (!metric.pinned && provider.metrics.filter((item) => item.pinned).length >= 2) {
       showMessage('Up to 2 stars per provider', 'denied');
+      if (!reducedMotion) {
+        button.animate?.(
+          [
+            { transform: 'translateX(0)' },
+            { transform: 'translateX(5px)' },
+            { transform: 'translateX(-5px)' },
+            { transform: 'translateX(5px)' },
+            { transform: 'translateX(-5px)' },
+            { transform: 'translateX(5px)' },
+            { transform: 'translateX(0)' },
+          ],
+          { duration: 400, delay: 100 },
+        );
+      }
       return;
     }
     showMessage(metric.pinned ? 'Removed from menu bar' : 'Starred for menu bar', 'success');
-    updateMetric({ ...metric, enabled: true, pinned: !metric.pinned });
+    updateMetric({ ...metric, pinned: !metric.pinned });
   }
   function showMessage(text: string, kind: 'success' | 'denied') {
     message = text;
     messageKind = kind;
     if (messageTimer) clearTimeout(messageTimer);
-    messageTimer = setTimeout(() => (message = ''), 1800);
+    messageTimer = setTimeout(() => (message = ''), 2500);
   }
   function reorder(
     draggedId: string,
@@ -162,7 +180,7 @@
                     class="pin-button"
                     type="button"
                     aria-label={`${metric.pinned ? 'Unpin' : 'Pin'} ${metricDefinition(metric.id)?.label}`}
-                    onclick={() => togglePin(metric)}
+                    onclick={(event) => togglePin(metric, event.currentTarget)}
                     ><Icon
                       name={metric.pinned ? 'star-filled' : 'star'}
                       size={15}
@@ -179,7 +197,6 @@
                     updateMetric({
                       ...metric,
                       enabled: event.currentTarget.checked,
-                      pinned: event.currentTarget.checked ? metric.pinned : false,
                     })}
                 /><span></span></label
               >
@@ -233,7 +250,7 @@
     }
 
     .pin-button.pinned {
-      color: var(--warning);
+      color: var(--meter-fill);
     }
 
     .metric-section {
@@ -310,40 +327,11 @@
 
     .customization-pill.denied {
       color: var(--warning);
-      animation:
-        detail-in var(--motion-spring) both,
-        deny-shake 400ms linear 100ms both;
+      animation: detail-in var(--motion-spring) both;
     }
 
     .customization-pill.denied .symbol-icon {
       color: var(--warning);
-    }
-
-    @keyframes deny-shake {
-      0%,
-      100% {
-        transform: translateX(0);
-      }
-
-      17% {
-        transform: translateX(5px);
-      }
-
-      33% {
-        transform: translateX(-5px);
-      }
-
-      50% {
-        transform: translateX(5px);
-      }
-
-      67% {
-        transform: translateX(-5px);
-      }
-
-      83% {
-        transform: translateX(5px);
-      }
     }
   }
 </style>

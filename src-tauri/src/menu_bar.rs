@@ -1,3 +1,8 @@
+use std::sync::OnceLock;
+
+use fontdue::{Font, FontSettings};
+use roxmltree::Document;
+use svgtypes::{PathParser, PathSegment};
 use tauri::image::Image;
 use tiny_skia::{FillRule, Paint, Path, PathBuilder, Pixmap, Transform};
 
@@ -6,8 +11,328 @@ const ICON_POINTS: f32 = 18.0;
 const ICON_SCALE: f32 = ICON_SIZE as f32 / ICON_POINTS;
 pub const MAX_BARS: usize = 4;
 
+const TEXT_HEIGHT: u32 = 36;
+const OUTER_PADDING: f32 = 2.0;
+const GROUP_GAP: f32 = 22.0;
+const ICON_TEXT_GAP: f32 = 8.0;
+const PROVIDER_ICON_SIZE: f32 = 32.0;
+const PROVIDER_ICON_INSET: f32 = 1.0;
+const SINGLE_VALUE_SIZE: f32 = 23.0;
+const STACKED_VALUE_SIZE: f32 = 17.0;
+const STACKED_BASELINES: [f32; 2] = [15.0, 32.0];
+const FONT_SOURCE: &[u8] = include_bytes!("../assets/fonts/Poppins-SemiBold.ttf");
+
+const CLAUDE_ICON: &str = include_str!("../../src/assets/provider-icons/claude.svg");
+const CODEX_ICON: &str = include_str!("../../src/assets/provider-icons/codex.svg");
+const CURSOR_ICON: &str = include_str!("../../src/assets/provider-icons/cursor.svg");
+const ANTIGRAVITY_ICON: &str = include_str!("../../src/assets/provider-icons/antigravity.svg");
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextGroup {
+    pub provider_id: String,
+    pub values: Vec<String>,
+}
+
+pub fn text_icon(groups: &[TextGroup]) -> Option<Image<'static>> {
+    let strip = render_text_strip(groups)?;
+    Some(Image::new_owned(strip.rgba, strip.width, TEXT_HEIGHT))
+}
+
 pub fn bar_icon(fractions: &[f64]) -> Image<'static> {
     Image::new_owned(render_bar_rgba(fractions), ICON_SIZE, ICON_SIZE)
+}
+
+struct RenderedStrip {
+    rgba: Vec<u8>,
+    width: u32,
+}
+
+#[derive(Debug, Clone)]
+struct GroupLayout<'a> {
+    group: &'a TextGroup,
+    text_width: f32,
+    width: f32,
+}
+
+fn render_text_strip(groups: &[TextGroup]) -> Option<RenderedStrip> {
+    let groups = groups
+        .iter()
+        .filter(|group| !group.values.is_empty())
+        .map(|group| {
+            let text_width = group
+                .values
+                .iter()
+                .take(2)
+                .map(|value| {
+                    measure_text(
+                        value,
+                        if group.values.len() == 1 {
+                            SINGLE_VALUE_SIZE
+                        } else {
+                            STACKED_VALUE_SIZE
+                        },
+                    )
+                })
+                .fold(0.0_f32, f32::max)
+                .ceil();
+            GroupLayout {
+                group,
+                text_width,
+                width: PROVIDER_ICON_SIZE + ICON_TEXT_GAP + text_width,
+            }
+        })
+        .collect::<Vec<_>>();
+    if groups.is_empty() {
+        return None;
+    }
+
+    let content_width = groups.iter().map(|group| group.width).sum::<f32>()
+        + GROUP_GAP * groups.len().saturating_sub(1) as f32;
+    let width = (content_width + OUTER_PADDING * 2.0).ceil().max(1.0) as u32;
+    let mut pixmap = Pixmap::new(width, TEXT_HEIGHT).expect("menu bar strip dimensions are valid");
+    let mut x = OUTER_PADDING;
+
+    for layout in groups {
+        draw_provider_icon(&mut pixmap, &layout.group.provider_id, x);
+        let text_x = x + PROVIDER_ICON_SIZE + ICON_TEXT_GAP;
+        if layout.group.values.len() == 1 {
+            let value = &layout.group.values[0];
+            let baseline = centered_baseline(value, SINGLE_VALUE_SIZE, TEXT_HEIGHT as f32);
+            draw_text(&mut pixmap, value, SINGLE_VALUE_SIZE, text_x, baseline);
+        } else {
+            for (value, baseline) in layout.group.values.iter().take(2).zip(STACKED_BASELINES) {
+                let value_width = measure_text(value, STACKED_VALUE_SIZE);
+                draw_text(
+                    &mut pixmap,
+                    value,
+                    STACKED_VALUE_SIZE,
+                    text_x + layout.text_width - value_width,
+                    baseline,
+                );
+            }
+        }
+        x += layout.width + GROUP_GAP;
+    }
+
+    Some(RenderedStrip {
+        rgba: pixmap.take_demultiplied(),
+        width,
+    })
+}
+
+fn bundled_font() -> &'static Font {
+    static FONT: OnceLock<Font> = OnceLock::new();
+    FONT.get_or_init(|| {
+        Font::from_bytes(FONT_SOURCE, FontSettings::default())
+            .expect("bundled menu bar font must be valid")
+    })
+}
+
+fn centered_baseline(text: &str, size: f32, height: f32) -> f32 {
+    let font = bundled_font();
+    let mut top = f32::MAX;
+    let mut bottom = f32::MIN;
+    for character in text.chars() {
+        let metrics = font.metrics(character, size);
+        top = top.min(-(metrics.height as f32 + metrics.ymin as f32));
+        bottom = bottom.max(-(metrics.ymin as f32));
+    }
+    if top == f32::MAX {
+        return height / 2.0;
+    }
+    (height - (bottom - top)) / 2.0 - top
+}
+
+fn measure_text(text: &str, size: f32) -> f32 {
+    let font = bundled_font();
+    let mut width = 0.0;
+    let mut previous = None;
+    for character in text.chars() {
+        if let Some(previous) = previous {
+            width += font
+                .horizontal_kern(previous, character, size)
+                .unwrap_or(0.0);
+        }
+        width += font.metrics(character, size).advance_width;
+        previous = Some(character);
+    }
+    width.max(0.0)
+}
+
+fn draw_text(pixmap: &mut Pixmap, text: &str, size: f32, x: f32, baseline: f32) {
+    let font = bundled_font();
+    let mut pen_x = x;
+    let mut previous = None;
+    for character in text.chars() {
+        if let Some(previous) = previous {
+            pen_x += font
+                .horizontal_kern(previous, character, size)
+                .unwrap_or(0.0);
+        }
+        let (metrics, bitmap) = font.rasterize(character, size);
+        let glyph_x = (pen_x + metrics.xmin as f32).round() as i32;
+        let glyph_y = (baseline - metrics.height as f32 - metrics.ymin as f32).round() as i32;
+        blend_alpha_mask(
+            pixmap,
+            &bitmap,
+            metrics.width,
+            metrics.height,
+            glyph_x,
+            glyph_y,
+        );
+        pen_x += metrics.advance_width;
+        previous = Some(character);
+    }
+}
+
+fn blend_alpha_mask(
+    pixmap: &mut Pixmap,
+    mask: &[u8],
+    mask_width: usize,
+    mask_height: usize,
+    target_x: i32,
+    target_y: i32,
+) {
+    let width = pixmap.width() as i32;
+    let height = pixmap.height() as i32;
+    let pixels = pixmap.data_mut();
+    for source_y in 0..mask_height {
+        let y = target_y + source_y as i32;
+        if !(0..height).contains(&y) {
+            continue;
+        }
+        for source_x in 0..mask_width {
+            let x = target_x + source_x as i32;
+            if !(0..width).contains(&x) {
+                continue;
+            }
+            let alpha = mask[source_y * mask_width + source_x];
+            let target = ((y * width + x) * 4) as usize;
+            pixels[target + 3] = pixels[target + 3].max(alpha);
+        }
+    }
+}
+
+fn draw_provider_icon(pixmap: &mut Pixmap, provider_id: &str, x: f32) {
+    let mut paint = Paint::default();
+    paint.set_color_rgba8(0, 0, 0, 255);
+    paint.anti_alias = true;
+    let icon_top = (TEXT_HEIGHT as f32 - PROVIDER_ICON_SIZE) / 2.0;
+
+    if let Some(path) = provider_path(provider_id) {
+        let bounds = path.bounds();
+        let target = PROVIDER_ICON_SIZE - PROVIDER_ICON_INSET * 2.0;
+        let scale = (target / bounds.width()).min(target / bounds.height());
+        let tx = x + PROVIDER_ICON_INSET + (target - bounds.width() * scale) / 2.0
+            - bounds.left() * scale;
+        let ty = icon_top + PROVIDER_ICON_INSET + (target - bounds.height() * scale) / 2.0
+            - bounds.top() * scale;
+        pixmap.fill_path(
+            path,
+            &paint,
+            FillRule::Winding,
+            Transform::from_row(scale, 0.0, 0.0, scale, tx, ty),
+            None,
+        );
+    } else {
+        let mut fallback = PathBuilder::new();
+        fallback.push_circle(
+            x + PROVIDER_ICON_SIZE / 2.0,
+            icon_top + PROVIDER_ICON_SIZE / 2.0,
+            (PROVIDER_ICON_SIZE - 2.0) / 2.0,
+        );
+        if let Some(path) = fallback.finish() {
+            pixmap.fill_path(
+                &path,
+                &paint,
+                FillRule::Winding,
+                Transform::identity(),
+                None,
+            );
+        }
+    }
+}
+
+fn provider_path(provider_id: &str) -> Option<&'static Path> {
+    fn parsed(source: &'static str, slot: &'static OnceLock<Path>) -> &'static Path {
+        slot.get_or_init(|| {
+            parse_svg_path(source)
+                .unwrap_or_else(|error| panic!("invalid bundled provider SVG: {error}"))
+        })
+    }
+
+    static CLAUDE: OnceLock<Path> = OnceLock::new();
+    static CODEX: OnceLock<Path> = OnceLock::new();
+    static CURSOR: OnceLock<Path> = OnceLock::new();
+    static ANTIGRAVITY: OnceLock<Path> = OnceLock::new();
+    match provider_id {
+        "claude" => Some(parsed(CLAUDE_ICON, &CLAUDE)),
+        "codex" => Some(parsed(CODEX_ICON, &CODEX)),
+        "cursor" => Some(parsed(CURSOR_ICON, &CURSOR)),
+        "antigravity" => Some(parsed(ANTIGRAVITY_ICON, &ANTIGRAVITY)),
+        _ => None,
+    }
+}
+
+fn parse_svg_path(source: &str) -> Result<Path, String> {
+    let document = Document::parse(source).map_err(|error| error.to_string())?;
+    let data = document
+        .descendants()
+        .find(|node| node.is_element() && node.tag_name().name() == "path")
+        .and_then(|node| node.attribute("d"))
+        .ok_or_else(|| "missing path data".to_owned())?;
+    let mut builder = PathBuilder::new();
+    let mut current = None;
+    let mut subpath_start = None;
+    for segment in PathParser::from(data) {
+        match segment.map_err(|error| error.to_string())? {
+            PathSegment::MoveTo { abs: true, x, y } => {
+                let point = (x as f32, y as f32);
+                builder.move_to(point.0, point.1);
+                current = Some(point);
+                subpath_start = Some(point);
+            }
+            PathSegment::LineTo { abs: true, x, y } => {
+                let point = (x as f32, y as f32);
+                builder.line_to(point.0, point.1);
+                current = Some(point);
+            }
+            PathSegment::HorizontalLineTo { abs: true, x } => {
+                let (_, y) =
+                    current.ok_or_else(|| "horizontal line has no current point".to_owned())?;
+                let point = (x as f32, y);
+                builder.line_to(point.0, point.1);
+                current = Some(point);
+            }
+            PathSegment::VerticalLineTo { abs: true, y } => {
+                let (x, _) =
+                    current.ok_or_else(|| "vertical line has no current point".to_owned())?;
+                let point = (x, y as f32);
+                builder.line_to(point.0, point.1);
+                current = Some(point);
+            }
+            PathSegment::CurveTo {
+                abs: true,
+                x1,
+                y1,
+                x2,
+                y2,
+                x,
+                y,
+            } => {
+                builder.cubic_to(
+                    x1 as f32, y1 as f32, x2 as f32, y2 as f32, x as f32, y as f32,
+                );
+                current = Some((x as f32, y as f32));
+            }
+            PathSegment::ClosePath { .. } => {
+                builder.close();
+                current = subpath_start;
+            }
+            _ => return Err("only absolute M, L, H, V, C and Z commands are supported".into()),
+        }
+    }
+    builder.finish().ok_or_else(|| "path is empty".into())
 }
 
 fn render_bar_rgba(fractions: &[f64]) -> Vec<u8> {
@@ -170,7 +495,64 @@ fn fill_rounded_bar(
 
 #[cfg(test)]
 mod tests {
-    use super::{bar_fill, bar_icon, render_bar_rgba, visual_bar_fraction, ICON_SIZE, MAX_BARS};
+    use super::{
+        bar_fill, bar_icon, provider_path, render_bar_rgba, render_text_strip, text_icon,
+        visual_bar_fraction, TextGroup, ICON_SIZE, MAX_BARS, TEXT_HEIGHT,
+    };
+
+    fn text_group(provider_id: &str, values: &[&str]) -> TextGroup {
+        TextGroup {
+            provider_id: provider_id.into(),
+            values: values.iter().map(|value| (*value).into()).collect(),
+        }
+    }
+
+    #[test]
+    fn bundled_provider_marks_and_font_render_into_a_retina_text_strip() {
+        for provider in ["claude", "codex", "cursor", "antigravity"] {
+            let path = provider_path(provider).expect("known provider mark should exist");
+            assert!(path.bounds().width() > 0.0);
+            assert!(path.bounds().height() > 0.0);
+        }
+
+        let strip = render_text_strip(&[
+            text_group("claude", &["100%", "36%"]),
+            text_group("codex", &["100%", "89%"]),
+            text_group("cursor", &["93%", "0%"]),
+        ])
+        .expect("provider values should produce a strip");
+        assert_eq!(strip.rgba.len(), (strip.width * TEXT_HEIGHT * 4) as usize);
+        assert!(strip.width > TEXT_HEIGHT * 3);
+        assert!(strip.rgba.chunks_exact(4).any(|pixel| pixel[3] == 255));
+        let icon = text_icon(&[text_group("codex", &["75%", "40%"])])
+            .expect("public text renderer should return an image");
+        assert_eq!(icon.height(), TEXT_HEIGHT);
+        assert!(icon.width() > TEXT_HEIGHT);
+    }
+
+    #[test]
+    fn text_strip_uses_natural_width_and_ignores_empty_groups() {
+        assert!(render_text_strip(&[]).is_none());
+        assert!(render_text_strip(&[text_group("codex", &[])]).is_none());
+
+        let one =
+            render_text_strip(&[text_group("codex", &["75%"])]).expect("one group should render");
+        let two = render_text_strip(&[
+            text_group("codex", &["75%"]),
+            text_group("claude", &["80%", "40%"]),
+        ])
+        .expect("two groups should render");
+        assert_eq!(one.rgba.len(), (one.width * TEXT_HEIGHT * 4) as usize);
+        assert!(two.width > one.width);
+    }
+
+    #[test]
+    fn unknown_providers_receive_a_visible_neutral_fallback_mark() {
+        assert!(provider_path("future-provider").is_none());
+        let strip = render_text_strip(&[text_group("future-provider", &["42%"])])
+            .expect("unknown provider should still render");
+        assert!(strip.rgba.chunks_exact(4).any(|pixel| pixel[3] == 255));
+    }
 
     #[test]
     fn renderer_preserves_empty_zero_and_full_states() {

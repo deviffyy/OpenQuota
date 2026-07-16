@@ -789,8 +789,7 @@
         class="danger"
         type="button"
         role="menuitem"
-        onclick={() =>
-          patchMetric(metricProvider.id, menuMetric.id, { enabled: false, pinned: false })}
+        onclick={() => patchMetric(metricProvider.id, menuMetric.id, { enabled: false })}
         ><Icon name="power" size={15} />Hide</button
       >
       {#if metricDefinition(menuMetric.id)?.pinnable}
@@ -802,7 +801,6 @@
           onclick={() =>
             patchMetric(metricProvider.id, menuMetric.id, {
               pinned: !menuMetric.pinned,
-              enabled: true,
             })}
           ><Icon name={menuMetric.pinned ? 'star-filled' : 'star'} size={15} />{menuMetric.pinned
             ? 'Unstar'

@@ -91,6 +91,64 @@ async function drag(
 }
 
 describe('pointer reorder integrations', () => {
+  it('keeps dashboard visibility and menu bar stars independent', async () => {
+    const onChange = vi.fn();
+    const independent = structuredClone(settings);
+    const metrics = independent.providers.find((provider) => provider.id === 'codex')!.metrics;
+    metrics.find((metric) => metric.id === 'codex.weekly')!.pinned = false;
+    const today = metrics.find((metric) => metric.id === 'codex.today')!;
+    today.enabled = false;
+
+    const { rerender } = render(CustomizeProviderDetail, {
+      settings: independent,
+      providerId: 'codex',
+      catalog: providerCatalogIndex,
+      onChange,
+      onReorderStart: vi.fn(),
+      onReorderEnd: vi.fn(),
+      reducedMotion: false,
+    });
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Pin Today' }));
+    const starred = onChange.mock.calls.at(-1)![0] as AppSettings;
+    const starredToday = starred.providers
+      .find((provider) => provider.id === 'codex')!
+      .metrics.find((metric) => metric.id === 'codex.today')!;
+    expect(starredToday).toMatchObject({ enabled: false, pinned: true });
+    expect(screen.getByRole('status')).toHaveTextContent('Starred for menu bar');
+
+    onChange.mockClear();
+    await rerender({ settings: starred });
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Show Session' }));
+    const hidden = onChange.mock.calls.at(-1)![0] as AppSettings;
+    const hiddenSession = hidden.providers
+      .find((provider) => provider.id === 'codex')!
+      .metrics.find((metric) => metric.id === 'codex.session')!;
+    expect(hiddenSession).toMatchObject({ enabled: false, pinned: true });
+  });
+
+  it('shakes the denied star control while preserving the two-star cap', async () => {
+    const onChange = vi.fn();
+    render(CustomizeProviderDetail, {
+      settings,
+      providerId: 'codex',
+      catalog: providerCatalogIndex,
+      onChange,
+      onReorderStart: vi.fn(),
+      onReorderEnd: vi.fn(),
+      reducedMotion: false,
+    });
+
+    const button = screen.getByRole('button', { name: 'Pin Today' });
+    const animate = vi.fn();
+    Object.defineProperty(button, 'animate', { configurable: true, value: animate });
+    await fireEvent.click(button);
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(animate).toHaveBeenCalledOnce();
+    expect(screen.getByRole('status')).toHaveTextContent('Up to 2 stars per provider');
+  });
+
   it('reorders enabled providers from the grip and keeps disabled providers at the tail', async () => {
     const onChange = vi.fn();
     const onReorderStart = vi.fn();

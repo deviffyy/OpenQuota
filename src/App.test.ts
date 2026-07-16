@@ -1,7 +1,12 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
-import type { ProviderViewState, SettingsViewState, UsageViewState } from './lib/types';
+import type {
+  AppSettings,
+  ProviderViewState,
+  SettingsViewState,
+  UsageViewState,
+} from './lib/types';
 import {
   antigravityState,
   claudeState,
@@ -941,6 +946,27 @@ describe('OpenQuota dashboard', () => {
     expect(screen.getByRole('menuitem', { name: 'Refresh Codex' })).toHaveFocus();
     await fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     expect(document.querySelector('.context-menu')).toBeNull();
+  });
+
+  it('hides a dashboard metric without removing its menu bar star', async () => {
+    render(App);
+    await screen.findByText('Plus');
+    await fireEvent.contextMenu(screen.getByRole('group', { name: 'Session options' }), {
+      clientX: 120,
+      clientY: 180,
+    });
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Hide' }));
+
+    await waitFor(() => {
+      const save = [...mocks.invoke.mock.calls]
+        .reverse()
+        .find((call: unknown[]) => call[0] === 'save_app_settings');
+      const settings = save?.[1]?.settings as AppSettings | undefined;
+      const session = settings?.providers
+        .find((provider) => provider.id === 'codex')
+        ?.metrics.find((metric) => metric.id === 'codex.session');
+      expect(session).toMatchObject({ enabled: false, pinned: true });
+    });
   });
 
   it('lets a dropdown consume Escape without navigating away from Settings', async () => {
