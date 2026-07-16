@@ -2,6 +2,7 @@ use std::sync::OnceLock;
 
 use roxmltree::Document;
 use svgtypes::{PathParser, PathSegment};
+#[cfg(not(target_os = "macos"))]
 use tauri::image::Image;
 use tiny_skia::{FillRule, Paint, Path, PathBuilder, Pixmap, Transform};
 
@@ -39,6 +40,7 @@ struct GaugePaths {
     q_tail: Path,
 }
 
+#[cfg(not(target_os = "macos"))]
 pub(crate) fn render_gauge(display_fraction: f64, remaining_fraction: f64) -> Image<'static> {
     Image::new_owned(
         render_rgba(display_fraction, remaining_fraction),
