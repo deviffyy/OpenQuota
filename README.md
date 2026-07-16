@@ -57,7 +57,8 @@ subscription quota endpoint.
   out-of-date indicators in a compact popup.
 - **Pinned metrics.** Pin up to two metrics per provider to the tray tooltip. On macOS, Text style
   groups live values by provider beside the monochrome OpenQuota mark; Bars style shows the first
-  four bounded metrics as compact horizontal meters. Both styles follow the global Used/Left mode.
+  four bounded metrics as compact horizontal meters. Tray values and gauges follow the global
+  Used/Left mode on every platform.
 - **Flexible quota display.** Show how much you have used or how much remains, with countdowns or
   exact reset times.
 - **Usage history.** See Today, Yesterday, and Last 30 Days token totals and estimated cost from

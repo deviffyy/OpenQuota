@@ -4,35 +4,25 @@ use roxmltree::Document;
 use svgtypes::{PathParser, PathSegment};
 #[cfg(not(target_os = "macos"))]
 use tauri::image::Image;
-use tiny_skia::{FillRule, Paint, Path, PathBuilder, Pixmap, Transform};
+use tiny_skia::{FillRule, Mask, Paint, Path, PathBuilder, Pixmap, Transform};
 
 const SOURCE: &str = include_str!("../../assets/openquota-tray.svg");
 const SOURCE_SIZE: f32 = 24.0;
 const ICON_SIZE: u32 = 32;
 const SEGMENT_COUNT: usize = 6;
+const SWEEP_CENTER: f32 = ICON_SIZE as f32 / 2.0;
+const SWEEP_RADIUS: f32 = ICON_SIZE as f32 * 1.5;
+const SWEEP_START_RADIANS: f32 = std::f32::consts::FRAC_PI_4;
+const SWEEP_STEPS: usize = 192;
 
 type Rgba = (u8, u8, u8, u8);
-
-#[derive(Clone, Copy)]
-struct Hsv {
-    hue: f64,
-    saturation: f64,
-    value: f64,
-}
 
 const TRACK_COLOR: Rgba = (142, 142, 147, 150);
 const HEALTHY_COLOR: Rgba = (22, 137, 239, 255);
 const CAUTION_COLOR: Rgba = (240, 195, 60, 255);
-const WARNING_COLOR: Rgba = (237, 129, 43, 255);
 const CRITICAL_COLOR: Rgba = (227, 72, 63, 255);
-
-const QUOTA_COLOR_STOPS: &[(f64, Rgba)] = &[
-    (0.0, CRITICAL_COLOR),
-    (0.2, WARNING_COLOR),
-    (0.45, CAUTION_COLOR),
-    (0.7, HEALTHY_COLOR),
-    (1.0, HEALTHY_COLOR),
-];
+const CRITICAL_THRESHOLD: f64 = 0.2;
+const HEALTHY_THRESHOLD: f64 = 0.6;
 
 struct GaugePaths {
     track: Vec<Path>,
@@ -57,14 +47,21 @@ fn render_rgba(display_fraction: f64, remaining_fraction: f64) -> Vec<u8> {
         ICON_SIZE as f32 / SOURCE_SIZE,
     );
 
+    let display_fraction = sanitized_fraction(display_fraction);
     let quota_color = quota_color(remaining_fraction);
     draw_paths(&mut pixmap, &paths.track, TRACK_COLOR, transform);
-    draw_paths(
-        &mut pixmap,
-        &paths.fill[..visible_segments(display_fraction)],
-        quota_color,
-        transform,
-    );
+    if display_fraction >= 1.0 {
+        draw_paths(&mut pixmap, &paths.fill, quota_color, transform);
+    } else if display_fraction > 0.0 {
+        let mask = sweep_mask(display_fraction);
+        draw_paths_masked(
+            &mut pixmap,
+            &paths.fill,
+            quota_color,
+            transform,
+            Some(&mask),
+        );
+    }
     draw_paths(
         &mut pixmap,
         std::slice::from_ref(&paths.q_tail),
@@ -76,98 +73,70 @@ fn render_rgba(display_fraction: f64, remaining_fraction: f64) -> Vec<u8> {
 }
 
 fn draw_paths(pixmap: &mut Pixmap, paths: &[Path], color: Rgba, transform: Transform) {
+    draw_paths_masked(pixmap, paths, color, transform, None);
+}
+
+fn draw_paths_masked(
+    pixmap: &mut Pixmap,
+    paths: &[Path],
+    color: Rgba,
+    transform: Transform,
+    mask: Option<&Mask>,
+) {
     let mut paint = Paint::default();
     paint.set_color_rgba8(color.0, color.1, color.2, color.3);
     paint.anti_alias = true;
     for path in paths {
-        pixmap.fill_path(path, &paint, FillRule::Winding, transform, None);
+        pixmap.fill_path(path, &paint, FillRule::Winding, transform, mask);
     }
 }
 
-fn visible_segments(fraction: f64) -> usize {
-    if !fraction.is_finite() {
-        return 0;
+fn sweep_mask(fraction: f64) -> Mask {
+    let fraction = sanitized_fraction(fraction) as f32;
+    let mut mask = Mask::new(ICON_SIZE, ICON_SIZE).expect("tray mask dimensions are valid");
+    if fraction <= 0.0 {
+        return mask;
     }
-    (fraction.clamp(0.0, 1.0) * SEGMENT_COUNT as f64)
-        .round()
-        .clamp(0.0, SEGMENT_COUNT as f64) as usize
+    let sweep = std::f32::consts::TAU * fraction;
+    let steps = ((SWEEP_STEPS as f32 * fraction).ceil() as usize).max(1);
+    let mut builder = PathBuilder::new();
+    builder.move_to(SWEEP_CENTER, SWEEP_CENTER);
+    builder.line_to(
+        SWEEP_CENTER + SWEEP_RADIUS * SWEEP_START_RADIANS.cos(),
+        SWEEP_CENTER + SWEEP_RADIUS * SWEEP_START_RADIANS.sin(),
+    );
+    for step in 1..=steps {
+        let progress = step as f32 / steps as f32;
+        let angle = SWEEP_START_RADIANS + sweep * progress;
+        builder.line_to(
+            SWEEP_CENTER + SWEEP_RADIUS * angle.cos(),
+            SWEEP_CENTER + SWEEP_RADIUS * angle.sin(),
+        );
+    }
+    builder.close();
+    if let Some(path) = builder.finish() {
+        mask.fill_path(&path, FillRule::Winding, true, Transform::identity());
+    }
+    mask
+}
+
+fn sanitized_fraction(fraction: f64) -> f64 {
+    if fraction.is_finite() {
+        fraction.clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
 }
 
 fn quota_color(remaining_fraction: f64) -> Rgba {
-    let remaining = if remaining_fraction.is_finite() {
-        remaining_fraction.clamp(0.0, 1.0)
+    let remaining = sanitized_fraction(remaining_fraction);
+    if remaining >= HEALTHY_THRESHOLD {
+        HEALTHY_COLOR
+    } else if remaining > CRITICAL_THRESHOLD {
+        CAUTION_COLOR
     } else {
-        0.0
-    };
-    for stops in QUOTA_COLOR_STOPS.windows(2) {
-        let (start_fraction, start_color) = stops[0];
-        let (end_fraction, end_color) = stops[1];
-        if remaining <= end_fraction {
-            let progress = (remaining - start_fraction) / (end_fraction - start_fraction);
-            return interpolate_color(start_color, end_color, progress);
-        }
+        CRITICAL_COLOR
     }
-    HEALTHY_COLOR
-}
-
-fn interpolate_color(start: Rgba, end: Rgba, progress: f64) -> Rgba {
-    let progress = progress.clamp(0.0, 1.0);
-    let start_hsv = rgb_to_hsv(start);
-    let end_hsv = rgb_to_hsv(end);
-    let mut hue_delta = (end_hsv.hue - start_hsv.hue).rem_euclid(360.0);
-    if hue_delta > 180.0 {
-        hue_delta -= 360.0;
-    }
-    let lerp = |start: f64, end: f64| start + (end - start) * progress;
-    let alpha = lerp(start.3 as f64, end.3 as f64).round() as u8;
-    hsv_to_rgba(
-        Hsv {
-            hue: (start_hsv.hue + hue_delta * progress).rem_euclid(360.0),
-            saturation: lerp(start_hsv.saturation, end_hsv.saturation),
-            value: lerp(start_hsv.value, end_hsv.value),
-        },
-        alpha,
-    )
-}
-
-fn rgb_to_hsv(color: Rgba) -> Hsv {
-    let red = color.0 as f64 / 255.0;
-    let green = color.1 as f64 / 255.0;
-    let blue = color.2 as f64 / 255.0;
-    let max = red.max(green).max(blue);
-    let min = red.min(green).min(blue);
-    let chroma = max - min;
-    let hue = if chroma == 0.0 {
-        0.0
-    } else if max == red {
-        60.0 * ((green - blue) / chroma).rem_euclid(6.0)
-    } else if max == green {
-        60.0 * ((blue - red) / chroma + 2.0)
-    } else {
-        60.0 * ((red - green) / chroma + 4.0)
-    };
-    Hsv {
-        hue,
-        saturation: if max == 0.0 { 0.0 } else { chroma / max },
-        value: max,
-    }
-}
-
-fn hsv_to_rgba(color: Hsv, alpha: u8) -> Rgba {
-    let chroma = color.value * color.saturation;
-    let sector = color.hue / 60.0;
-    let secondary = chroma * (1.0 - (sector.rem_euclid(2.0) - 1.0).abs());
-    let (red, green, blue) = match sector.floor() as u8 {
-        0 => (chroma, secondary, 0.0),
-        1 => (secondary, chroma, 0.0),
-        2 => (0.0, chroma, secondary),
-        3 => (0.0, secondary, chroma),
-        4 => (secondary, 0.0, chroma),
-        _ => (chroma, 0.0, secondary),
-    };
-    let match_value = color.value - chroma;
-    let channel = |value: f64| ((value + match_value) * 255.0).round() as u8;
-    (channel(red), channel(green), channel(blue), alpha)
 }
 
 fn gauge_paths() -> &'static GaugePaths {
@@ -263,8 +232,8 @@ fn parse_path_data(data: &str) -> Result<Path, String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        gauge_paths, quota_color, render_rgba, visible_segments, CAUTION_COLOR, CRITICAL_COLOR,
-        HEALTHY_COLOR, ICON_SIZE, SEGMENT_COUNT, WARNING_COLOR,
+        gauge_paths, quota_color, render_rgba, sanitized_fraction, sweep_mask, CAUTION_COLOR,
+        CRITICAL_COLOR, HEALTHY_COLOR, ICON_SIZE, SEGMENT_COUNT,
     };
 
     #[test]
@@ -276,33 +245,39 @@ mod tests {
     }
 
     #[test]
-    fn fraction_maps_to_seven_stable_segment_states() {
-        assert_eq!(visible_segments(f64::NAN), 0);
-        assert_eq!(visible_segments(-1.0), 0);
-        assert_eq!(visible_segments(0.0), 0);
-        assert_eq!(visible_segments(0.17), 1);
-        assert_eq!(visible_segments(0.5), 3);
-        assert_eq!(visible_segments(0.99), 6);
-        assert_eq!(visible_segments(2.0), 6);
+    fn fractions_are_sanitized_without_quantizing_them() {
+        assert_eq!(sanitized_fraction(f64::NAN), 0.0);
+        assert_eq!(sanitized_fraction(-1.0), 0.0);
+        assert_eq!(sanitized_fraction(0.24), 0.24);
+        assert_eq!(sanitized_fraction(0.25), 0.25);
+        assert_eq!(sanitized_fraction(2.0), 1.0);
     }
 
     #[test]
-    fn remaining_quota_moves_smoothly_through_the_status_palette() {
-        let channel_spread = |color: (u8, u8, u8, u8)| {
-            color.0.max(color.1).max(color.2) - color.0.min(color.1).min(color.2)
+    fn angular_mask_advances_continuously_between_nearby_percentages() {
+        let mask_weight = |fraction| {
+            sweep_mask(fraction)
+                .data()
+                .iter()
+                .map(|alpha| u64::from(*alpha))
+                .sum::<u64>()
         };
+        let quarter_minus = mask_weight(0.24);
+        let quarter = mask_weight(0.25);
+        let quarter_plus = mask_weight(0.26);
+        assert!(quarter_minus < quarter);
+        assert!(quarter < quarter_plus);
+    }
+
+    #[test]
+    fn remaining_quota_uses_three_status_colors() {
         assert_eq!(quota_color(f64::NAN), CRITICAL_COLOR);
         assert_eq!(quota_color(0.0), CRITICAL_COLOR);
-        assert_eq!(quota_color(0.2), WARNING_COLOR);
-        assert_eq!(quota_color(0.45), CAUTION_COLOR);
-        assert_eq!(quota_color(0.7), HEALTHY_COLOR);
+        assert_eq!(quota_color(0.2), CRITICAL_COLOR);
+        assert_eq!(quota_color(0.21), CAUTION_COLOR);
+        assert_eq!(quota_color(0.59), CAUTION_COLOR);
+        assert_eq!(quota_color(0.6), HEALTHY_COLOR);
         assert_eq!(quota_color(1.0), HEALTHY_COLOR);
-        assert_ne!(quota_color(0.1), CRITICAL_COLOR);
-        assert_ne!(quota_color(0.325), WARNING_COLOR);
-        assert_ne!(quota_color(0.575), CAUTION_COLOR);
-        assert!(channel_spread(quota_color(0.1)) > 150);
-        assert!(channel_spread(quota_color(0.325)) > 150);
-        assert!(channel_spread(quota_color(0.575)) > 150);
     }
 
     #[test]
@@ -314,10 +289,17 @@ mod tests {
     }
 
     #[test]
-    fn renderer_changes_both_fill_and_remaining_quota_color() {
+    fn renderer_uses_display_fraction_for_fill_and_remaining_fraction_for_color() {
         let empty = render_rgba(0.0, 1.0);
+        let quarter = render_rgba(0.25, 1.0);
+        let half = render_rgba(0.5, 1.0);
         let full = render_rgba(1.0, 1.0);
         let depleted = render_rgba(1.0, 0.0);
+        let alpha_weight = |rgba: &[u8]| {
+            rgba.chunks_exact(4)
+                .map(|pixel| u64::from(pixel[3]))
+                .sum::<u64>()
+        };
         let blue_pixels = |rgba: &[u8]| {
             rgba.chunks_exact(4)
                 .filter(|pixel| pixel[2] > pixel[0] && pixel[2] > pixel[1] && pixel[3] > 200)
@@ -328,7 +310,10 @@ mod tests {
                 .filter(|pixel| pixel[0] > pixel[1] && pixel[0] > pixel[2] && pixel[3] > 200)
                 .count()
         };
-        assert!(blue_pixels(&full) > blue_pixels(&empty));
+        assert!(alpha_weight(&empty) < alpha_weight(&quarter));
+        assert!(alpha_weight(&quarter) < alpha_weight(&half));
+        assert!(alpha_weight(&half) < alpha_weight(&full));
+        assert!(blue_pixels(&full) > 0);
         assert!(red_pixels(&depleted) > 0);
     }
 }

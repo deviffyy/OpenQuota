@@ -415,7 +415,7 @@ mod tests {
             MetricValue, MetricValueKind, ProviderSnapshot, ProviderViewState, QuotaWindow,
             SnapshotSource, UsageHistory, ValueMetric,
         },
-        providers::{codex, ProviderRegistry},
+        providers::{codex, cursor, ProviderRegistry},
         settings::default_settings,
     };
 
@@ -635,6 +635,58 @@ mod tests {
         let used_groups = resolved_groups(&state, &used_settings, &catalog);
         assert_eq!(
             used_groups[0].metrics[0].gauge,
+            Some(TrayGauge {
+                display_fraction: 0.25,
+                remaining_fraction: 0.75,
+            })
+        );
+        assert_eq!(used_groups[0].metrics[0].value, "25%");
+        assert_eq!(bar_fractions(&groups), vec![0.75, 0.4]);
+        assert_eq!(bar_fractions(&used_groups), vec![0.25, 0.6]);
+    }
+
+    #[test]
+    fn count_quota_display_changes_text_and_fill_but_not_status_fraction() {
+        let snapshot = ProviderSnapshot {
+            provider_id: "cursor".into(),
+            plan: None,
+            quotas: vec![QuotaWindow {
+                id: "requests".into(),
+                label: "Requests".into(),
+                used_percent: 25.0,
+                resets_at: None,
+                period_seconds: 2_592_000,
+                format: crate::models::QuotaFormat::Count,
+                used_value: Some(25.0),
+                limit_value: Some(100.0),
+            }],
+            value_metrics: Vec::new(),
+            notices: Vec::new(),
+            usage: UsageHistory::default(),
+            warnings: Vec::new(),
+            refreshed_at: Utc::now(),
+        };
+        let catalog = ProviderRegistry::from_definitions(vec![cursor::definition()]).unwrap();
+        let definition = catalog.metric("cursor.requests").unwrap();
+
+        let left =
+            super::tray_metric(definition, &snapshot, crate::models::UsageDisplay::Left).unwrap();
+        let used =
+            super::tray_metric(definition, &snapshot, crate::models::UsageDisplay::Used).unwrap();
+
+        assert_eq!(left.value, "75");
+        assert_eq!(left.detail, "Requests 75 requests left");
+        assert_eq!(used.value, "25");
+        assert_eq!(used.detail, "Requests 25 requests used");
+        assert_eq!(
+            left.gauge,
+            Some(TrayGauge {
+                display_fraction: 0.75,
+                remaining_fraction: 0.75,
+            })
+        );
+        assert_eq!(
+            used.gauge,
             Some(TrayGauge {
                 display_fraction: 0.25,
                 remaining_fraction: 0.75,
