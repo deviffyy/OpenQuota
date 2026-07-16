@@ -176,11 +176,16 @@ jobs:
           set -euo pipefail
           export HOME="${RUNNER_TEMP}/openquota-macos-home"
           mkdir -p "${HOME}"
-          binary="src-tauri/target/release/bundle/macos/OpenQuota.app/Contents/MacOS/OpenQuota"
+          dmg="$(find src-tauri/target/release/bundle/dmg -name '*.dmg' -print -quit)"
+          mount_dir="${RUNNER_TEMP}/openquota-macos-dmg"
           log="${RUNNER_TEMP}/openquota-macos.log"
+          mkdir -p "${mount_dir}"
+          hdiutil attach "${dmg}" -mountpoint "${mount_dir}" -nobrowse -readonly
+          binary="${mount_dir}/OpenQuota.app/Contents/MacOS/openquota"
+          test -x "${binary}"
           "${binary}" >"${log}" 2>&1 &
           app_pid=$!
-          trap 'kill "${app_pid}" 2>/dev/null || true' EXIT
+          trap 'kill "${app_pid}" 2>/dev/null || true; hdiutil detach "${mount_dir}" -force >/dev/null 2>&1 || true' EXIT
           sleep 8
           if ! kill -0 "${app_pid}" 2>/dev/null; then
             cat "${log}"
