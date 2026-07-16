@@ -13,6 +13,7 @@ mod refresh_loop;
 mod service;
 mod settings;
 mod storage;
+mod tray_icon;
 mod tray_presentation;
 mod updates;
 mod window;

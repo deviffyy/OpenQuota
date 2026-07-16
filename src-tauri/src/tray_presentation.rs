@@ -1,15 +1,14 @@
-use tauri::AppHandle;
-
-#[cfg(target_os = "macos")]
-use tauri::image::Image;
+use tauri::{image::Image, AppHandle};
 
 use crate::{
     models::{
         AppSettings, MetricDefinition, MetricSource, MetricValue, MetricValueKind,
         ProviderSnapshot, QuotaFormat, UsageDisplay, UsagePeriod, UsagePeriodSelection,
     },
+    pacing::{self, PaceSeverity},
     providers::ProviderRegistry,
     service::UsageViewState,
+    tray_icon,
 };
 
 const TRAY_ID: &str = "openquota-tray";
@@ -23,6 +22,7 @@ struct TrayMetric {
     compact: String,
     detail: String,
     fraction: Option<f64>,
+    severity: PaceSeverity,
 }
 
 pub fn update(
@@ -49,11 +49,22 @@ pub fn update(
     };
     let _ = tray.set_tooltip(Some(tooltip));
 
+    #[cfg(not(target_os = "macos"))]
+    {
+        let icon = primary_gauge(&metrics)
+            .map(|(fraction, severity)| tray_icon::render_gauge(fraction, severity))
+            .unwrap_or_else(mark_icon);
+        let _ = tray.set_icon(Some(icon));
+    }
+
     #[cfg(target_os = "macos")]
     {
         match settings.menu_bar_style {
             crate::models::MenuBarStyle::Text => {
-                let _ = tray.set_icon_with_as_template(Some(mark_icon()), true);
+                let icon = primary_gauge(&metrics)
+                    .map(|(fraction, severity)| tray_icon::render_gauge(fraction, severity))
+                    .unwrap_or_else(mark_icon);
+                let _ = tray.set_icon_with_as_template(Some(icon), true);
                 let title = (!metrics.is_empty()).then(|| {
                     format!(
                         " {}",
@@ -81,6 +92,12 @@ pub fn update(
             }
         }
     }
+}
+
+fn primary_gauge(metrics: &[TrayMetric]) -> Option<(f64, PaceSeverity)> {
+    metrics
+        .iter()
+        .find_map(|metric| metric.fraction.map(|fraction| (fraction, metric.severity)))
 }
 
 fn resolved_metrics(
@@ -142,6 +159,12 @@ fn tray_metric(
                             compact: format!("{short} {value:.0}"),
                             detail: format!("{} {value:.0} requests {word}", quota.label),
                             fraction: (limit > 0.0).then(|| (value / limit).clamp(0.0, 1.0)),
+                            severity: pacing::project(
+                                quota,
+                                chrono::Utc::now(),
+                                definition.source.session_window(),
+                            )
+                            .severity,
                         };
                     }
                 }
@@ -158,6 +181,12 @@ fn tray_metric(
                     compact: format!("{short} {percent:.0}%"),
                     detail: format!("{} {percent:.0}% {word}", quota.label),
                     fraction: Some(percent / 100.0),
+                    severity: pacing::project(
+                        quota,
+                        chrono::Utc::now(),
+                        definition.source.session_window(),
+                    )
+                    .severity,
                 }
             })
     };
@@ -224,6 +253,7 @@ fn value_metric(
         compact: format!("{short} {compact}"),
         detail: format!("{} {detail}", metric.label),
         fraction: None,
+        severity: PaceSeverity::Untracked,
     })
 }
 
@@ -261,6 +291,7 @@ fn usage_metric(short: &str, label: &str, period: Option<&UsagePeriod>) -> Optio
         compact: format!("{short} {value}"),
         detail: format!("{label} {value}"),
         fraction: None,
+        severity: PaceSeverity::Untracked,
     })
 }
 
@@ -304,25 +335,9 @@ fn bar_icon(fractions: &[f64]) -> Image<'static> {
     Image::new_owned(rgba, BAR_ICON_SIZE, BAR_ICON_SIZE)
 }
 
-#[cfg(target_os = "macos")]
 fn mark_icon() -> Image<'static> {
-    let size = BAR_ICON_SIZE as usize;
-    let mut rgba = vec![0_u8; size * size * 4];
-    let center = 8.0;
-    for y in 2..16 {
-        for x in 2..16 {
-            let distance = ((x as f64 - center).powi(2) + (y as f64 - center).powi(2)).sqrt();
-            let ring = (4.5..=6.5).contains(&distance);
-            let tail = (10..=15).contains(&x)
-                && (10..=15).contains(&y)
-                && (x as isize - y as isize).abs() <= 1;
-            if ring || tail {
-                let pixel = (y * size + x) * 4;
-                rgba[pixel + 3] = 255;
-            }
-        }
-    }
-    Image::new_owned(rgba, BAR_ICON_SIZE, BAR_ICON_SIZE)
+    Image::from_bytes(include_bytes!("../icons/32x32.png"))
+        .expect("bundled OpenQuota tray mark must be a valid PNG")
 }
 
 #[cfg(test)]
@@ -340,8 +355,15 @@ mod tests {
         settings::default_settings,
     };
 
-    use super::{format_tokens, resolved_metrics};
+    use super::{format_tokens, primary_gauge, resolved_metrics, TrayMetric};
     use crate::service::UsageViewState;
+
+    #[test]
+    fn bundled_tray_mark_decodes_at_the_expected_size() {
+        let image = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))
+            .expect("bundled tray mark should decode");
+        assert_eq!((image.width(), image.height()), (32, 32));
+    }
 
     #[test]
     fn pinned_quota_metrics_resolve_in_layout_order() {
@@ -402,6 +424,34 @@ mod tests {
         assert_eq!(format_tokens(999), "999");
         assert_eq!(format_tokens(12_340), "12.3K");
         assert_eq!(format_tokens(2_500_000), "2.5M");
+    }
+
+    #[test]
+    fn gauge_uses_the_first_pinned_quota_metric() {
+        let metrics = vec![
+            TrayMetric {
+                compact: "Credits 10".into(),
+                detail: "Credits 10".into(),
+                fraction: None,
+                severity: crate::pacing::PaceSeverity::Untracked,
+            },
+            TrayMetric {
+                compact: "Session 40%".into(),
+                detail: "Session 40% left".into(),
+                fraction: Some(0.4),
+                severity: crate::pacing::PaceSeverity::RunningOut,
+            },
+            TrayMetric {
+                compact: "Weekly 80%".into(),
+                detail: "Weekly 80% left".into(),
+                fraction: Some(0.8),
+                severity: crate::pacing::PaceSeverity::Healthy,
+            },
+        ];
+        assert_eq!(
+            primary_gauge(&metrics),
+            Some((0.4, crate::pacing::PaceSeverity::RunningOut))
+        );
     }
 
     #[test]

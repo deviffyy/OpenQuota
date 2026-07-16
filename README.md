@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/openquota-icon.svg" alt="OpenQuota logo" width="88">
+  <img src="assets/openquota-icon.png" alt="OpenQuota logo" width="88">
 </p>
 
 <h1 align="center">OpenQuota</h1>
