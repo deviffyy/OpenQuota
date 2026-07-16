@@ -1,0 +1,48 @@
+name: Feature request
+description: Suggest an improvement or provider addition
+title: '[Feature]: '
+labels:
+  - enhancement
+body:
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and pull requests for a similar request.
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem or limitation would this change address?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior you would like to see.
+    validations:
+      required: true
+
+  - type: input
+    id: provider
+    attributes:
+      label: Provider
+      description: If this request concerns a provider, enter its name.
+
+  - type: input
+    id: platforms
+    attributes:
+      label: Platforms
+      description: Which platforms should this apply to?
+      placeholder: Windows, macOS, Linux, or all platforms
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or additional context
+      description: Add mockups, examples, or alternative approaches if available.

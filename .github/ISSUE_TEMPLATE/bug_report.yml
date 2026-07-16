@@ -1,0 +1,94 @@
+name: Bug report
+description: Report a reproducible problem in OpenQuota
+title: '[Bug]: '
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a problem. Do not include credentials, access tokens, account identifiers, or unreviewed diagnostic logs.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and pull requests for this problem.
+          required: true
+        - label: I reproduced the problem with the latest OpenQuota release.
+          required: true
+
+  - type: dropdown
+    id: operating-system
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+    validations:
+      required: true
+
+  - type: input
+    id: system-details
+    attributes:
+      label: System details
+      description: Include the OS version, desktop environment when relevant, and x64 or ARM64.
+      placeholder: Windows 11 24H2, x64
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: OpenQuota version
+      placeholder: '0.2.4'
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Affected provider
+      options:
+        - Not provider-specific
+        - Claude Code
+        - Codex
+        - Cursor
+        - Antigravity
+        - Multiple providers
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you were doing when it occurred.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open...
+        2. Select...
+        3. Observe...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional context
+      description: Add screenshots or reviewed log excerpts if useful. Remove all sensitive information first.

@@ -5,7 +5,7 @@
 <h1 align="center">OpenQuota</h1>
 
 <p align="center">
-  Keep your AI coding subscriptions in view from the system tray.
+  Track your AI coding subscriptions from the system tray.
 </p>
 
 <p align="center">
@@ -14,162 +14,94 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
 </p>
 
-OpenQuota shows how much of your AI coding plans you have used without pulling you away from your
-work. Session and weekly limits, reset times, local token usage, and estimated spend all live in one
-compact panel. Pin the numbers you care about most to the tray or macOS menu bar.
+OpenQuota keeps your session limits, weekly quotas, reset times, token usage, and estimated spend
+in one compact panel. Pin the metrics you care about to the tray and see what remains without
+interrupting your work.
 
 <p align="center">
-  <img src="assets/screenshot.png" alt="OpenQuota dashboard showing AI provider quotas, usage, and estimated spend" width="520">
+  <img src="assets/screenshot.png" alt="OpenQuota dashboard showing AI provider quotas, usage, and estimated spend" width="720">
 </p>
 
-## Installation
+## Download
 
-Download the latest build from the [OpenQuota releases
-page](https://github.com/deviffyy/OpenQuota/releases/latest):
+| Platform | Available builds                           | Download                                                                      |
+| -------- | ------------------------------------------ | ----------------------------------------------------------------------------- |
+| Windows  | x64 and ARM64 installers                   | [Download for Windows](https://github.com/deviffyy/OpenQuota/releases/latest) |
+| macOS    | Universal DMG for Apple Silicon and Intel  | [Download for macOS](https://github.com/deviffyy/OpenQuota/releases/latest)   |
+| Linux    | x64 and ARM64 AppImage and Debian packages | [Download for Linux](https://github.com/deviffyy/OpenQuota/releases/latest)   |
 
-- **Windows:** x64 and ARM64 NSIS installers
-- **macOS:** Universal DMG for Apple Silicon and Intel Macs (macOS 11 or later)
-- **Linux:** x64 and ARM64 AppImage and Debian packages
+Open the latest release and choose the file for your platform:
 
-OpenQuota automatically checks for updates, and every installable update is cryptographically
-signed. Windows, macOS, and Linux AppImage builds can update from inside the app. Debian users can
-download and install the latest package from the releases page.
+- **Windows:** `_x64-setup.exe` or `_arm64-setup.exe`
+- **macOS:** `_universal.dmg` — requires macOS 11 or later
+- **Linux:** `.AppImage` or `.deb`
+
+OpenQuota checks for updates automatically. Installable updates are cryptographically signed.
 
 ## Supported providers
 
-- **Claude Code** — session, weekly, Sonnet, Fable, capped or uncapped extra usage, local token
-  history, and estimated spend
-- **Codex** — session, weekly, Spark and Spark Weekly limits, extra-usage credits, rate-limit reset
-  credits and expiries, local token history, model breakdown, and estimated spend
-- **Cursor** — total, Auto and API usage, team/request fallback, extra usage, credits, and exported
-  30-day token history, model breakdown, and estimated spend
-- **Antigravity** — shared Gemini and Claude quota pools with session and weekly windows
+- **Claude Code** — session and weekly limits, model-specific usage, token history, and estimated
+  spend
+- **Codex** — session and weekly limits, credits, token history, model breakdown, and estimated
+  spend
+- **Cursor** — total, Auto and API usage, credits, token history, and estimated spend
+- **Antigravity** — shared Gemini and Claude quota pools
 
-OpenQuota reuses the sign-in details already stored by each provider's app or CLI. Sign in to the
-provider first, then open OpenQuota—there is no separate account to create.
+OpenQuota uses the provider sign-ins already available on your computer. Sign in through the
+provider's app or CLI first, then open OpenQuota.
 
-Codex subscription limits require a ChatGPT login. API-key-only Codex sessions do not expose the
-subscription quota endpoint.
+Codex subscription limits require a ChatGPT login. API-key-only sessions do not expose subscription
+quota information.
 
 ## Features
 
-- **Tray dashboard.** View provider quotas, live reset countdowns, plan details, warnings, and
-  out-of-date indicators in a compact popup.
-- **Pinned metrics.** Pin up to two metrics per provider to the tray tooltip. On macOS, Text style
-  groups live values by provider beside the monochrome OpenQuota mark; Bars style shows the first
-  four bounded metrics as compact horizontal meters. Tray values and gauges follow the global
-  Used/Left mode on every platform.
-- **Flexible quota display.** Show how much you have used or how much remains, with countdowns or
-  exact reset times.
-- **Usage history.** See Today, Yesterday, and Last 30 Days token totals and estimated cost from
-  local CLI logs.
-- **Pacing alerts.** See whether your usage is on track and get an optional warning when a quota may
-  run out before it resets.
-- **Usage trend and Total Spend.** Review a 30-day trend, provider totals, model breakdowns, and
-  shareable usage cards.
-- **Customize.** Reorder providers and metrics, move metrics between Always Visible and On Demand,
-  hide values, and reset individual provider layouts.
-- **Provider shortcuts.** Open supported providers' status and usage dashboards from each expanded
-  provider card.
-- **Desktop integration.** Toggle the panel with a global shortcut, launch at login, follow the
-  system theme, or choose light/dark and default/compact density. Opening OpenQuota again activates
-  the running app instead of starting a second tray process.
-- **Instant cached data.** Your latest values appear as soon as OpenQuota starts. Providers refresh
-  in parallel every five minutes, and a failed refresh never wipes the last successful result.
-- **Private diagnostics.** A redacted, size-limited local log helps diagnose provider and desktop
-  integration problems. Choose Error, Warning, Info, or Debug in Settings and open the log folder
-  without using a terminal.
-- **Linux desktop support.** OpenQuota uses a StatusNotifier tray when one is available and falls
-  back to a small standalone window on desktops without a tray host.
+- **Tray dashboard.** View all provider quotas and reset times in a compact popup.
+- **Pinned metrics.** Keep important values visible in the tray or macOS menu bar.
+- **Used or left.** Display how much quota you have consumed or how much remains.
+- **Usage history.** Review today, yesterday, and the last 30 days of token usage and estimated
+  spend.
+- **Pacing alerts.** See whether your current usage is likely to last until the next reset.
+- **Custom layouts.** Reorder providers and metrics, hide rows, and choose what stays visible.
+- **Desktop integration.** Launch at login, use a global shortcut, and follow the system theme.
+- **Fast refresh.** Cached values appear immediately and providers refresh automatically in the
+  background.
 
-## Privacy and data
-
-OpenQuota runs locally and has no cloud backend of its own.
-
-- Existing provider credentials are read from local auth files or the operating system credential
-  store.
-- Credentials are never included in the frontend state or copied into the OpenQuota SQLite cache.
-- OpenQuota contacts provider services only to retrieve quota data and refresh sign-in details when
-  needed.
-- Model prices are resolved locally from bundled catalogs. When pricing is used, OpenQuota starts at
-  most one background check if the public LiteLLM, models.dev, or OpenQuota supplement feed is older
-  than a day; these requests never include usage or log data.
-- Local Codex and Claude logs plus Cursor's usage export are read for token counts and cost estimates.
-  OpenQuota does not store your prompt content in its usage snapshots.
-- Cached snapshots, parsed usage records, and application settings are stored in `openquota.db`
-  inside the platform application-data directory.
-- Diagnostic logs stay on the device, rotate at 10 MB, retain one archive, and redact credentials,
-  account identifiers, email addresses, and personal filesystem paths. OpenQuota contains no usage
-  telemetry or remote crash-report upload.
-- Validated pricing catalogs and their ETags are cached atomically in the `pricing` folder beside
-  the database. Bundled catalogs remain available when the network or a feed is unavailable.
-
-Cost values derived from local token logs and model pricing are estimates, not billing statements.
+OpenQuota runs locally and has no account, cloud backend, analytics, or usage telemetry of its own.
 
 ## Development
 
 Requirements:
 
 - Node.js 22 or later
-- pnpm 11.11.0 (managed through Corepack)
-- Stable Rust toolchain with Cargo
-- The platform dependencies required by [Tauri
-  2](https://v2.tauri.app/start/prerequisites/)
+- pnpm 11.11.0
+- Stable Rust toolchain
+- [Tauri 2 platform prerequisites](https://v2.tauri.app/start/prerequisites/)
 
-Install dependencies and run the development application:
+Install dependencies and start the development app:
 
 ```sh
 corepack pnpm install --frozen-lockfile
 corepack pnpm tauri dev
 ```
 
-Run the complete quality gate:
+Run the complete quality checks:
 
 ```sh
 corepack pnpm verify
 ```
 
-This checks version and frontend/backend contracts, formatting, linting, Svelte and TypeScript
-types, frontend tests, the production frontend build, Rust formatting, Clippy, and Rust tests.
-
-Build a platform package:
+Build an installer for the current platform:
 
 ```sh
-corepack pnpm build:installer             # Windows NSIS installer
-corepack pnpm build:linux                 # Linux AppImage and .deb
-corepack pnpm tauri build --bundles dmg   # macOS DMG
+corepack pnpm build:installer             # Windows
+corepack pnpm build:linux                 # Linux
+corepack pnpm tauri build --bundles dmg   # macOS
 ```
 
-## Architecture
+## Contributing
 
-```text
-Svelte interface
-    -> typed Tauri commands and events
-    -> Rust application services
-    -> provider auth, client, mapper, and local usage modules
-    -> shared offline-first model pricing engine
-    -> SQLite cache and platform credential stores
-```
-
-Provider API responses and credentials stay behind the Rust boundary. Each provider implements the
-same small runtime contract (definition, local credential detection, and refresh), owns its static
-metric metadata, and produces a shared snapshot model for the UI. A validated registry shares that
-catalog—including allowlisted browser shortcuts—with settings, tray, pacing, and the frontend
-bootstrap path. One provider failure does not stop the others from refreshing.
-
-Local credential detection starts after Tauri setup and fans out across blocking workers, so
-credential-store access does not hold up the UI thread. Fresh installs show the established fallback
-immediately, then adopt the detected provider set without overriding toggles changed during detection.
-
-Claude and Codex normalize local log events into the same pricing model. A provider refresh uses one
-immutable pricing snapshot from start to finish, while price feeds revalidate in the background with
-ETags. Unknown models remain explicitly unpriced instead of being silently counted as zero-cost
-usage. Their spend rows follow the same active-day, period-scoped unknown-model, and model-breakdown
-rules. Bundled pricing snapshots can be regenerated with
-`bash scripts/update_pricing_snapshots.sh`.
-
-The repository includes CI builds for Windows, macOS, and Linux, plus contract tests for shared
-Rust/TypeScript models and registered Tauri commands.
+Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before contributing,
+and report security problems privately as described in [SECURITY.md](SECURITY.md).
 
 ## License
 
