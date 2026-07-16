@@ -237,10 +237,15 @@ pub fn run() {
                 #[cfg(target_os = "macos")]
                 let menu = {
                     let settings_item =
-                        MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
+                        MenuItem::with_id(app, "settings", "Settings", true, Some("CmdOrCtrl+,"))?;
                     let separator = PredefinedMenuItem::separator(app)?;
-                    let quit =
-                        MenuItem::with_id(app, "quit", "Quit OpenQuota", true, None::<&str>)?;
+                    let quit = MenuItem::with_id(
+                        app,
+                        "quit",
+                        "Quit OpenQuota",
+                        true,
+                        Some("CmdOrCtrl+Q"),
+                    )?;
                     Menu::with_items(app, &[&settings_item, &separator, &quit])?
                 };
                 #[cfg(not(target_os = "macos"))]

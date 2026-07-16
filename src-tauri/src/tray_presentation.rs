@@ -34,6 +34,22 @@ struct TrayGauge {
     remaining_fraction: f64,
 }
 
+#[cfg(any(target_os = "macos", test))]
+#[derive(Debug, Clone, PartialEq)]
+enum MacMenuBarIcon {
+    Mark,
+    Bars(Vec<f64>),
+}
+
+#[cfg(any(target_os = "macos", test))]
+#[derive(Debug, Clone, PartialEq)]
+struct MacMenuBarPresentation {
+    icon: MacMenuBarIcon,
+    /// Always applied to the native status item. An empty string deliberately clears stale text;
+    /// `None` does not clear an existing title in the macOS tray implementation.
+    title: String,
+}
+
 pub fn update(
     app: &AppHandle,
     state: &UsageViewState,
@@ -58,7 +74,9 @@ pub fn update(
         )
     };
     #[cfg(not(target_os = "linux"))]
-    let _ = tray.set_tooltip(Some(tooltip));
+    if tray.set_tooltip(Some(tooltip)).is_err() {
+        crate::app_warn!("tray", "tray tooltip update failed");
+    }
     #[cfg(target_os = "linux")]
     let _ = tooltip;
 
@@ -67,28 +85,73 @@ pub fn update(
         let icon = primary_gauge(&groups)
             .map(|gauge| tray_icon::render_gauge(gauge.display_fraction, gauge.remaining_fraction))
             .unwrap_or_else(mark_icon);
-        let _ = tray.set_icon(Some(icon));
+        if tray.set_icon(Some(icon)).is_err() {
+            crate::app_warn!("tray", "tray icon update failed");
+        }
     }
 
     #[cfg(target_os = "macos")]
-    {
-        match settings.menu_bar_style {
-            crate::models::MenuBarStyle::Text => {
-                let _ = tray.set_icon_with_as_template(Some(mark_icon()), true);
-                let title = text_title(&groups).map(|title| format!(" {title}"));
-                let _ = tray.set_title(title);
-            }
-            crate::models::MenuBarStyle::Bars => {
-                let fractions = bar_fractions(&groups);
-                let _ = tray.set_title(None::<&str>);
-                if fractions.is_empty() {
-                    let _ = tray.set_icon_with_as_template(Some(mark_icon()), true);
+    apply_mac_menu_bar_presentation(
+        &tray,
+        mac_menu_bar_presentation(&groups, settings.menu_bar_style),
+    );
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn mac_menu_bar_presentation(
+    groups: &[TrayGroup],
+    style: crate::models::MenuBarStyle,
+) -> MacMenuBarPresentation {
+    match style {
+        crate::models::MenuBarStyle::Text => MacMenuBarPresentation {
+            icon: MacMenuBarIcon::Mark,
+            title: text_title(groups)
+                .map(|title| format!(" {title}"))
+                .unwrap_or_default(),
+        },
+        crate::models::MenuBarStyle::Bars => {
+            let fractions = bar_fractions(groups);
+            MacMenuBarPresentation {
+                icon: if fractions.is_empty() {
+                    MacMenuBarIcon::Mark
                 } else {
-                    let _ = tray.set_icon_with_as_template(
-                        Some(crate::menu_bar::bar_icon(&fractions)),
-                        true,
-                    );
-                }
+                    MacMenuBarIcon::Bars(fractions)
+                },
+                title: String::new(),
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn apply_mac_menu_bar_presentation(
+    tray: &tauri::tray::TrayIcon,
+    presentation: MacMenuBarPresentation,
+) {
+    match presentation.icon {
+        MacMenuBarIcon::Mark => {
+            // Text installs its mark before exposing the new value. An empty value explicitly clears
+            // stale text when the last pin or snapshot disappears.
+            if tray
+                .set_icon_with_as_template(Some(mark_icon()), true)
+                .is_err()
+            {
+                crate::app_warn!("tray", "macOS menu bar icon update failed");
+            }
+            if tray.set_title(Some(presentation.title)).is_err() {
+                crate::app_warn!("tray", "macOS menu bar title update failed");
+            }
+        }
+        MacMenuBarIcon::Bars(fractions) => {
+            // Clear Text before installing Bars so no stale value can remain beside the compact glyph.
+            if tray.set_title(Some("")).is_err() {
+                crate::app_warn!("tray", "macOS menu bar title clear failed");
+            }
+            if tray
+                .set_icon_with_as_template(Some(crate::menu_bar::bar_icon(&fractions)), true)
+                .is_err()
+            {
+                crate::app_warn!("tray", "macOS menu bar icon update failed");
             }
         }
     }
@@ -348,8 +411,8 @@ mod tests {
     };
 
     use super::{
-        bar_fractions, format_tokens, primary_gauge, resolved_groups, text_title, TrayGauge,
-        TrayGroup, TrayMetric,
+        bar_fractions, format_tokens, mac_menu_bar_presentation, primary_gauge, resolved_groups,
+        text_title, MacMenuBarIcon, MacMenuBarPresentation, TrayGauge, TrayGroup, TrayMetric,
     };
     use crate::service::UsageViewState;
 
@@ -380,6 +443,65 @@ mod tests {
 
         assert_eq!(text_title(&groups).as_deref(), Some("Cl 75%/40%  Cx 90%"));
         assert_eq!(text_title(&[]), None);
+    }
+
+    #[test]
+    fn mac_text_to_bars_transition_explicitly_clears_the_native_title() {
+        let groups = vec![TrayGroup {
+            short_name: "Cx".into(),
+            metrics: vec![TrayMetric {
+                value: "75%".into(),
+                detail: String::new(),
+                gauge: Some(TrayGauge {
+                    display_fraction: 0.75,
+                    remaining_fraction: 0.75,
+                }),
+            }],
+        }];
+
+        assert_eq!(
+            mac_menu_bar_presentation(&groups, crate::models::MenuBarStyle::Text),
+            MacMenuBarPresentation {
+                icon: MacMenuBarIcon::Mark,
+                title: " Cx 75%".into(),
+            }
+        );
+        assert_eq!(
+            mac_menu_bar_presentation(&groups, crate::models::MenuBarStyle::Bars),
+            MacMenuBarPresentation {
+                icon: MacMenuBarIcon::Bars(vec![0.75]),
+                title: String::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn mac_empty_and_unbounded_bar_states_fall_back_without_stale_text() {
+        let unbounded = vec![TrayGroup {
+            short_name: "Cx".into(),
+            metrics: vec![TrayMetric {
+                value: "$4".into(),
+                detail: String::new(),
+                gauge: None,
+            }],
+        }];
+        let fallback = MacMenuBarPresentation {
+            icon: MacMenuBarIcon::Mark,
+            title: String::new(),
+        };
+
+        assert_eq!(
+            mac_menu_bar_presentation(&[], crate::models::MenuBarStyle::Text),
+            fallback
+        );
+        assert_eq!(
+            mac_menu_bar_presentation(&[], crate::models::MenuBarStyle::Bars),
+            fallback
+        );
+        assert_eq!(
+            mac_menu_bar_presentation(&unbounded, crate::models::MenuBarStyle::Bars),
+            fallback
+        );
     }
 
     #[test]
