@@ -34,7 +34,7 @@ pub fn show_popup(window: &WebviewWindow) {
         .app_handle()
         .state::<DesktopIntegration>()
         .standalone_window;
-    if standalone {
+    if standalone || cfg!(target_os = "linux") {
         let _ = window.center();
         let _ = window.unminimize();
     } else {

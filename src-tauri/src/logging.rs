@@ -640,11 +640,19 @@ mod tests {
             path.file_name().and_then(|value| value.to_str()),
             Some("OpenQuota.log")
         );
+        #[cfg(not(target_os = "macos"))]
         assert_eq!(
             path.parent()
                 .and_then(Path::file_name)
                 .and_then(|value| value.to_str()),
             Some("logs")
+        );
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            path.parent()
+                .and_then(Path::file_name)
+                .and_then(|value| value.to_str()),
+            Some("OpenQuota")
         );
         #[cfg(target_os = "macos")]
         assert!(path.to_string_lossy().contains("Library/Logs/OpenQuota"));

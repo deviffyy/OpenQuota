@@ -1,28 +1,37 @@
 use tauri::{image::Image, AppHandle};
 
+#[cfg(not(target_os = "macos"))]
+use crate::tray_icon;
 use crate::{
     models::{
         AppSettings, MetricDefinition, MetricSource, MetricValue, MetricValueKind,
         ProviderSnapshot, QuotaFormat, UsageDisplay, UsagePeriod, UsagePeriodSelection,
     },
-    pacing::{self, PaceSeverity},
     providers::ProviderRegistry,
     service::UsageViewState,
-    tray_icon,
 };
 
 const TRAY_ID: &str = "openquota-tray";
-#[cfg(target_os = "macos")]
-const BAR_ICON_SIZE: u32 = 18;
-#[cfg(target_os = "macos")]
-const MAX_BARS: usize = 4;
 
 #[derive(Debug, Clone, PartialEq)]
 struct TrayMetric {
-    compact: String,
+    value: String,
     detail: String,
-    fraction: Option<f64>,
-    severity: PaceSeverity,
+    gauge: Option<TrayGauge>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct TrayGroup {
+    #[cfg(any(target_os = "macos", test))]
+    short_name: String,
+    metrics: Vec<TrayMetric>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct TrayGauge {
+    display_fraction: f64,
+    #[cfg(any(not(target_os = "macos"), test))]
+    remaining_fraction: f64,
 }
 
 pub fn update(
@@ -34,25 +43,29 @@ pub fn update(
     let Some(tray) = app.tray_by_id(TRAY_ID) else {
         return;
     };
-    let metrics = resolved_metrics(state, settings, registry);
-    let tooltip = if metrics.is_empty() {
+    let groups = resolved_groups(state, settings, registry);
+    let tooltip = if groups.is_empty() {
         "OpenQuota".to_owned()
     } else {
         format!(
             "OpenQuota\n{}",
-            metrics
+            groups
                 .iter()
+                .flat_map(|group| group.metrics.iter())
                 .map(|metric| metric.detail.as_str())
                 .collect::<Vec<_>>()
                 .join(" · ")
         )
     };
+    #[cfg(not(target_os = "linux"))]
     let _ = tray.set_tooltip(Some(tooltip));
+    #[cfg(target_os = "linux")]
+    let _ = tooltip;
 
     #[cfg(not(target_os = "macos"))]
     {
-        let icon = primary_gauge(&metrics)
-            .map(|(fraction, severity)| tray_icon::render_gauge(fraction, severity))
+        let icon = primary_gauge(&groups)
+            .map(|gauge| tray_icon::render_gauge(gauge.display_fraction, gauge.remaining_fraction))
             .unwrap_or_else(mark_icon);
         let _ = tray.set_icon(Some(icon));
     }
@@ -61,74 +74,95 @@ pub fn update(
     {
         match settings.menu_bar_style {
             crate::models::MenuBarStyle::Text => {
-                let icon = primary_gauge(&metrics)
-                    .map(|(fraction, severity)| tray_icon::render_gauge(fraction, severity))
-                    .unwrap_or_else(mark_icon);
-                let _ = tray.set_icon_with_as_template(Some(icon), true);
-                let title = (!metrics.is_empty()).then(|| {
-                    format!(
-                        " {}",
-                        metrics
-                            .iter()
-                            .map(|metric| metric.compact.as_str())
-                            .collect::<Vec<_>>()
-                            .join(" · ")
-                    )
-                });
+                let _ = tray.set_icon_with_as_template(Some(mark_icon()), true);
+                let title = text_title(&groups).map(|title| format!(" {title}"));
                 let _ = tray.set_title(title);
             }
             crate::models::MenuBarStyle::Bars => {
-                let fractions = metrics
-                    .iter()
-                    .filter_map(|metric| metric.fraction)
-                    .take(MAX_BARS)
-                    .collect::<Vec<_>>();
+                let fractions = bar_fractions(&groups);
                 let _ = tray.set_title(None::<&str>);
                 if fractions.is_empty() {
                     let _ = tray.set_icon_with_as_template(Some(mark_icon()), true);
                 } else {
-                    let _ = tray.set_icon_with_as_template(Some(bar_icon(&fractions)), true);
+                    let _ = tray.set_icon_with_as_template(
+                        Some(crate::menu_bar::bar_icon(&fractions)),
+                        true,
+                    );
                 }
             }
         }
     }
 }
 
-fn primary_gauge(metrics: &[TrayMetric]) -> Option<(f64, PaceSeverity)> {
-    metrics
+#[cfg(any(target_os = "macos", test))]
+fn bar_fractions(groups: &[TrayGroup]) -> Vec<f64> {
+    groups
         .iter()
-        .find_map(|metric| metric.fraction.map(|fraction| (fraction, metric.severity)))
+        .flat_map(|group| group.metrics.iter())
+        .filter_map(|metric| metric.gauge.map(|gauge| gauge.display_fraction))
+        .take(crate::menu_bar::MAX_BARS)
+        .collect()
 }
 
-fn resolved_metrics(
+#[cfg(any(not(target_os = "macos"), test))]
+fn primary_gauge(groups: &[TrayGroup]) -> Option<TrayGauge> {
+    groups
+        .iter()
+        .flat_map(|group| group.metrics.iter())
+        .find_map(|metric| metric.gauge)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn text_title(groups: &[TrayGroup]) -> Option<String> {
+    (!groups.is_empty()).then(|| {
+        groups
+            .iter()
+            .map(|group| {
+                let values = group
+                    .metrics
+                    .iter()
+                    .map(|metric| metric.value.as_str())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                format!("{} {values}", group.short_name)
+            })
+            .collect::<Vec<_>>()
+            .join("  ")
+    })
+}
+
+fn resolved_groups(
     state: &UsageViewState,
     settings: &AppSettings,
     registry: &ProviderRegistry,
-) -> Vec<TrayMetric> {
+) -> Vec<TrayGroup> {
     settings
         .providers
         .iter()
         .filter(|provider| provider.enabled)
-        .flat_map(|provider| {
-            let definition = registry.definition(&provider.id);
+        .filter_map(|provider| {
+            let definition = registry.definition(&provider.id)?;
             let snapshot = state
                 .providers
                 .get(&provider.id)
-                .and_then(|state| state.snapshot.as_ref());
-            provider
+                .and_then(|state| state.snapshot.as_ref())?;
+            let metrics = provider
                 .metrics
                 .iter()
                 .filter(|metric| metric.enabled && metric.pinned)
-                .filter_map(move |metric| {
-                    let snapshot = snapshot?;
-                    let definition = definition?;
+                .filter_map(|metric| {
                     let metric_definition = registry.metric(&metric.id)?;
                     let mut resolved =
                         tray_metric(metric_definition, snapshot, settings.usage_display)?;
-                    resolved.compact = format!("{} {}", definition.short_name, resolved.compact);
                     resolved.detail = format!("{} {}", definition.display_name, resolved.detail);
                     Some(resolved)
                 })
+                .collect::<Vec<_>>();
+            (!metrics.is_empty()).then_some(TrayGroup {
+                #[cfg(any(target_os = "macos", test))]
+                short_name: definition.short_name.clone(),
+                metrics,
+            })
         })
         .collect()
 }
@@ -139,7 +173,7 @@ fn tray_metric(
     display: UsageDisplay,
 ) -> Option<TrayMetric> {
     let tray = definition.tray.as_ref()?;
-    let quota = |id: &str, short: &str| {
+    let quota = |id: &str| {
         snapshot
             .quotas
             .iter()
@@ -147,6 +181,7 @@ fn tray_metric(
             .map(|quota| {
                 if quota.format == QuotaFormat::Count {
                     if let (Some(used), Some(limit)) = (quota.used_value, quota.limit_value) {
+                        let used_fraction = (limit > 0.0).then(|| (used / limit).clamp(0.0, 1.0));
                         let value = match display {
                             UsageDisplay::Used => used,
                             UsageDisplay::Left => (limit - used).max(0.0),
@@ -156,62 +191,51 @@ fn tray_metric(
                             UsageDisplay::Left => "left",
                         };
                         return TrayMetric {
-                            compact: format!("{short} {value:.0}"),
+                            value: format!("{value:.0}"),
                             detail: format!("{} {value:.0} requests {word}", quota.label),
-                            fraction: (limit > 0.0).then(|| (value / limit).clamp(0.0, 1.0)),
-                            severity: pacing::project(
-                                quota,
-                                chrono::Utc::now(),
-                                definition.source.session_window(),
-                            )
-                            .severity,
+                            gauge: used_fraction.map(|used_fraction| TrayGauge {
+                                display_fraction: match display {
+                                    UsageDisplay::Used => used_fraction,
+                                    UsageDisplay::Left => 1.0 - used_fraction,
+                                },
+                                #[cfg(any(not(target_os = "macos"), test))]
+                                remaining_fraction: 1.0 - used_fraction,
+                            }),
                         };
                     }
                 }
-                let percent = match display {
-                    UsageDisplay::Used => quota.used_percent,
-                    UsageDisplay::Left => 100.0 - quota.used_percent,
-                }
-                .clamp(0.0, 100.0);
+                let used_fraction = (quota.used_percent / 100.0).clamp(0.0, 1.0);
+                let display_fraction = match display {
+                    UsageDisplay::Used => used_fraction,
+                    UsageDisplay::Left => 1.0 - used_fraction,
+                };
+                let percent = display_fraction * 100.0;
                 let word = match display {
                     UsageDisplay::Used => "used",
                     UsageDisplay::Left => "left",
                 };
                 TrayMetric {
-                    compact: format!("{short} {percent:.0}%"),
+                    value: format!("{percent:.0}%"),
                     detail: format!("{} {percent:.0}% {word}", quota.label),
-                    fraction: Some(percent / 100.0),
-                    severity: pacing::project(
-                        quota,
-                        chrono::Utc::now(),
-                        definition.source.session_window(),
-                    )
-                    .severity,
+                    gauge: Some(TrayGauge {
+                        display_fraction,
+                        #[cfg(any(not(target_os = "macos"), test))]
+                        remaining_fraction: 1.0 - used_fraction,
+                    }),
                 }
             })
     };
     match &definition.source {
-        MetricSource::Quota { source_id, .. } => quota(source_id, &tray.short_label),
-        MetricSource::QuotaOrValue { source_id, .. } => quota(source_id, &tray.short_label)
-            .or_else(|| {
-                value_metric(
-                    &tray.short_label,
-                    snapshot,
-                    source_id,
-                    tray.suffix.as_deref(),
-                )
-            }),
-        MetricSource::Value { source_id } => value_metric(
-            &tray.short_label,
-            snapshot,
-            source_id,
-            tray.suffix.as_deref(),
-        ),
-        MetricSource::Usage { period } => usage_metric(
-            &tray.short_label,
-            &definition.label,
-            usage_period(snapshot, *period),
-        ),
+        MetricSource::Quota { source_id, .. } => quota(source_id),
+        MetricSource::QuotaOrValue { source_id, .. } => {
+            quota(source_id).or_else(|| value_metric(snapshot, source_id, tray.suffix.as_deref()))
+        }
+        MetricSource::Value { source_id } => {
+            value_metric(snapshot, source_id, tray.suffix.as_deref())
+        }
+        MetricSource::Usage { period } => {
+            usage_metric(&definition.label, usage_period(snapshot, *period))
+        }
         MetricSource::Trend => None,
     }
 }
@@ -225,7 +249,6 @@ fn usage_period(snapshot: &ProviderSnapshot, period: UsagePeriodSelection) -> Op
 }
 
 fn value_metric(
-    short: &str,
     snapshot: &ProviderSnapshot,
     source_id: &str,
     tray_suffix: Option<&str>,
@@ -234,7 +257,7 @@ fn value_metric(
         .value_metrics
         .iter()
         .find(|metric| metric.id == source_id)?;
-    let compact = metric
+    let value = metric
         .values
         .iter()
         .map(format_tray_value)
@@ -246,14 +269,13 @@ fn value_metric(
         .map(format_detail_value)
         .collect::<Vec<_>>()
         .join(" · ");
-    let compact = tray_suffix
-        .map(|suffix| format!("{compact} {suffix}"))
-        .unwrap_or(compact);
+    let value = tray_suffix
+        .map(|suffix| format!("{value} {suffix}"))
+        .unwrap_or(value);
     Some(TrayMetric {
-        compact: format!("{short} {compact}"),
+        value,
         detail: format!("{} {detail}", metric.label),
-        fraction: None,
-        severity: PaceSeverity::Untracked,
+        gauge: None,
     })
 }
 
@@ -281,17 +303,17 @@ fn format_detail_value(value: &MetricValue) -> String {
         .unwrap_or(number)
 }
 
-fn usage_metric(short: &str, label: &str, period: Option<&UsagePeriod>) -> Option<TrayMetric> {
+fn usage_metric(label: &str, period: Option<&UsagePeriod>) -> Option<TrayMetric> {
     let period = period?;
     let value = period
         .estimated_cost_usd
         .map(|value| format!("${value:.2}"))
         .unwrap_or_else(|| format_tokens(period.tokens));
+    let detail = format!("{label} {value}");
     Some(TrayMetric {
-        compact: format!("{short} {value}"),
-        detail: format!("{label} {value}"),
-        fraction: None,
-        severity: PaceSeverity::Untracked,
+        value,
+        detail,
+        gauge: None,
     })
 }
 
@@ -303,36 +325,6 @@ fn format_tokens(tokens: u64) -> String {
     } else {
         tokens.to_string()
     }
-}
-
-#[cfg(target_os = "macos")]
-fn bar_icon(fractions: &[f64]) -> Image<'static> {
-    let size = BAR_ICON_SIZE as usize;
-    let mut rgba = vec![0_u8; size * size * 4];
-    let count = fractions.len().min(MAX_BARS);
-    let bar_width = if count <= 2 { 4 } else { 3 };
-    let gap = 1;
-    let total_width = count * bar_width + count.saturating_sub(1) * gap;
-    let start_x = (size.saturating_sub(total_width)) / 2;
-    let baseline = size - 3;
-    let max_height = size - 6;
-
-    for (index, fraction) in fractions.iter().take(MAX_BARS).enumerate() {
-        let height = ((*fraction).clamp(0.0, 1.0) * max_height as f64)
-            .round()
-            .max(1.0) as usize;
-        let x0 = start_x + index * (bar_width + gap);
-        for y in baseline - height..baseline {
-            for x in x0..x0 + bar_width {
-                let pixel = (y * size + x) * 4;
-                rgba[pixel] = 0;
-                rgba[pixel + 1] = 0;
-                rgba[pixel + 2] = 0;
-                rgba[pixel + 3] = 255;
-            }
-        }
-    }
-    Image::new_owned(rgba, BAR_ICON_SIZE, BAR_ICON_SIZE)
 }
 
 fn mark_icon() -> Image<'static> {
@@ -355,7 +347,10 @@ mod tests {
         settings::default_settings,
     };
 
-    use super::{format_tokens, primary_gauge, resolved_metrics, TrayMetric};
+    use super::{
+        bar_fractions, format_tokens, primary_gauge, resolved_groups, text_title, TrayGauge,
+        TrayGroup, TrayMetric,
+    };
     use crate::service::UsageViewState;
 
     #[test]
@@ -363,6 +358,60 @@ mod tests {
         let image = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))
             .expect("bundled tray mark should decode");
         assert_eq!((image.width(), image.height()), (32, 32));
+    }
+
+    #[test]
+    fn text_title_groups_values_by_provider_without_choosing_a_primary_metric() {
+        let metric = |value: &str| TrayMetric {
+            value: value.into(),
+            detail: value.into(),
+            gauge: None,
+        };
+        let groups = vec![
+            TrayGroup {
+                short_name: "Cl".into(),
+                metrics: vec![metric("75%"), metric("40%")],
+            },
+            TrayGroup {
+                short_name: "Cx".into(),
+                metrics: vec![metric("90%")],
+            },
+        ];
+
+        assert_eq!(text_title(&groups).as_deref(), Some("Cl 75%/40%  Cx 90%"));
+        assert_eq!(text_title(&[]), None);
+    }
+
+    #[test]
+    fn bars_use_the_first_four_bounded_metrics_in_layout_order() {
+        let metric = |value: f64| TrayMetric {
+            value: format!("{value:.0}%"),
+            detail: String::new(),
+            gauge: Some(TrayGauge {
+                display_fraction: value / 100.0,
+                remaining_fraction: value / 100.0,
+            }),
+        };
+        let groups = vec![
+            TrayGroup {
+                short_name: "Cl".into(),
+                metrics: vec![
+                    metric(10.0),
+                    TrayMetric {
+                        value: "$4".into(),
+                        detail: String::new(),
+                        gauge: None,
+                    },
+                    metric(20.0),
+                ],
+            },
+            TrayGroup {
+                short_name: "Cx".into(),
+                metrics: vec![metric(30.0), metric(40.0), metric(50.0)],
+            },
+        ];
+
+        assert_eq!(bar_fractions(&groups), vec![0.1, 0.2, 0.3, 0.4]);
     }
 
     #[test]
@@ -408,15 +457,42 @@ mod tests {
             last_full_refresh_at: None,
         };
         let catalog = ProviderRegistry::from_definitions(vec![codex::definition()]).unwrap();
-        let metrics = resolved_metrics(
+        let groups = resolved_groups(
             &state,
             &default_settings(&catalog, &HashSet::from(["codex".to_owned()])),
             &catalog,
         );
-        assert_eq!(metrics.len(), 2);
-        assert_eq!(metrics[0].compact, "Cx S 75%");
-        assert_eq!(metrics[1].compact, "Cx W 40%");
-        assert_eq!(metrics[0].fraction, Some(0.75));
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].short_name, "Cx");
+        assert_eq!(groups[0].metrics.len(), 2);
+        assert_eq!(groups[0].metrics[0].value, "75%");
+        assert_eq!(groups[0].metrics[1].value, "40%");
+        assert_eq!(text_title(&groups).as_deref(), Some("Cx 75%/40%"));
+        assert_eq!(
+            groups[0].metrics[0].gauge,
+            Some(TrayGauge {
+                display_fraction: 0.75,
+                remaining_fraction: 0.75,
+            })
+        );
+
+        let mut used_settings = default_settings(&catalog, &HashSet::from(["codex".to_owned()]));
+        used_settings.usage_display = crate::models::UsageDisplay::Used;
+        let used_groups = resolved_groups(&state, &used_settings, &catalog);
+        assert_eq!(
+            used_groups[0].metrics[0].gauge,
+            Some(TrayGauge {
+                display_fraction: 0.25,
+                remaining_fraction: 0.75,
+            })
+        );
+    }
+
+    #[test]
+    fn pinned_metrics_without_a_snapshot_do_not_leave_placeholder_content() {
+        let catalog = ProviderRegistry::from_definitions(vec![codex::definition()]).unwrap();
+        let settings = default_settings(&catalog, &HashSet::from(["codex".to_owned()]));
+        assert!(resolved_groups(&UsageViewState::default(), &settings, &catalog).is_empty());
     }
 
     #[test]
@@ -428,29 +504,38 @@ mod tests {
 
     #[test]
     fn gauge_uses_the_first_pinned_quota_metric() {
-        let metrics = vec![
-            TrayMetric {
-                compact: "Credits 10".into(),
-                detail: "Credits 10".into(),
-                fraction: None,
-                severity: crate::pacing::PaceSeverity::Untracked,
-            },
-            TrayMetric {
-                compact: "Session 40%".into(),
-                detail: "Session 40% left".into(),
-                fraction: Some(0.4),
-                severity: crate::pacing::PaceSeverity::RunningOut,
-            },
-            TrayMetric {
-                compact: "Weekly 80%".into(),
-                detail: "Weekly 80% left".into(),
-                fraction: Some(0.8),
-                severity: crate::pacing::PaceSeverity::Healthy,
-            },
-        ];
+        let groups = vec![TrayGroup {
+            short_name: "Cx".into(),
+            metrics: vec![
+                TrayMetric {
+                    value: "10".into(),
+                    detail: "Credits 10".into(),
+                    gauge: None,
+                },
+                TrayMetric {
+                    value: "40%".into(),
+                    detail: "Session 40% left".into(),
+                    gauge: Some(TrayGauge {
+                        display_fraction: 0.4,
+                        remaining_fraction: 0.4,
+                    }),
+                },
+                TrayMetric {
+                    value: "80%".into(),
+                    detail: "Weekly 80% left".into(),
+                    gauge: Some(TrayGauge {
+                        display_fraction: 0.8,
+                        remaining_fraction: 0.8,
+                    }),
+                },
+            ],
+        }];
         assert_eq!(
-            primary_gauge(&metrics),
-            Some((0.4, crate::pacing::PaceSeverity::RunningOut))
+            primary_gauge(&groups),
+            Some(TrayGauge {
+                display_fraction: 0.4,
+                remaining_fraction: 0.4,
+            })
         );
     }
 
@@ -489,8 +574,8 @@ mod tests {
             crate::models::UsageDisplay::Left,
         )
         .unwrap();
-        assert_eq!(metric.compact, "E $33 · 821 credits");
+        assert_eq!(metric.value, "$33 · 821 credits");
         assert_eq!(metric.detail, "Extra Usage $32.84 · 821 credits");
-        assert_eq!(metric.fraction, None);
+        assert_eq!(metric.gauge, None);
     }
 }

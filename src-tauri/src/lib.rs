@@ -2,6 +2,8 @@ mod child_process;
 mod commands;
 mod desktop_integration;
 mod logging;
+#[cfg(any(target_os = "macos", test))]
+mod menu_bar;
 mod models;
 mod notifications;
 mod pacing;
@@ -13,6 +15,7 @@ mod refresh_loop;
 mod service;
 mod settings;
 mod storage;
+#[cfg(any(not(target_os = "macos"), test))]
 mod tray_icon;
 mod tray_presentation;
 mod updates;
@@ -229,15 +232,28 @@ pub fn run() {
             }
 
             if !desktop_integration.standalone_window {
-                let open = MenuItem::with_id(app, "open", "Open OpenQuota", true, None::<&str>)?;
-                let customize =
-                    MenuItem::with_id(app, "customize", "Customize…", true, None::<&str>)?;
-                let settings_item =
-                    MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
-                let separator = PredefinedMenuItem::separator(app)?;
-                let quit = MenuItem::with_id(app, "quit", "Quit OpenQuota", true, None::<&str>)?;
-                let menu =
-                    Menu::with_items(app, &[&open, &customize, &settings_item, &separator, &quit])?;
+                #[cfg(target_os = "macos")]
+                let menu = {
+                    let settings_item =
+                        MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
+                    let separator = PredefinedMenuItem::separator(app)?;
+                    let quit =
+                        MenuItem::with_id(app, "quit", "Quit OpenQuota", true, None::<&str>)?;
+                    Menu::with_items(app, &[&settings_item, &separator, &quit])?
+                };
+                #[cfg(not(target_os = "macos"))]
+                let menu = {
+                    let open =
+                        MenuItem::with_id(app, "open", "Open OpenQuota", true, None::<&str>)?;
+                    let customize =
+                        MenuItem::with_id(app, "customize", "Customize…", true, None::<&str>)?;
+                    let settings_item =
+                        MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
+                    let separator = PredefinedMenuItem::separator(app)?;
+                    let quit =
+                        MenuItem::with_id(app, "quit", "Quit OpenQuota", true, None::<&str>)?;
+                    Menu::with_items(app, &[&open, &customize, &settings_item, &separator, &quit])?
+                };
 
                 let tray = TrayIconBuilder::with_id("openquota-tray")
                     .icon(
@@ -245,13 +261,10 @@ pub fn run() {
                             .expect("OpenQuota requires a bundled application icon")
                             .clone(),
                     )
-                    .tooltip("OpenQuota")
                     .menu(&menu);
-                #[cfg(target_os = "linux")]
-                let tray = tray.show_menu_on_left_click(true);
                 #[cfg(not(target_os = "linux"))]
-                let tray = tray.show_menu_on_left_click(false);
-                tray.on_menu_event(|app, event| match event.id.as_ref() {
+                let tray = tray.tooltip("OpenQuota").show_menu_on_left_click(false);
+                let tray = tray.on_menu_event(|app, event| match event.id.as_ref() {
                     "open" => {
                         app.state::<PopupDismissGuard>().cancel_pending();
                         if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
@@ -262,8 +275,9 @@ pub fn run() {
                     "settings" => open_screen(app, "settings"),
                     "quit" => app.exit(0),
                     _ => {}
-                })
-                .on_tray_icon_event(|tray, event| {
+                });
+                #[cfg(not(target_os = "linux"))]
+                let tray = tray.on_tray_icon_event(|tray, event| {
                     tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
 
                     if matches!(
@@ -276,8 +290,8 @@ pub fn run() {
                     ) {
                         toggle_popup(tray.app_handle());
                     }
-                })
-                .build(app)?;
+                });
+                tray.build(app)?;
                 app_info!("lifecycle", "system tray integration ready");
             }
 

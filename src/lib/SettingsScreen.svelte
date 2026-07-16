@@ -163,17 +163,19 @@
 
   <div class="settings-section">
     <h2>Appearance</h2>
-    <div class="setting-row">
-      <span><b>Icon Style</b></span><SelectMenu
-        label="Icon Style"
-        value={settings.menuBarStyle}
-        options={[
-          { value: 'text', label: 'Text' },
-          { value: 'bars', label: 'Bars' },
-        ]}
-        onChange={(value) => patch({ menuBarStyle: value as AppSettings['menuBarStyle'] })}
-      />
-    </div>
+    {#if platform === 'macos'}
+      <div class="setting-row">
+        <span><b>Icon Style</b></span><SelectMenu
+          label="Icon Style"
+          value={settings.menuBarStyle}
+          options={[
+            { value: 'text', label: 'Text' },
+            { value: 'bars', label: 'Bars' },
+          ]}
+          onChange={(value) => patch({ menuBarStyle: value as AppSettings['menuBarStyle'] })}
+        />
+      </div>
+    {/if}
     <div class="setting-row">
       <span><b>Theme</b></span><SelectMenu
         label="Theme"

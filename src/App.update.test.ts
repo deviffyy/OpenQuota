@@ -63,9 +63,15 @@ describe('OpenQuota update lifecycle', () => {
       return Promise.reject(new Error(`unexpected command ${command}`));
     });
   });
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   it('checks for updates manually and persists the macOS menu bar style', async () => {
+    vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue(
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)',
+    );
     render(App);
     await screen.findByText('Plus');
     await fireEvent.click(screen.getByLabelText('Open options'));
@@ -88,6 +94,17 @@ describe('OpenQuota update lifecycle', () => {
         expect.objectContaining({ settings: expect.objectContaining({ menuBarStyle: 'bars' }) }),
       ),
     );
+  });
+
+  it('hides the macOS-only icon style on other desktop platforms', async () => {
+    vi.spyOn(window.navigator, 'userAgent', 'get').mockReturnValue(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    );
+    render(App);
+    await screen.findByText('Plus');
+    await fireEvent.click(screen.getByLabelText('Open options'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(screen.queryByRole('combobox', { name: 'Icon Style' })).not.toBeInTheDocument();
   });
 
   it('surfaces an available update on the dashboard and allows it to be dismissed', async () => {
