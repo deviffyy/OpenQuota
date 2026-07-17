@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
 use crate::providers::credential_store::{decode_go_keyring_value, read_generic_password};
 
@@ -17,6 +18,13 @@ pub fn load_token() -> Option<AntigravityToken> {
 
 pub fn has_local_credentials() -> bool {
     load_token().is_some()
+}
+
+pub fn credential_fingerprint(refresh_token: Option<&str>) -> Option<[u8; 32]> {
+    let refresh_token = refresh_token
+        .map(str::trim)
+        .filter(|value| !value.is_empty())?;
+    Some(Sha256::digest(refresh_token.as_bytes()).into())
 }
 
 pub fn extract_token(raw: &[u8]) -> Option<AntigravityToken> {
@@ -96,7 +104,7 @@ fn non_empty(value: &str) -> Option<&str> {
 mod tests {
     use base64::{engine::general_purpose::STANDARD, Engine};
 
-    use super::extract_token;
+    use super::{credential_fingerprint, extract_token};
 
     #[test]
     fn extracts_nested_go_keyring_token() {
@@ -106,5 +114,14 @@ mod tests {
         assert_eq!(token.access_token.as_deref(), Some("access"));
         assert_eq!(token.refresh_token.as_deref(), Some("refresh"));
         assert!(token.expiry.is_some());
+    }
+
+    #[test]
+    fn refresh_credential_fingerprint_is_stable_and_secret_free() {
+        let first = credential_fingerprint(Some("refresh-a")).unwrap();
+        assert_eq!(first, credential_fingerprint(Some(" refresh-a ")).unwrap());
+        assert_ne!(first, credential_fingerprint(Some("refresh-b")).unwrap());
+        assert!(credential_fingerprint(None).is_none());
+        assert!(credential_fingerprint(Some("   ")).is_none());
     }
 }

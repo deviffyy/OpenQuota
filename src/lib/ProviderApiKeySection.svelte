@@ -14,23 +14,25 @@
   let credentialState = $state<ProviderApiKeyState | null>(null);
   let supported = $state<boolean | null>(null);
   let open = $state(false);
-  let overrideEnvironment = $state(false);
+  let overrideExternal = $state(false);
   let apiKey = $state('');
   let revealInput = $state(false);
   let saving = $state(false);
   let error = $state<string | null>(null);
   let availabilityError = $state<string | null>(null);
   const status = $derived<ApiKeyStatus>(credentialState?.status ?? 'notSet');
-  const editable = $derived(status === 'notSet' || overrideEnvironment);
+  const editable = $derived(status === 'notSet' || overrideExternal);
   const canClear = $derived(status === 'saved' || status === 'overrideActive');
   const sourceLabel = $derived(
     status === 'fromEnvironment'
       ? 'From Your Environment'
-      : status === 'saved'
-        ? 'Saved securely'
-        : status === 'overrideActive'
-          ? 'Custom Key'
-          : '',
+      : status === 'fromConfig'
+        ? 'From Config File'
+        : status === 'saved'
+          ? 'Saved securely'
+          : status === 'overrideActive'
+            ? 'Custom Key'
+            : '',
   );
 
   function errorMessage(cause: unknown, fallback: string) {
@@ -49,7 +51,7 @@
   }
 
   function resetEditor() {
-    overrideEnvironment = false;
+    overrideExternal = false;
     apiKey = '';
     revealInput = false;
     error = null;
@@ -149,7 +151,7 @@
                   disabled={!apiKey.trim() || saving}
                   onclick={save}>{saving ? 'Saving…' : 'Save'}</button
                 >
-                {#if overrideEnvironment}
+                {#if overrideExternal}
                   <button type="button" disabled={saving} onclick={resetEditor}>Cancel</button>
                 {/if}
               </div>
@@ -175,9 +177,9 @@
                   disabled
                 />
               </div>
-              {#if status === 'fromEnvironment'}
+              {#if status === 'fromEnvironment' || status === 'fromConfig'}
                 <label class="api-key-override">
-                  <input type="checkbox" bind:checked={overrideEnvironment} disabled={saving} />
+                  <input type="checkbox" bind:checked={overrideExternal} disabled={saving} />
                   Override With a Custom Key
                 </label>
               {/if}

@@ -142,6 +142,7 @@ pub struct ClaudeProvider {
     storage: Arc<Storage>,
     pricing: Arc<PricingStore>,
     client: ClaudeClient,
+    cached_credential_fingerprint: Mutex<Option<[u8; 32]>>,
     last_good: Mutex<Option<ProviderSnapshot>>,
     rate_limited_until: Mutex<Option<chrono::DateTime<Utc>>>,
 }
@@ -152,6 +153,7 @@ impl ClaudeProvider {
             storage,
             pricing,
             client: ClaudeClient::new()?,
+            cached_credential_fingerprint: Mutex::new(None),
             last_good: Mutex::new(None),
             rate_limited_until: Mutex::new(None),
         })
@@ -226,8 +228,11 @@ impl ClaudeProvider {
                 refreshed_at: now,
             });
         }
+        self.activate_live_usage_cache(credential.fingerprint());
         if credential.needs_refresh(now.timestamp_millis()) {
+            let previous_fingerprint = credential.fingerprint();
             refresh_credential(&self.client, credential, config, now, &mut warnings)?;
+            self.replace_live_usage_fingerprint(previous_fingerprint, credential.fingerprint());
         }
 
         let cooldown_until = self
@@ -266,7 +271,9 @@ impl ClaudeProvider {
         let token = credential.access_token().ok_or(ClaudeError::NotLoggedIn)?;
         let (mut status, mut body, mut retry_after) = self.client.fetch_usage(token, config)?;
         if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
+            let previous_fingerprint = credential.fingerprint();
             refresh_credential(&self.client, credential, config, now, &mut warnings)?;
+            self.replace_live_usage_fingerprint(previous_fingerprint, credential.fingerprint());
             let token = credential.access_token().ok_or(ClaudeError::TokenExpired)?;
             (status, body, retry_after) = self.client.fetch_usage(token, config)?;
         }
@@ -330,6 +337,38 @@ impl ClaudeProvider {
             *until = None;
         }
         Ok(snapshot)
+    }
+
+    fn activate_live_usage_cache(&self, fingerprint: [u8; 32]) {
+        let changed = self
+            .cached_credential_fingerprint
+            .lock()
+            .map(|mut active| {
+                if active.as_ref() == Some(&fingerprint) {
+                    false
+                } else {
+                    *active = Some(fingerprint);
+                    true
+                }
+            })
+            .unwrap_or(true);
+        if !changed {
+            return;
+        }
+        if let Ok(mut last) = self.last_good.lock() {
+            *last = None;
+        }
+        if let Ok(mut until) = self.rate_limited_until.lock() {
+            *until = None;
+        }
+    }
+
+    fn replace_live_usage_fingerprint(&self, previous: [u8; 32], current: [u8; 32]) {
+        if let Ok(mut active) = self.cached_credential_fingerprint.lock() {
+            if active.as_ref() == Some(&previous) {
+                *active = Some(current);
+            }
+        }
     }
 }
 
@@ -436,9 +475,18 @@ impl crate::providers::UsageProvider for ClaudeProvider {
 
 #[cfg(test)]
 mod tests {
-    use crate::models::ProviderNoticeTone;
+    use std::sync::Arc;
 
-    use super::rate_limit_notice;
+    use chrono::{Duration, Utc};
+    use tempfile::tempdir;
+
+    use crate::{
+        models::{ProviderNoticeTone, ProviderSnapshot, UsageHistory},
+        pricing::PricingStore,
+        storage::Storage,
+    };
+
+    use super::{rate_limit_notice, ClaudeProvider};
 
     #[test]
     fn rate_limit_notice_distinguishes_empty_and_stale_live_usage() {
@@ -452,5 +500,34 @@ mod tests {
             stale.message,
             "Showing the last successful limits · Retrying in about 1 minute"
         );
+    }
+
+    #[test]
+    fn account_change_clears_live_usage_and_rate_limit_cache() {
+        let directory = tempdir().unwrap();
+        let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
+        let pricing = Arc::new(PricingStore::new(directory.path().join("pricing")).unwrap());
+        let provider = ClaudeProvider::new(storage, pricing).unwrap();
+        let snapshot = ProviderSnapshot {
+            provider_id: "claude".into(),
+            plan: None,
+            quotas: Vec::new(),
+            value_metrics: Vec::new(),
+            notices: Vec::new(),
+            usage: UsageHistory::default(),
+            warnings: Vec::new(),
+            refreshed_at: Utc::now(),
+        };
+
+        provider.activate_live_usage_cache([1; 32]);
+        *provider.last_good.lock().unwrap() = Some(snapshot);
+        *provider.rate_limited_until.lock().unwrap() = Some(Utc::now() + Duration::minutes(5));
+        provider.activate_live_usage_cache([1; 32]);
+        assert!(provider.last_good.lock().unwrap().is_some());
+        assert!(provider.rate_limited_until.lock().unwrap().is_some());
+
+        provider.activate_live_usage_cache([2; 32]);
+        assert!(provider.last_good.lock().unwrap().is_none());
+        assert!(provider.rate_limited_until.lock().unwrap().is_none());
     }
 }

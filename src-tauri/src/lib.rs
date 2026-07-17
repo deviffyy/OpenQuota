@@ -44,9 +44,9 @@ use crate::{
     pacing::NotificationEvaluator,
     pricing::PricingStore,
     providers::{
-        antigravity::AntigravityProvider, claude::ClaudeProvider, codex::CodexProvider,
-        cursor::CursorProvider, detect_local_credentials, openrouter::OpenRouterProvider,
-        ProviderRegistry, UsageProvider,
+        antigravity::AntigravityProvider, claude::ClaudeProvider,
+        codex::reset_claim::CodexResetClaimService, codex::CodexProvider, cursor::CursorProvider,
+        detect_local_credentials, openrouter::OpenRouterProvider, ProviderRegistry, UsageProvider,
     },
     storage::Storage,
     window::{handle_window_event, open_screen, show_popup, toggle_popup, MAIN_WINDOW},
@@ -230,6 +230,7 @@ pub fn run() {
             app.manage(service.clone());
             app.manage(settings.clone());
             app.manage(notifications.clone());
+            app.manage(Arc::new(CodexResetClaimService::new()?));
 
             if let Some(shortcut) = settings.get().global_shortcut {
                 let _ = register_shortcut(app.handle(), &shortcut);
@@ -342,6 +343,7 @@ pub fn run() {
             commands::provider::delete_provider_api_key,
             commands::usage::refresh_usage,
             commands::usage::refresh_provider_usage,
+            commands::usage::claim_codex_reset_credit,
             commands::settings::get_app_settings,
             commands::settings::save_app_settings,
             commands::settings::reset_customization,

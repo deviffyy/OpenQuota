@@ -10,6 +10,7 @@ const CREDITS_URL: &str =
     "https://api2.cursor.sh/aiserver.v1.DashboardService/GetCreditGrantsBalance";
 const REFRESH_URL: &str = "https://api2.cursor.sh/oauth/token";
 const REST_USAGE_URL: &str = "https://cursor.com/api/usage";
+const USAGE_SUMMARY_URL: &str = "https://cursor.com/api/usage-summary";
 const STRIPE_URL: &str = "https://cursor.com/api/auth/stripe";
 const CSV_URL: &str = "https://cursor.com/api/dashboard/export-usage-events-csv";
 const CLIENT_ID: &str = "KbZUR41cY7W6zRSdpSUJ7I7mLYBKOCmB";
@@ -39,6 +40,7 @@ pub(super) struct Endpoints {
     pub credits: String,
     pub refresh: String,
     pub rest_usage: String,
+    pub usage_summary: String,
     pub stripe: String,
     pub csv: String,
 }
@@ -51,6 +53,7 @@ impl Default for Endpoints {
             credits: CREDITS_URL.into(),
             refresh: REFRESH_URL.into(),
             rest_usage: REST_USAGE_URL.into(),
+            usage_summary: USAGE_SUMMARY_URL.into(),
             stripe: STRIPE_URL.into(),
             csv: CSV_URL.into(),
         }
@@ -138,6 +141,26 @@ impl CursorClient {
             "stripe",
             self.client
                 .get(&self.endpoints.stripe)
+                .header(
+                    "Cookie",
+                    format!("WorkosCursorSessionToken={}", session.session_token),
+                )
+                .timeout(Duration::from_secs(10)),
+        )
+        .map(Some)
+    }
+
+    pub fn fetch_usage_summary(
+        &self,
+        access_token: &str,
+    ) -> Result<Option<CursorResponse>, CursorError> {
+        let Some(session) = session(access_token) else {
+            return Ok(None);
+        };
+        self.send(
+            "usage-summary",
+            self.client
+                .get(&self.endpoints.usage_summary)
                 .header(
                     "Cookie",
                     format!("WorkosCursorSessionToken={}", session.session_token),
@@ -251,6 +274,7 @@ mod tests {
             credits: format!("{base}/credits"),
             refresh: format!("{base}/token"),
             rest_usage: format!("{base}/rest"),
+            usage_summary: format!("{base}/summary"),
             stripe: format!("{base}/stripe"),
             csv: format!("{base}/csv"),
         })

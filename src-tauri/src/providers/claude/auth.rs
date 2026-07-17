@@ -68,6 +68,27 @@ impl ClaudeCredential {
             .is_some_and(|expires| expires - now_millis as f64 <= 5.0 * 60.0 * 1000.0)
     }
 
+    pub fn fingerprint(&self) -> [u8; 32] {
+        let access = Sha256::digest(
+            self.oauth
+                .access_token
+                .as_deref()
+                .unwrap_or_default()
+                .as_bytes(),
+        );
+        let refresh = Sha256::digest(
+            self.oauth
+                .refresh_token
+                .as_deref()
+                .unwrap_or_default()
+                .as_bytes(),
+        );
+        let mut pair = Sha256::new();
+        pair.update(access);
+        pair.update(refresh);
+        pair.finalize().into()
+    }
+
     pub fn update_and_save(
         &mut self,
         access_token: String,
@@ -369,5 +390,33 @@ mod tests {
         assert!(matches!(error, ClaudeError::AuthWrite));
         assert!(!error.to_string().contains("secret-access"));
         assert!(!error.to_string().contains("secret-refresh"));
+    }
+
+    #[test]
+    fn credential_fingerprint_covers_the_complete_token_pair() {
+        let credential = |access: &str, refresh: &str| ClaudeCredential {
+            oauth: ClaudeOAuth {
+                access_token: Some(access.into()),
+                refresh_token: Some(refresh.into()),
+                ..ClaudeOAuth::default()
+            },
+            source: CredentialSource::Environment,
+            document: ClaudeCredentialsFile::default(),
+            inference_only: false,
+        };
+
+        let original = credential("shared-access", "refresh-a").fingerprint();
+        assert_eq!(
+            original,
+            credential("shared-access", "refresh-a").fingerprint()
+        );
+        assert_ne!(
+            original,
+            credential("shared-access", "refresh-b").fingerprint()
+        );
+        assert_ne!(
+            original,
+            credential("different-access", "refresh-a").fingerprint()
+        );
     }
 }

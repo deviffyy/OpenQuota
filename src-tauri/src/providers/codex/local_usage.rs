@@ -124,6 +124,7 @@ fn discover_session_files(homes: &[PathBuf]) -> Vec<PathBuf> {
         };
         let mut seen_relative = HashSet::new();
         for source in sources {
+            let source = fs::canonicalize(&source).unwrap_or(source);
             if !seen_directories.insert(source.clone()) {
                 continue;
             }
@@ -452,7 +453,7 @@ fn estimate_cost(event: &TokenEvent, fast_tier: bool, pricing: &ModelPricing) ->
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashMap, fs};
+    use std::{collections::HashMap, fs, io, path::Path};
 
     use chrono::{TimeZone, Utc};
     use tempfile::tempdir;
@@ -536,7 +537,39 @@ mod tests {
         fs::write(&active, "active").unwrap();
         fs::write(&archived, "archived").unwrap();
 
-        assert_eq!(discover_session_files(&[home.to_path_buf()]), vec![active]);
+        assert_eq!(
+            discover_session_files(&[home.to_path_buf()]),
+            vec![fs::canonicalize(active).unwrap()]
+        );
+    }
+
+    #[test]
+    fn discovers_logs_under_a_symlinked_sessions_root() {
+        let directory = tempdir().unwrap();
+        let home = directory.path().join("codex");
+        let real_sessions = directory.path().join("real-sessions");
+        let log = real_sessions.join("2026/07/rollout.jsonl");
+        fs::create_dir_all(log.parent().unwrap()).unwrap();
+        fs::create_dir_all(&home).unwrap();
+        fs::write(&log, "{}").unwrap();
+        if create_directory_symlink(&real_sessions, &home.join("sessions")).is_err() {
+            return;
+        }
+
+        assert_eq!(
+            discover_session_files(&[home]),
+            vec![fs::canonicalize(log).unwrap()]
+        );
+    }
+
+    #[cfg(unix)]
+    fn create_directory_symlink(target: &Path, link: &Path) -> io::Result<()> {
+        std::os::unix::fs::symlink(target, link)
+    }
+
+    #[cfg(windows)]
+    fn create_directory_symlink(target: &Path, link: &Path) -> io::Result<()> {
+        std::os::windows::fs::symlink_dir(target, link)
     }
 
     #[test]

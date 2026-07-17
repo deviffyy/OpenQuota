@@ -2,6 +2,7 @@ pub mod auth;
 pub mod client;
 pub mod local_usage;
 pub mod mapper;
+pub mod reset_claim;
 
 use std::sync::Arc;
 

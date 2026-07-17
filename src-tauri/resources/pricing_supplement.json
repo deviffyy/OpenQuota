@@ -1,6 +1,6 @@
 {
   "$comment": "OpenQuota pricing supplement. Prices models that no public catalog carries, supplies fast-variant multipliers the catalogs omit, and maps provider log model slugs to canonical pricing keys (LiteLLM keys, models.dev ids, or entries in this file). The raw main-branch file is refreshed by installed apps, so merged corrections arrive without an app release. Rates are USD per million tokens.",
-  "updated_at": "2026-07-08",
+  "updated_at": "2026-07-14",
   "pricing": {
     "auto": {
       "input_per_million": 1.25,
@@ -135,9 +135,9 @@
     { "pattern": "^composer-2\\.5$", "canonical": "composer-2.5" },
     { "pattern": "^composer-2\\.5-fast$", "canonical": "composer-2.5-fast" },
     { "pattern": "^github_bugbot$", "canonical": "github_bugbot" },
-    { "pattern": "^grok-4\\.5-fast(?:-(?:low|medium|high))?$", "canonical": "grok-4.5-fast" },
-    { "pattern": "^grok-4\\.5(?:-(?:low|medium|high))?-fast$", "canonical": "grok-4.5-fast" },
-    { "pattern": "^grok-4\\.5(?:-(?:low|medium|high))?$", "canonical": "grok-4.5" },
+    { "pattern": "^(?:cursor-)?grok-4\\.5-fast(?:-(?:low|medium|high|xhigh))?$", "canonical": "grok-4.5-fast" },
+    { "pattern": "^(?:cursor-)?grok-4\\.5(?:-(?:low|medium|high|xhigh))?-fast$", "canonical": "grok-4.5-fast" },
+    { "pattern": "^(?:cursor-)?grok-4\\.5(?:-(?:low|medium|high|xhigh))?$", "canonical": "grok-4.5" },
     { "pattern": "^kimi-k2\\.7(?:-code)?$", "canonical": "kimi-k2.7-code" },
     { "pattern": "^kimi-k2p7(?:-code)?$", "canonical": "kimi-k2.7-code" },
     { "pattern": "^claude-4\\.5-haiku(?:-thinking)?$", "canonical": "claude-haiku-4-5" },

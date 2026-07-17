@@ -4,6 +4,7 @@ import type {
   AppSettings,
   BootstrapState,
   ProviderApiKeyState,
+  ResetClaimOutcome,
   SettingsViewState,
   UpdateProgress,
   UpdateStatus,
@@ -27,6 +28,10 @@ export function refreshUsage() {
 
 export function refreshProviderUsage(providerId: string) {
   return invoke<UsageViewState>('refresh_provider_usage', { providerId });
+}
+
+export function claimCodexResetCredit(expiresAt: string, redeemRequestId: string) {
+  return invoke<ResetClaimOutcome>('claim_codex_reset_credit', { expiresAt, redeemRequestId });
 }
 
 export function openProviderLink(providerId: string, linkIndex: number) {

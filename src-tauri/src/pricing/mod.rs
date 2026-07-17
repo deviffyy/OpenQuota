@@ -89,6 +89,20 @@ mod bundled_resource_tests {
             pricing.resolve("grok-build-0.1").unwrap().input_per_million,
             1.0
         );
+        assert_eq!(
+            pricing
+                .resolve("cursor-grok-4.5-xhigh")
+                .unwrap()
+                .input_per_million,
+            pricing.resolve("grok-4.5").unwrap().input_per_million
+        );
+        assert_eq!(
+            pricing
+                .resolve("cursor-grok-4.5-fast-xhigh")
+                .unwrap()
+                .output_per_million,
+            pricing.resolve("grok-4.5-fast").unwrap().output_per_million
+        );
         assert!(pricing.resolve("glm-5.2-bogus").is_none());
     }
 

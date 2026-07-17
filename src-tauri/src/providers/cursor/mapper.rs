@@ -249,6 +249,239 @@ pub fn map_request_usage(
     })
 }
 
+pub fn map_summary_usage(
+    summary: Option<&Value>,
+    request_usage: Option<&Value>,
+    plan_name: Option<&str>,
+    unavailable_message: &str,
+) -> Result<CursorMappedUsage, CursorError> {
+    let (resets_at, period_seconds) = summary_billing_cycle(summary, request_usage);
+    let mut quotas = Vec::new();
+    let mut value_metrics = Vec::new();
+
+    let has_requests = request_usage
+        .and_then(|usage| usage.get("gpt-4"))
+        .and_then(Value::as_object)
+        .and_then(|requests| {
+            let limit = requests.get("maxRequestUsage").and_then(number)?;
+            if limit <= 0.0 {
+                return None;
+            }
+            let used = requests
+                .get("numRequests")
+                .and_then(number)
+                .or_else(|| requests.get("numRequestsTotal").and_then(number))
+                .unwrap_or_default()
+                .max(0.0);
+            Some((used, limit))
+        });
+    if let Some((used, limit)) = has_requests {
+        for (id, label) in [("usage", "Total usage"), ("requests", "Requests")] {
+            quotas.push(quota(
+                id,
+                label,
+                used,
+                limit,
+                QuotaFormat::Count,
+                resets_at,
+                period_seconds,
+            ));
+        }
+    } else {
+        append_summary_total(summary, resets_at, period_seconds, &mut quotas);
+    }
+
+    let plan = summary
+        .and_then(|value| value.pointer("/individualUsage/plan"))
+        .and_then(Value::as_object);
+    for (key, id, label) in [
+        ("autoPercentUsed", "auto", "Auto usage"),
+        ("apiPercentUsed", "api", "API usage"),
+    ] {
+        if let Some(used) = plan.and_then(|value| value.get(key)).and_then(number) {
+            quotas.push(percent_quota(id, label, used, resets_at, period_seconds));
+        }
+    }
+
+    let individual = summary.and_then(|value| value.get("individualUsage"));
+    let team = summary.and_then(|value| value.get("teamUsage"));
+    if !append_on_demand_bucket(
+        individual.and_then(|value| value.get("onDemand")),
+        resets_at,
+        period_seconds,
+        &mut quotas,
+        &mut value_metrics,
+    ) {
+        append_on_demand_bucket(
+            team.and_then(|value| value.get("onDemand")),
+            resets_at,
+            period_seconds,
+            &mut quotas,
+            &mut value_metrics,
+        );
+    }
+
+    if quotas.is_empty() && value_metrics.is_empty() {
+        return Err(CursorError::RequestBasedUnavailable(
+            unavailable_message.into(),
+        ));
+    }
+    let membership = summary
+        .and_then(|value| value.get("membershipType"))
+        .and_then(Value::as_str);
+    Ok(CursorMappedUsage {
+        plan: plan_label(plan_name).or_else(|| plan_label(membership)),
+        quotas,
+        value_metrics,
+    })
+}
+
+fn append_summary_total(
+    summary: Option<&Value>,
+    resets_at: Option<DateTime<Utc>>,
+    period_seconds: u64,
+    quotas: &mut Vec<QuotaWindow>,
+) {
+    let individual = summary.and_then(|value| value.get("individualUsage"));
+    let team = summary.and_then(|value| value.get("teamUsage"));
+    let team_limit = summary
+        .and_then(|value| value.get("limitType"))
+        .and_then(Value::as_str)
+        .is_some_and(|value| value.eq_ignore_ascii_case("team"));
+    if team_limit {
+        if let Some((used, limit)) = team
+            .and_then(|value| value.get("pooled"))
+            .and_then(dollar_meter)
+        {
+            quotas.push(quota(
+                "usage",
+                "Total usage",
+                used / 100.0,
+                limit / 100.0,
+                QuotaFormat::Dollars,
+                resets_at,
+                period_seconds,
+            ));
+            return;
+        }
+    }
+    if let Some(used) = individual
+        .and_then(|value| value.pointer("/plan/totalPercentUsed"))
+        .and_then(number)
+    {
+        quotas.push(percent_quota(
+            "usage",
+            "Total usage",
+            used,
+            resets_at,
+            period_seconds,
+        ));
+        return;
+    }
+    for bucket in [
+        individual.and_then(|value| value.get("overall")),
+        team.and_then(|value| value.get("pooled")),
+    ] {
+        if let Some((used, limit)) = bucket.and_then(dollar_meter) {
+            quotas.push(quota(
+                "usage",
+                "Total usage",
+                used / 100.0,
+                limit / 100.0,
+                QuotaFormat::Dollars,
+                resets_at,
+                period_seconds,
+            ));
+            return;
+        }
+    }
+}
+
+fn append_on_demand_bucket(
+    bucket: Option<&Value>,
+    resets_at: Option<DateTime<Utc>>,
+    period_seconds: u64,
+    quotas: &mut Vec<QuotaWindow>,
+    value_metrics: &mut Vec<ValueMetric>,
+) -> bool {
+    if bucket
+        .and_then(|value| value.get("enabled"))
+        .and_then(Value::as_bool)
+        == Some(false)
+    {
+        return false;
+    }
+    if let Some((used, limit)) = bucket.and_then(dollar_meter) {
+        quotas.push(quota(
+            "onDemand",
+            "On-demand",
+            used / 100.0,
+            limit / 100.0,
+            QuotaFormat::Dollars,
+            resets_at,
+            period_seconds,
+        ));
+        return true;
+    }
+    if let Some(used) = bucket
+        .and_then(|value| value.get("used"))
+        .and_then(number)
+        .filter(|value| *value > 0.0)
+    {
+        value_metrics.push(dollar_value("onDemand", "On-demand", used / 100.0));
+        return true;
+    }
+    false
+}
+
+fn dollar_meter(bucket: &Value) -> Option<(f64, f64)> {
+    if bucket.get("enabled").and_then(Value::as_bool) == Some(false) {
+        return None;
+    }
+    let limit = bucket
+        .get("limit")
+        .and_then(number)
+        .filter(|value| *value > 0.0)?;
+    let reported = bucket.get("used").and_then(number);
+    let remaining = bucket.get("remaining").and_then(number).unwrap_or(limit);
+    let inferred = (limit - remaining).max(0.0);
+    let used = reported.filter(|value| *value > 0.0).unwrap_or(inferred);
+    Some((used.max(0.0), limit))
+}
+
+fn summary_billing_cycle(
+    summary: Option<&Value>,
+    request_usage: Option<&Value>,
+) -> (Option<DateTime<Utc>>, u64) {
+    let start = summary
+        .and_then(|value| value.get("billingCycleStart"))
+        .and_then(iso_timestamp);
+    let end = summary
+        .and_then(|value| value.get("billingCycleEnd"))
+        .and_then(iso_timestamp);
+    if let Some((start, end)) = start.zip(end).filter(|(start, end)| end > start) {
+        return (
+            Some(end),
+            end.signed_duration_since(start).num_seconds().max(1) as u64,
+        );
+    }
+    let request_start = request_usage
+        .and_then(|value| value.get("startOfMonth"))
+        .and_then(iso_timestamp);
+    (
+        request_start.map(|start| start + chrono::Duration::seconds(BILLING_PERIOD_SECONDS as i64)),
+        BILLING_PERIOD_SECONDS,
+    )
+}
+
+fn iso_timestamp(value: &Value) -> Option<DateTime<Utc>> {
+    value
+        .as_str()
+        .map(str::trim)
+        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+        .map(|value| value.to_utc())
+}
+
 pub fn stripe_balance_cents(response: Option<&Value>) -> f64 {
     response
         .and_then(|value| value.get("customerBalance"))
@@ -491,6 +724,83 @@ mod tests {
         assert_eq!(mapped.quotas[0].format, QuotaFormat::Count);
         assert_eq!(mapped.quotas[0].used_value, Some(120.0));
         assert_eq!(mapped.quotas[0].limit_value, Some(500.0));
+    }
+
+    #[test]
+    fn summary_combines_enterprise_requests_percentages_and_user_on_demand() {
+        let summary = json!({
+            "billingCycleStart": "2026-07-01T00:00:00Z",
+            "billingCycleEnd": "2026-08-01T00:00:00Z",
+            "membershipType": "enterprise",
+            "limitType": "team",
+            "individualUsage": {
+                "plan": {"totalPercentUsed": 6.25, "autoPercentUsed": 0, "apiPercentUsed": 6.25},
+                "onDemand": {"enabled": true, "used": 0, "limit": 25000, "remaining": 25000}
+            },
+            "teamUsage": {
+                "onDemand": {"enabled": true, "used": 75000, "limit": 600000, "remaining": 525000}
+            }
+        });
+        let request = json!({
+            "gpt-4": {"numRequests": 37, "numRequestsTotal": 37, "maxRequestUsage": 750},
+            "startOfMonth": "2026-07-01T00:00:00Z"
+        });
+
+        let mapped =
+            map_summary_usage(Some(&summary), Some(&request), None, "unavailable").unwrap();
+        assert_eq!(mapped.plan.as_deref(), Some("Enterprise"));
+        assert_eq!(
+            mapped
+                .quotas
+                .iter()
+                .map(|quota| quota.id.as_str())
+                .collect::<Vec<_>>(),
+            ["usage", "requests", "auto", "api", "onDemand"]
+        );
+        assert_eq!(mapped.quotas[0].format, QuotaFormat::Count);
+        assert_eq!(mapped.quotas[0].used_value, Some(37.0));
+        assert_eq!(mapped.quotas[0].limit_value, Some(750.0));
+        assert_eq!(mapped.quotas[4].used_value, Some(0.0));
+        assert_eq!(mapped.quotas[4].limit_value, Some(250.0));
+        assert_eq!(mapped.quotas[4].period_seconds, 31 * 24 * 60 * 60);
+    }
+
+    #[test]
+    fn summary_uses_team_dollar_buckets_when_individual_values_are_unusable() {
+        let summary = json!({
+            "limitType": "team",
+            "individualUsage": {"onDemand": {"enabled": false, "limit": 0}},
+            "teamUsage": {
+                "pooled": {"enabled": true, "used": 25000, "limit": 100000, "remaining": 75000},
+                "onDemand": {"enabled": true, "used": 10000, "limit": 50000, "remaining": 40000}
+            }
+        });
+
+        let mapped =
+            map_summary_usage(Some(&summary), None, Some("enterprise"), "unavailable").unwrap();
+        assert_eq!(mapped.quotas.len(), 2);
+        assert_eq!(mapped.quotas[0].id, "usage");
+        assert_eq!(mapped.quotas[0].format, QuotaFormat::Dollars);
+        assert_eq!(mapped.quotas[0].used_value, Some(250.0));
+        assert_eq!(mapped.quotas[0].limit_value, Some(1000.0));
+        assert_eq!(mapped.quotas[1].id, "onDemand");
+        assert_eq!(mapped.quotas[1].used_value, Some(100.0));
+    }
+
+    #[test]
+    fn summary_requires_at_least_one_usable_metric() {
+        let error = map_summary_usage(
+            Some(&json!({"individualUsage":{"plan":{"limit":0}}})),
+            Some(&json!({"gpt-4":{"maxRequestUsage":0}})),
+            Some("enterprise"),
+            "Enterprise usage unavailable",
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            CursorError::RequestBasedUnavailable(message)
+                if message == "Enterprise usage unavailable"
+        ));
     }
 
     #[test]

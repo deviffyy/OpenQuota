@@ -1,5 +1,8 @@
 <script lang="ts">
+  import { SvelteMap } from 'svelte/reactivity';
+  import { claimCodexResetCredit } from './backend';
   import { formatReset } from './pacing';
+  import type { ResetClaimOutcome } from './types';
 
   interface Props {
     title: string;
@@ -10,9 +13,15 @@
     top: number;
     onEnter: () => void;
     onLeave: () => void;
+    onDismiss: () => void;
   }
 
-  let { title, count, expiries, now, timeFormat, top, onEnter, onLeave }: Props = $props();
+  let { title, count, expiries, now, timeFormat, top, onEnter, onLeave, onDismiss }: Props =
+    $props();
+  let confirmingExpiry = $state<string | null>(null);
+  let pendingExpiry = $state<string | null>(null);
+  let result = $state<{ expiry: string; outcome: ResetClaimOutcome } | null>(null);
+  const requestIds = new SvelteMap<string, string>();
 
   const entries = $derived(
     [...expiries].sort().map((expiry, index) => {
@@ -32,6 +41,7 @@
       const imminent = relative === 'soon';
       return {
         id: `${expiry}:${index}`,
+        expiry,
         number: index + 1,
         severity,
         exact: imminent ? 'Expiring soon' : exact,
@@ -39,39 +49,136 @@
       };
     }),
   );
+
+  const resultMessage = $derived(
+    result?.outcome === 'success'
+      ? 'Reset applied.'
+      : result?.outcome === 'nothingToReset'
+        ? 'No active limit needs resetting.'
+        : result?.outcome === 'noCredit'
+          ? 'This reset is no longer available.'
+          : result?.outcome === 'failed'
+            ? 'Could not use this reset. Try again.'
+            : null,
+  );
+
+  function handleKeydown(event: KeyboardEvent) {
+    if (event.key !== 'Escape') return;
+    if (confirmingExpiry) {
+      confirmingExpiry = null;
+      return;
+    }
+    if (!pendingExpiry) onDismiss();
+  }
+
+  function beginClaim(expiry: string) {
+    confirmingExpiry = expiry;
+    result = null;
+    if (!requestIds.has(expiry)) {
+      requestIds.set(
+        expiry,
+        globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+      );
+    }
+  }
+
+  async function confirmClaim(expiry: string) {
+    const requestId = requestIds.get(expiry);
+    if (!requestId || pendingExpiry) return;
+    pendingExpiry = expiry;
+    let outcome: ResetClaimOutcome;
+    try {
+      outcome = await claimCodexResetCredit(expiry, requestId);
+    } catch {
+      outcome = 'failed';
+    }
+    result = { expiry, outcome };
+    pendingExpiry = null;
+    confirmingExpiry = null;
+    if (outcome !== 'failed') requestIds.delete(expiry);
+  }
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <div
   class="reset-credits-detail"
   style={`top:${top}px`}
-  role="tooltip"
-  aria-label={`${title} expiry details`}
+  role="dialog"
+  tabindex="-1"
+  aria-label={`${title} details`}
   onmouseenter={onEnter}
-  onmouseleave={onLeave}
+  onmouseleave={() => {
+    if (!confirmingExpiry && !pendingExpiry) onLeave();
+  }}
 >
-  <h3>{title}</h3>
-  {#if entries.length > 0}
-    <div class="reset-timeline">
-      {#each entries as entry, index (entry.id)}
-        <div class="reset-entry">
-          <div class="reset-rail" aria-hidden="true">
-            <i class:reset-rail-hidden={index === 0}></i>
-            <b class="reset-node reset-node--{entry.severity}">{entry.number}</b>
-            <i class:reset-rail-hidden={index === entries.length - 1}></i>
+  <div class="reset-detail-body">
+    {#if resultMessage}
+      <div
+        class:reset-result-error={result?.outcome === 'failed'}
+        class="reset-result"
+        role="status"
+      >
+        {resultMessage}
+      </div>
+    {/if}
+    {#if entries.length > 0}
+      <div class="reset-timeline">
+        {#each entries as entry, index (entry.id)}
+          <div class="reset-entry-shell">
+            <div class="reset-rail" aria-hidden="true">
+              <i class:reset-rail-hidden={index === 0}></i>
+              <b class="reset-node reset-node--{entry.severity}">{entry.number}</b>
+              <i class:reset-rail-hidden={index === entries.length - 1}></i>
+            </div>
+            <div class="reset-entry-content">
+              {#if confirmingExpiry === entry.expiry}
+                <div class="reset-confirm">
+                  <strong>Use this reset?</strong>
+                  <span>Immediately reset your usage limits. This can't be undone.</span>
+                  <div>
+                    <button
+                      class="reset-confirm-primary"
+                      type="button"
+                      disabled={pendingExpiry !== null}
+                      onclick={() => confirmClaim(entry.expiry)}
+                      >{pendingExpiry === entry.expiry ? 'Resetting…' : 'Use reset'}</button
+                    >
+                    <button
+                      type="button"
+                      disabled={pendingExpiry !== null}
+                      onclick={() => (confirmingExpiry = null)}>Cancel</button
+                    >
+                  </div>
+                </div>
+              {:else}
+                <div class="reset-entry">
+                  <span>{entry.exact}</span>
+                  <div class="reset-trailing">
+                    {#if entry.relative}<small>{entry.relative}</small>{/if}
+                    <button
+                      class="reset-use"
+                      type="button"
+                      aria-label={`Use reset expiring ${entry.exact}`}
+                      disabled={pendingExpiry !== null}
+                      onclick={() => beginClaim(entry.expiry)}>Use</button
+                    >
+                  </div>
+                </div>
+              {/if}
+            </div>
           </div>
-          <span>{entry.exact}</span>
-          {#if entry.relative}<small>{entry.relative}</small>{/if}
-        </div>
-      {/each}
-    </div>
-  {:else if count > 0}
-    <div class="reset-empty">
-      <strong>{count} available</strong>
-      <span>Expiry times unavailable</span>
-    </div>
-  {:else}
-    <div class="reset-empty"><span>No rate limit resets available</span></div>
-  {/if}
+        {/each}
+      </div>
+    {:else if count > 0}
+      <div class="reset-empty">
+        <strong>{count} available</strong>
+        <span>Expiry times unavailable</span>
+      </div>
+    {:else}
+      <div class="reset-empty"><span>No rate limit resets available</span></div>
+    {/if}
+  </div>
 </div>
 
 <style>
@@ -81,34 +188,60 @@
       right: 8px;
       z-index: 100;
       box-sizing: border-box;
-      width: 268px;
+      width: 250px;
       max-height: calc(100vh - 16px);
-      padding: 14px;
-      overflow-y: auto;
+      overflow: hidden;
       border: 1px solid var(--separator);
-      border-radius: 12px;
+      border-radius: 11px;
       color: var(--text);
-      background: color-mix(in srgb, var(--tray) 97%, transparent);
-      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.28);
+      background: color-mix(in srgb, var(--tray) 98%, transparent);
+      box-shadow:
+        0 10px 28px rgba(0, 0, 0, 0.22),
+        0 2px 7px rgba(0, 0, 0, 0.12);
+      backdrop-filter: blur(16px);
       animation: reset-detail-in 120ms ease-out both;
     }
 
-    .reset-credits-detail h3 {
-      margin: 0 0 8px;
-      font-size: 13px;
-      font-weight: 650;
-      line-height: 17px;
+    .reset-detail-body {
+      max-height: calc(100vh - 16px);
+      padding: 14px;
+      overflow-y: auto;
     }
 
     .reset-timeline {
       display: grid;
     }
 
-    .reset-entry {
+    .reset-result {
+      margin-bottom: 8px;
+      padding: 7px 8px;
+      border-radius: 7px;
+      color: var(--text);
+      background: color-mix(in srgb, var(--meter-fill) 16%, transparent);
+      font-size: 10px;
+    }
+
+    .reset-result-error {
+      color: var(--error);
+      background: var(--error-bg);
+    }
+
+    .reset-entry-shell {
       display: grid;
-      min-height: 34px;
-      grid-template-columns: 20px minmax(0, 1fr) auto;
+      grid-template-columns: 18px minmax(0, 1fr);
+      gap: 10px;
+    }
+
+    .reset-entry-content {
+      min-width: 0;
+      padding: 3px 0;
+    }
+
+    .reset-entry {
+      display: flex;
+      height: 30px;
       align-items: center;
+      justify-content: space-between;
       gap: 8px;
       font-size: 11px;
       line-height: 14px;
@@ -121,17 +254,91 @@
       white-space: nowrap;
     }
 
-    .reset-entry > small {
+    .reset-trailing {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+    }
+
+    .reset-trailing > small {
       color: var(--secondary);
       font: inherit;
       font-variant-numeric: tabular-nums;
       white-space: nowrap;
+      transition: opacity 100ms ease;
+    }
+
+    .reset-use,
+    .reset-confirm button {
+      min-height: 22px;
+      padding: 2px 8px;
+      border: 1px solid var(--separator);
+      border-radius: 6px;
+      color: var(--text);
+      background: var(--card);
+      font: inherit;
+      font-size: 10px;
+      cursor: default;
+    }
+
+    .reset-use {
+      position: absolute;
+      right: 0;
+      opacity: 0;
+      transition: opacity 100ms ease;
+    }
+
+    .reset-entry:hover .reset-trailing > small,
+    .reset-entry:focus-within .reset-trailing > small {
+      opacity: 0;
+    }
+
+    .reset-entry:hover .reset-use,
+    .reset-entry:focus-within .reset-use {
+      opacity: 1;
+    }
+
+    .reset-use:disabled,
+    .reset-confirm button:disabled {
+      opacity: 0.55;
+    }
+
+    .reset-confirm {
+      display: grid;
+      gap: 8px;
+      margin: 1px 0 5px;
+      padding: 10px;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--text) 4%, transparent);
+      font-size: 10px;
+      animation: reset-confirm-in 150ms ease-out both;
+    }
+
+    .reset-confirm > span {
+      color: var(--secondary);
+      line-height: 14px;
+    }
+
+    .reset-confirm > div {
+      display: flex;
+      gap: 8px;
+    }
+
+    .reset-confirm > div > button {
+      flex: 1;
+    }
+
+    .reset-confirm .reset-confirm-primary {
+      color: white;
+      background: var(--meter-fill);
+      font-weight: 600;
     }
 
     .reset-rail {
       display: grid;
       height: 100%;
-      grid-template-rows: 1fr 18px 1fr;
+      grid-template-rows: 8px 18px 1fr;
       justify-items: center;
       align-items: center;
     }
@@ -154,8 +361,8 @@
       border-radius: 50%;
       color: white;
       background: var(--meter-fill);
-      font-size: 10px;
-      font-weight: 650;
+      font-size: 11px;
+      font-weight: 600;
       line-height: 1;
     }
 
@@ -195,12 +402,20 @@
       }
     }
 
-    :root[data-density='compact'] .reset-credits-detail h3 {
-      font-size: 12px;
+    @keyframes reset-confirm-in {
+      from {
+        opacity: 0;
+        transform: scale(0.97);
+        transform-origin: top;
+      }
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
     }
 
     :root[data-density='compact'] .reset-entry {
-      min-height: 30px;
+      height: 26px;
       font-size: 10px;
     }
   }

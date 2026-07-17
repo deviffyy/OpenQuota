@@ -22,6 +22,9 @@ use self::{
 
 use super::{ProviderError, UsageProvider};
 
+const ENVIRONMENT_NAMES: &[&str] = &["OPENROUTER_API_KEY", "OPENROUTER_KEY"];
+const CONFIG_PATHS: &[&str] = &["~/.config/openrouter/key.json"];
+
 pub(crate) fn definition() -> ProviderDefinition {
     ProviderDefinition {
         id: "openrouter".into(),
@@ -140,7 +143,7 @@ pub struct OpenRouterProvider {
 impl OpenRouterProvider {
     pub fn new() -> Result<Self, ProviderError> {
         Ok(Self {
-            auth: ApiKeyStore::new("openrouter", "OPENROUTER_API_KEY"),
+            auth: ApiKeyStore::new_with_sources("openrouter", ENVIRONMENT_NAMES, CONFIG_PATHS),
             client: Arc::new(OpenRouterClient::new().map_err(ProviderError::from)?),
         })
     }

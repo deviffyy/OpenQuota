@@ -22,6 +22,8 @@ export interface ValueMetric {
   expiriesAt: string[];
 }
 
+export type ResetClaimOutcome = 'success' | 'nothingToReset' | 'noCredit' | 'failed';
+
 export interface ProviderNotice {
   id: string;
   title: string;
@@ -138,7 +140,7 @@ export interface ProviderLink {
   url: string;
 }
 
-export type ApiKeyStatus = 'notSet' | 'fromEnvironment' | 'saved' | 'overrideActive';
+export type ApiKeyStatus = 'notSet' | 'fromEnvironment' | 'fromConfig' | 'saved' | 'overrideActive';
 
 export interface ProviderApiKeyState {
   providerId: string;

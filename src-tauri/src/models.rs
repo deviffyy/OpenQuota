@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum ApiKeyStatus {
     NotSet,
     FromEnvironment,
+    FromConfig,
     Saved,
     OverrideActive,
 }

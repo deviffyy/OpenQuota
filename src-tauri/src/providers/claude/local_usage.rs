@@ -90,10 +90,16 @@ fn discover_files() -> Vec<PathBuf> {
     let home = home_directory();
     let config = env_text("CLAUDE_CONFIG_DIR");
     let xdg = env_text("XDG_CONFIG_HOME");
-    let mut paths = claude_roots(config.as_deref(), xdg.as_deref(), &home)
-        .into_iter()
+    discover_files_in_roots(&claude_roots(config.as_deref(), xdg.as_deref(), &home))
+}
+
+fn discover_files_in_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
+    let mut paths = roots
+        .iter()
         .flat_map(|root| {
-            WalkDir::new(root.join("projects"))
+            let projects = root.join("projects");
+            let projects = fs::canonicalize(&projects).unwrap_or(projects);
+            WalkDir::new(projects)
                 .follow_links(false)
                 .into_iter()
                 .filter_map(Result::ok)
@@ -428,14 +434,14 @@ fn has_unsupported_null_field(line: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
+    use std::{fs, io, path::Path};
 
     use chrono::{TimeZone, Utc};
     use tempfile::tempdir;
 
     use super::{
-        aggregate, claude_roots, deduplicate, has_unsupported_null_field, is_semver_prefix,
-        parse_jsonl, parse_line, ClaudeTokenEvent,
+        aggregate, claude_roots, deduplicate, discover_files_in_roots, has_unsupported_null_field,
+        is_semver_prefix, parse_jsonl, parse_line, ClaudeTokenEvent,
     };
     use crate::pricing::test_bundled_pricing;
 
@@ -555,6 +561,35 @@ mod tests {
         let config = format!("{}, {}", first.display(), second.join("projects").display());
         let roots = claude_roots(Some(&config), None, &home);
         assert_eq!(roots, vec![first, second]);
+    }
+
+    #[test]
+    fn discovers_logs_under_a_symlinked_projects_root() {
+        let directory = tempdir().unwrap();
+        let root = directory.path().join("claude");
+        let real_projects = directory.path().join("real-projects");
+        let log = real_projects.join("project/session.jsonl");
+        fs::create_dir_all(log.parent().unwrap()).unwrap();
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&log, "{}").unwrap();
+        if create_directory_symlink(&real_projects, &root.join("projects")).is_err() {
+            return;
+        }
+
+        assert_eq!(
+            discover_files_in_roots(&[root]),
+            vec![fs::canonicalize(log).unwrap()]
+        );
+    }
+
+    #[cfg(unix)]
+    fn create_directory_symlink(target: &Path, link: &Path) -> io::Result<()> {
+        std::os::unix::fs::symlink(target, link)
+    }
+
+    #[cfg(windows)]
+    fn create_directory_symlink(target: &Path, link: &Path) -> io::Result<()> {
+        std::os::windows::fs::symlink_dir(target, link)
     }
 
     #[test]

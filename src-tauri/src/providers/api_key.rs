@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{fs, path::PathBuf, sync::Arc};
 
 use crate::models::ApiKeyStatus;
 use zeroize::Zeroizing;
@@ -73,21 +73,48 @@ impl EnvironmentReader for ProcessEnvironment {
     }
 }
 
+pub trait ConfigFileReader: Send + Sync {
+    fn read(&self, path: &str) -> Option<SecretBytes>;
+}
+
+#[derive(Default)]
+struct ProcessConfigFiles;
+
+impl ConfigFileReader for ProcessConfigFiles {
+    fn read(&self, path: &str) -> Option<SecretBytes> {
+        fs::read(expand_home(path)).ok().map(SecretBytes::new)
+    }
+}
+
 #[derive(Clone)]
 pub struct ApiKeyStore {
     provider_id: String,
-    environment_name: String,
+    environment_names: Vec<String>,
+    config_paths: Vec<String>,
     secrets: Arc<dyn SecretBackend>,
     environment: Arc<dyn EnvironmentReader>,
+    config_files: Arc<dyn ConfigFileReader>,
 }
 
 impl ApiKeyStore {
-    pub fn new(provider_id: &str, environment_name: &str) -> Self {
+    pub fn new_with_sources(
+        provider_id: &str,
+        environment_names: &[&str],
+        config_paths: &[&str],
+    ) -> Self {
         Self {
             provider_id: provider_id.to_owned(),
-            environment_name: environment_name.to_owned(),
+            environment_names: environment_names
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect(),
+            config_paths: config_paths
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect(),
             secrets: Arc::new(SystemSecretBackend),
             environment: Arc::new(ProcessEnvironment),
+            config_files: Arc::new(ProcessConfigFiles),
         }
     }
 
@@ -100,19 +127,46 @@ impl ApiKeyStore {
     ) -> Self {
         Self {
             provider_id: provider_id.to_owned(),
-            environment_name: environment_name.to_owned(),
+            environment_names: vec![environment_name.to_owned()],
+            config_paths: Vec::new(),
             secrets,
             environment,
+            config_files: Arc::new(ProcessConfigFiles),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn with_source_backends(
+        provider_id: &str,
+        environment_names: &[&str],
+        config_paths: &[&str],
+        secrets: Arc<dyn SecretBackend>,
+        environment: Arc<dyn EnvironmentReader>,
+        config_files: Arc<dyn ConfigFileReader>,
+    ) -> Self {
+        Self {
+            provider_id: provider_id.to_owned(),
+            environment_names: environment_names
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect(),
+            config_paths: config_paths
+                .iter()
+                .map(|value| (*value).to_owned())
+                .collect(),
+            secrets,
+            environment,
+            config_files,
         }
     }
 
     pub fn load(&self) -> Result<Option<SecretString>, String> {
         match self.saved_key() {
             Ok(Some(value)) => Ok(Some(value)),
-            Ok(None) => Ok(self.environment_key()),
-            Err(error) => match self.environment_key() {
-                Some(value) => {
-                    report_environment_fallback(&self.provider_id, &error);
+            Ok(None) => Ok(self.external_key().map(|(value, _)| value)),
+            Err(error) => match self.external_key() {
+                Some((value, _)) => {
+                    report_external_fallback(&self.provider_id, &error);
                     Ok(Some(value))
                 }
                 None => Err(error),
@@ -121,20 +175,23 @@ impl ApiKeyStore {
     }
 
     pub fn status(&self) -> Result<ApiKeyStatus, String> {
-        let environment = self.environment_key().is_some();
+        let external = self.external_key().map(|(_, status)| status);
         let saved = match self.saved_key() {
             Ok(value) => value.is_some(),
-            Err(error) if environment => {
-                report_environment_fallback(&self.provider_id, &error);
-                return Ok(ApiKeyStatus::FromEnvironment);
+            Err(error) if external.is_some() => {
+                report_external_fallback(&self.provider_id, &error);
+                return Ok(external.expect("external source checked above"));
             }
             Err(error) => return Err(error),
         };
-        Ok(match (saved, environment) {
-            (false, false) => ApiKeyStatus::NotSet,
-            (false, true) => ApiKeyStatus::FromEnvironment,
-            (true, false) => ApiKeyStatus::Saved,
-            (true, true) => ApiKeyStatus::OverrideActive,
+        Ok(if saved {
+            if external.is_some() {
+                ApiKeyStatus::OverrideActive
+            } else {
+                ApiKeyStatus::Saved
+            }
+        } else {
+            external.unwrap_or(ApiKeyStatus::NotSet)
         })
     }
 
@@ -160,17 +217,60 @@ impl ApiKeyStore {
     }
 
     fn environment_key(&self) -> Option<SecretString> {
-        self.environment
-            .value(&self.environment_name)
-            .and_then(non_empty)
+        self.environment_names
+            .iter()
+            .find_map(|name| self.environment.value(name).and_then(non_empty))
+    }
+
+    fn config_key(&self) -> Option<SecretString> {
+        self.config_paths.iter().find_map(|path| {
+            self.config_files
+                .read(path)
+                .and_then(|value| key_from_config(value.as_slice()))
+        })
+    }
+
+    fn external_key(&self) -> Option<(SecretString, ApiKeyStatus)> {
+        self.config_key()
+            .map(|value| (value, ApiKeyStatus::FromConfig))
+            .or_else(|| {
+                self.environment_key()
+                    .map(|value| (value, ApiKeyStatus::FromEnvironment))
+            })
     }
 }
 
-fn report_environment_fallback(provider_id: &str, error: &str) {
+fn report_external_fallback(provider_id: &str, error: &str) {
     crate::app_warn!(
         &format!("auth:{provider_id}"),
-        "system credential store unavailable; using environment API key ({error})"
+        "system credential store unavailable; using external API key source ({error})"
     );
+}
+
+fn key_from_config(bytes: &[u8]) -> Option<SecretString> {
+    let text = std::str::from_utf8(bytes).ok()?.trim();
+    if text.starts_with('{') {
+        let object = serde_json::from_str::<serde_json::Value>(text)
+            .ok()?
+            .as_object()?
+            .clone();
+        return ["apiKey", "api_key", "key"]
+            .iter()
+            .find_map(|name| object.get(*name)?.as_str().map(str::to_owned))
+            .and_then(non_empty);
+    }
+    non_empty(text.to_owned())
+}
+
+fn expand_home(path: &str) -> PathBuf {
+    let Some(relative) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) else {
+        return PathBuf::from(path);
+    };
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("~"))
+        .join(relative)
 }
 
 fn non_empty(value: String) -> Option<SecretString> {
@@ -195,7 +295,7 @@ mod tests {
 
     use crate::models::ApiKeyStatus;
 
-    use super::{ApiKeyStore, EnvironmentReader, SecretBackend, SecretBytes};
+    use super::{ApiKeyStore, ConfigFileReader, EnvironmentReader, SecretBackend, SecretBytes};
 
     #[derive(Default)]
     struct MemorySecrets(Mutex<HashMap<String, Vec<u8>>>);
@@ -230,6 +330,14 @@ mod tests {
     impl EnvironmentReader for MemoryEnvironment {
         fn value(&self, name: &str) -> Option<String> {
             self.0.get(name).cloned()
+        }
+    }
+
+    struct MemoryConfigFiles(HashMap<String, Vec<u8>>);
+
+    impl ConfigFileReader for MemoryConfigFiles {
+        fn read(&self, path: &str) -> Option<SecretBytes> {
+            self.0.get(path).cloned().map(SecretBytes::new)
         }
     }
 
@@ -334,6 +442,83 @@ mod tests {
         assert_eq!(
             store.load().err().as_deref(),
             Some("System credential store unavailable.")
+        );
+    }
+
+    #[test]
+    fn config_file_precedes_environment_and_saved_key_can_override_it() {
+        let secrets = Arc::new(MemorySecrets::default());
+        let store = ApiKeyStore::with_source_backends(
+            "provider",
+            &["PRIMARY_KEY", "ALTERNATE_KEY"],
+            &["~/first.json", "~/second.json"],
+            secrets,
+            Arc::new(MemoryEnvironment(HashMap::from([
+                ("PRIMARY_KEY".into(), "environment-key".into()),
+                ("ALTERNATE_KEY".into(), "alternate-key".into()),
+            ]))),
+            Arc::new(MemoryConfigFiles(HashMap::from([(
+                "~/second.json".into(),
+                br#"{"api_key":"config-key"}"#.to_vec(),
+            )]))),
+        );
+
+        assert_eq!(store.status().unwrap(), ApiKeyStatus::FromConfig);
+        assert_eq!(
+            store.load().unwrap().as_ref().map(|value| value.as_str()),
+            Some("config-key")
+        );
+
+        store.save("saved-key").unwrap();
+        assert_eq!(store.status().unwrap(), ApiKeyStatus::OverrideActive);
+        assert_eq!(
+            store.load().unwrap().as_ref().map(|value| value.as_str()),
+            Some("saved-key")
+        );
+    }
+
+    #[test]
+    fn alternate_environment_name_and_plain_text_config_are_supported() {
+        let secrets = Arc::new(MemorySecrets::default());
+        let environment_store = ApiKeyStore::with_source_backends(
+            "provider",
+            &["PRIMARY_KEY", "ALTERNATE_KEY"],
+            &[],
+            secrets.clone(),
+            Arc::new(MemoryEnvironment(HashMap::from([(
+                "ALTERNATE_KEY".into(),
+                " alternate-key ".into(),
+            )]))),
+            Arc::new(MemoryConfigFiles(HashMap::new())),
+        );
+        assert_eq!(
+            environment_store
+                .load()
+                .unwrap()
+                .as_ref()
+                .map(|value| value.as_str()),
+            Some("alternate-key")
+        );
+
+        let config_store = ApiKeyStore::with_source_backends(
+            "provider",
+            &[],
+            &["~/key.txt"],
+            secrets,
+            Arc::new(MemoryEnvironment(HashMap::new())),
+            Arc::new(MemoryConfigFiles(HashMap::from([(
+                "~/key.txt".into(),
+                b" plain-text-key \n".to_vec(),
+            )]))),
+        );
+        assert_eq!(config_store.status().unwrap(), ApiKeyStatus::FromConfig);
+        assert_eq!(
+            config_store
+                .load()
+                .unwrap()
+                .as_ref()
+                .map(|value| value.as_str()),
+            Some("plain-text-key")
         );
     }
 }

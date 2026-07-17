@@ -88,6 +88,35 @@ describe('ProviderApiKeySection', () => {
     );
   });
 
+  it('identifies config-file keys and lets the user override them securely', async () => {
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === 'get_provider_api_key_state') {
+        return Promise.resolve({ providerId: 'openrouter', status: 'fromConfig' });
+      }
+      if (command === 'save_provider_api_key') {
+        return Promise.resolve({ providerId: 'openrouter', status: 'overrideActive' });
+      }
+      return Promise.reject(new Error(`unexpected command ${command}`));
+    });
+    render(ProviderApiKeySection, {
+      providerId: 'openrouter',
+      providerName: 'OpenRouter',
+    });
+    await screen.findByRole('region', { name: 'OpenRouter API Key' });
+    await fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    expect(screen.getByRole('textbox', { name: 'OpenRouter API key source' })).toHaveValue(
+      'From Config File',
+    );
+    await fireEvent.click(screen.getByRole('checkbox', { name: 'Override With a Custom Key' }));
+    await fireEvent.input(screen.getByLabelText('OpenRouter API key'), {
+      target: { value: 'config-override' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(await screen.findByRole('textbox', { name: 'OpenRouter API key source' })).toHaveValue(
+      'Custom Key',
+    );
+  });
+
   it('stays absent for providers without the API-key capability', async () => {
     mocks.invoke.mockResolvedValue(null);
     render(ProviderApiKeySection, {

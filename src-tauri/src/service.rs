@@ -11,7 +11,7 @@ use crate::{
     models::{
         MetricSource, ProviderErrorKind, ProviderSnapshot, ProviderViewState, SnapshotSource,
     },
-    policy::{REFRESH_INTERVAL, STALE_AFTER},
+    policy::{FAILURE_RETRY_BACKOFF, REFRESH_INTERVAL, STALE_AFTER},
     providers::{ProviderError, ProviderRegistry},
     storage::Storage,
 };
@@ -29,6 +29,7 @@ pub struct ProviderService {
     states: RwLock<BTreeMap<String, ProviderViewState>>,
     refresh_gates: HashMap<String, Arc<AsyncMutex<()>>>,
     last_live_refresh: Mutex<HashMap<String, Instant>>,
+    last_failed_refresh: Mutex<HashMap<String, Instant>>,
     last_full_refresh_at: RwLock<Option<chrono::DateTime<Utc>>>,
 }
 
@@ -61,6 +62,7 @@ impl ProviderService {
             states: RwLock::new(states),
             refresh_gates,
             last_live_refresh: Mutex::new(HashMap::new()),
+            last_failed_refresh: Mutex::new(HashMap::new()),
             last_full_refresh_at: RwLock::new(None),
         }
     }
@@ -108,6 +110,14 @@ impl ProviderService {
             crate::app_debug!("refresh", "cache hit {provider_id}");
             return self.provider_state(provider_id);
         }
+        if !force && self.is_in_failure_backoff(provider_id) {
+            crate::app_debug!(
+                "refresh",
+                "backoff skip {provider_id} (failed <{}s ago)",
+                FAILURE_RETRY_BACKOFF.as_secs()
+            );
+            return self.provider_state(provider_id);
+        }
         let started = Instant::now();
         let tag = format!("plugin:{provider_id}");
         crate::app_info!(&tag, "refresh start (force={force})");
@@ -145,6 +155,11 @@ impl ProviderService {
             if let Ok(mut last) = self.last_live_refresh.lock() {
                 last.insert(provider_id.to_owned(), Instant::now());
             }
+            if let Ok(mut failures) = self.last_failed_refresh.lock() {
+                failures.remove(provider_id);
+            }
+        } else if let Ok(mut failures) = self.last_failed_refresh.lock() {
+            failures.insert(provider_id.to_owned(), Instant::now());
         }
         state
     }
@@ -236,6 +251,14 @@ impl ProviderService {
             .ok()
             .and_then(|value| value.get(provider_id).copied())
             .is_some_and(|instant| instant.elapsed() < REFRESH_INTERVAL)
+    }
+
+    fn is_in_failure_backoff(&self, provider_id: &str) -> bool {
+        self.last_failed_refresh
+            .lock()
+            .ok()
+            .and_then(|value| value.get(provider_id).copied())
+            .is_some_and(|instant| instant.elapsed() < FAILURE_RETRY_BACKOFF)
     }
 
     fn update_state(&self, provider_id: &str, update: impl FnOnce(&mut ProviderViewState)) {
@@ -338,6 +361,7 @@ mod tests {
             MetricDefinition, MetricSection, MetricSource, ProviderDefinition, ProviderErrorKind,
             ProviderSnapshot, ProviderViewState, UsageHistory,
         },
+        policy::FAILURE_RETRY_BACKOFF,
         providers::{ProviderError, ProviderRegistry, UsageProvider},
         storage::Storage,
     };
@@ -348,30 +372,15 @@ mod tests {
         maximum: Arc<AtomicUsize>,
     }
 
+    struct SequenceProvider {
+        id: &'static str,
+        calls: Arc<AtomicUsize>,
+        failures_before_success: usize,
+    }
+
     impl UsageProvider for SlowProvider {
         fn definition(&self) -> ProviderDefinition {
-            ProviderDefinition {
-                id: self.id.into(),
-                display_name: self.id.into(),
-                short_name: "T".into(),
-                fallback_enabled: true,
-                local_usage_source_note: None,
-                links: vec![],
-                metrics: vec![MetricDefinition::new(
-                    format!("{}.session", self.id),
-                    "Session",
-                    MetricSource::Quota {
-                        source_id: "session".into(),
-                        session_window: false,
-                    },
-                    true,
-                    true,
-                    MetricSection::AlwaysVisible,
-                    true,
-                    Some("S"),
-                    None,
-                )],
-            }
+            test_definition(self.id)
         }
 
         fn has_local_credentials(&self) -> bool {
@@ -383,16 +392,64 @@ mod tests {
             self.maximum.fetch_max(active, Ordering::SeqCst);
             thread::sleep(Duration::from_millis(75));
             self.active.fetch_sub(1, Ordering::SeqCst);
-            Ok(ProviderSnapshot {
-                provider_id: self.id.into(),
-                plan: None,
-                quotas: Vec::new(),
-                value_metrics: Vec::new(),
-                notices: Vec::new(),
-                usage: UsageHistory::default(),
-                warnings: Vec::new(),
-                refreshed_at: Utc::now(),
-            })
+            Ok(test_snapshot(self.id))
+        }
+    }
+
+    impl UsageProvider for SequenceProvider {
+        fn definition(&self) -> ProviderDefinition {
+            test_definition(self.id)
+        }
+
+        fn has_local_credentials(&self) -> bool {
+            true
+        }
+
+        fn refresh(&self) -> Result<ProviderSnapshot, ProviderError> {
+            let call = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+            if call <= self.failures_before_success {
+                Err(ProviderError::new(ProviderErrorKind::Network, "offline"))
+            } else {
+                Ok(test_snapshot(self.id))
+            }
+        }
+    }
+
+    fn test_definition(id: &str) -> ProviderDefinition {
+        ProviderDefinition {
+            id: id.into(),
+            display_name: id.into(),
+            short_name: "T".into(),
+            fallback_enabled: true,
+            local_usage_source_note: None,
+            links: vec![],
+            metrics: vec![MetricDefinition::new(
+                format!("{id}.session"),
+                "Session",
+                MetricSource::Quota {
+                    source_id: "session".into(),
+                    session_window: false,
+                },
+                true,
+                true,
+                MetricSection::AlwaysVisible,
+                true,
+                Some("S"),
+                None,
+            )],
+        }
+    }
+
+    fn test_snapshot(provider_id: &str) -> ProviderSnapshot {
+        ProviderSnapshot {
+            provider_id: provider_id.into(),
+            plan: None,
+            quotas: Vec::new(),
+            value_metrics: Vec::new(),
+            notices: Vec::new(),
+            usage: UsageHistory::default(),
+            warnings: Vec::new(),
+            refreshed_at: Utc::now(),
         }
     }
 
@@ -480,5 +537,64 @@ mod tests {
             service.refresh_all(&["claude".into(), "antigravity".into()], true),
         );
         assert!(completed.last_full_refresh_at.is_some());
+    }
+
+    #[test]
+    fn failed_provider_is_backed_off_but_force_and_expiry_retry() {
+        let directory = tempdir().unwrap();
+        let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let provider = Arc::new(SequenceProvider {
+            id: "failing",
+            calls: calls.clone(),
+            failures_before_success: usize::MAX,
+        }) as Arc<dyn UsageProvider>;
+        let registry = Arc::new(ProviderRegistry::new(vec![provider]).unwrap());
+        let service = ProviderService::new(registry, storage);
+
+        tauri::async_runtime::block_on(service.refresh("failing", false));
+        tauri::async_runtime::block_on(service.refresh("failing", false));
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        tauri::async_runtime::block_on(service.refresh("failing", true));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+
+        service.last_failed_refresh.lock().unwrap().insert(
+            "failing".into(),
+            std::time::Instant::now()
+                .checked_sub(FAILURE_RETRY_BACKOFF)
+                .unwrap(),
+        );
+        tauri::async_runtime::block_on(service.refresh("failing", false));
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+    }
+
+    #[test]
+    fn successful_retry_clears_failure_backoff() {
+        let directory = tempdir().unwrap();
+        let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let provider = Arc::new(SequenceProvider {
+            id: "recovering",
+            calls,
+            failures_before_success: 1,
+        }) as Arc<dyn UsageProvider>;
+        let registry = Arc::new(ProviderRegistry::new(vec![provider]).unwrap());
+        let service = ProviderService::new(registry, storage);
+
+        tauri::async_runtime::block_on(service.refresh("recovering", false));
+        assert!(service
+            .last_failed_refresh
+            .lock()
+            .unwrap()
+            .contains_key("recovering"));
+
+        let recovered = tauri::async_runtime::block_on(service.refresh("recovering", true));
+        assert!(recovered.error.is_none());
+        assert!(!service
+            .last_failed_refresh
+            .lock()
+            .unwrap()
+            .contains_key("recovering"));
     }
 }

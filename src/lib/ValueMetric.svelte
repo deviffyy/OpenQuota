@@ -135,6 +135,7 @@
     top={detailTop}
     onEnter={keepOpen}
     onLeave={scheduleHide}
+    onDismiss={() => (detailOpen = false)}
   />
 {/if}
 

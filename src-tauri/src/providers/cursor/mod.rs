@@ -23,8 +23,8 @@ use self::{
     client::{CursorClient, CursorResponse},
     csv::parse_usage_csv,
     mapper::{
-        map_live_usage, map_request_usage, request_fallback, stripe_balance_cents, usage_history,
-        PlanUsageFacts,
+        map_live_usage, map_request_usage, map_summary_usage, request_fallback,
+        stripe_balance_cents, usage_history, PlanUsageFacts,
     },
 };
 
@@ -198,8 +198,13 @@ impl CursorProvider {
         let (plan_name, plan_unavailable) = self.fetch_plan_name(current_token);
 
         if let Some(message) = request_fallback(&usage, plan_name.as_deref(), plan_unavailable) {
-            let mapped = self.request_based_result(current_token, plan_name.as_deref(), message)?;
-            return Ok(snapshot(mapped, UsageHistory::default(), Vec::new(), now));
+            let mapped = self.usage_summary_and_request_result(
+                current_token,
+                plan_name.as_deref(),
+                message,
+            )?;
+            let history = self.fetch_usage_history(current_token, now);
+            return Ok(snapshot(mapped, history, Vec::new(), now));
         }
         if PlanUsageFacts::new(&usage).should_try_generic_request_fallback() {
             if let Ok(mapped) = self.request_based_result(
@@ -340,6 +345,62 @@ impl CursorProvider {
             .json()
             .ok_or_else(|| CursorError::RequestBasedUnavailable(unavailable_message.into()))?;
         map_request_usage(&body, plan_name, unavailable_message)
+    }
+
+    fn usage_summary_and_request_result(
+        &self,
+        access_token: &str,
+        plan_name: Option<&str>,
+        unavailable_message: &str,
+    ) -> Result<mapper::CursorMappedUsage, CursorError> {
+        let summary = self.optional_json(
+            "usage-summary",
+            self.client.fetch_usage_summary(access_token),
+        );
+        let request_usage = self.optional_json(
+            "request-based usage",
+            self.client.fetch_request_usage(access_token),
+        );
+        map_summary_usage(
+            summary.as_ref(),
+            request_usage.as_ref(),
+            plan_name,
+            unavailable_message,
+        )
+    }
+
+    fn optional_json(
+        &self,
+        label: &str,
+        response: Result<Option<CursorResponse>, CursorError>,
+    ) -> Option<Value> {
+        let response = match response {
+            Ok(Some(response)) => response,
+            Ok(None) => {
+                crate::app_warn!(
+                    "plugin:cursor",
+                    "optional {label} request could not be prepared from the current session"
+                );
+                return None;
+            }
+            Err(_) => {
+                crate::app_warn!("plugin:cursor", "optional {label} request failed");
+                return None;
+            }
+        };
+        if !response.status.is_success() {
+            crate::app_warn!(
+                "plugin:cursor",
+                "optional {label} request returned HTTP {}",
+                response.status.as_u16()
+            );
+            return None;
+        }
+        let body = response.json().filter(Value::is_object);
+        if body.is_none() {
+            crate::app_warn!("plugin:cursor", "optional {label} response was invalid");
+        }
+        body
     }
 
     fn fetch_usage_history(&self, access_token: &str, now: chrono::DateTime<Utc>) -> UsageHistory {
@@ -549,6 +610,62 @@ mod tests {
         (base, requests)
     }
 
+    fn enterprise_server() -> (String, Arc<Mutex<Vec<String>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let recorded = requests.clone();
+        thread::spawn(move || {
+            for _ in 0..5 {
+                let Ok((mut stream, _)) = listener.accept() else {
+                    return;
+                };
+                let mut buffer = [0_u8; 8192];
+                let read = stream.read(&mut buffer).unwrap_or_default();
+                let request = String::from_utf8_lossy(&buffer[..read]);
+                let path = request
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("/")
+                    .to_owned();
+                recorded.lock().unwrap().push(path.clone());
+                let (content_type, body) = if path.starts_with("/usage") {
+                    (
+                        "application/json",
+                        r#"{"enabled":true,"planUsage":{}}"#.to_owned(),
+                    )
+                } else if path.starts_with("/plan") {
+                    (
+                        "application/json",
+                        r#"{"planInfo":{"planName":"Enterprise"}}"#.to_owned(),
+                    )
+                } else if path.starts_with("/summary") {
+                    (
+                        "application/json",
+                        r#"{"billingCycleStart":"2026-07-01T00:00:00Z","billingCycleEnd":"2026-08-01T00:00:00Z","membershipType":"enterprise","individualUsage":{"plan":{"autoPercentUsed":0,"apiPercentUsed":6.25,"totalPercentUsed":6.25},"onDemand":{"enabled":true,"used":0,"limit":25000,"remaining":25000}}}"#.to_owned(),
+                    )
+                } else if path.starts_with("/rest") {
+                    (
+                        "application/json",
+                        r#"{"gpt-4":{"numRequests":37,"numRequestsTotal":37,"maxRequestUsage":750},"startOfMonth":"2026-07-01T00:00:00Z"}"#.to_owned(),
+                    )
+                } else {
+                    (
+                        "text/csv",
+                        "Date,Model,Input (w/o Cache Write),Output Tokens\n2026-07-15T12:00:00Z,composer-1,100,0".to_owned(),
+                    )
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        (base, requests)
+    }
+
     #[test]
     fn definition_matches_cursor_layout_contract() {
         let definition = definition();
@@ -598,6 +715,7 @@ mod tests {
             credits: format!("{base}/credits"),
             refresh: format!("{base}/token"),
             rest_usage: format!("{base}/rest"),
+            usage_summary: format!("{base}/summary"),
             stripe: format!("{base}/stripe"),
             csv: format!("{base}/csv"),
         };
@@ -651,6 +769,7 @@ mod tests {
             credits: format!("{base}/credits"),
             refresh: format!("{base}/token"),
             rest_usage: format!("{base}/rest"),
+            usage_summary: format!("{base}/summary"),
             stripe: format!("{base}/stripe"),
             csv: format!("{base}/csv"),
         };
@@ -671,5 +790,53 @@ mod tests {
 
         assert_eq!(snapshot.plan.as_deref(), Some("Pro Plan"));
         assert!(snapshot.warnings.is_empty());
+    }
+
+    #[test]
+    fn enterprise_fallback_combines_summary_requests_and_csv_history() {
+        let directory = tempdir().unwrap();
+        let (base, requests) = enterprise_server();
+        let endpoints = Endpoints {
+            usage: format!("{base}/usage"),
+            plan: format!("{base}/plan"),
+            credits: format!("{base}/credits"),
+            refresh: format!("{base}/token"),
+            rest_usage: format!("{base}/rest"),
+            usage_summary: format!("{base}/summary"),
+            stripe: format!("{base}/stripe"),
+            csv: format!("{base}/csv"),
+        };
+        let pricing = Arc::new(PricingStore::new(directory.path().join("pricing")).unwrap());
+        let provider = CursorProvider {
+            pricing,
+            client: CursorClient::with_endpoints(endpoints).unwrap(),
+        };
+        let auth = CursorAuthState {
+            access_token: Some(jwt("google-oauth2|enterprise-user")),
+            refresh_token: None,
+            source: CursorAuthSource::Sqlite(directory.path().join("unused.db")),
+        };
+        let now = Utc.with_ymd_and_hms(2026, 7, 15, 12, 0, 0).unwrap();
+
+        let snapshot = provider.refresh_with_auth(auth, now).unwrap();
+
+        assert_eq!(snapshot.plan.as_deref(), Some("Enterprise"));
+        assert_eq!(
+            snapshot
+                .quotas
+                .iter()
+                .map(|quota| quota.id.as_str())
+                .collect::<Vec<_>>(),
+            ["usage", "requests", "auto", "api", "onDemand"]
+        );
+        assert_eq!(snapshot.quotas[0].used_value, Some(37.0));
+        assert_eq!(snapshot.quotas[0].limit_value, Some(750.0));
+        assert_eq!(snapshot.usage.today.as_ref().unwrap().tokens, 100);
+        let requests = requests.lock().unwrap();
+        assert!(requests.iter().any(|path| path == "/summary"));
+        assert!(requests
+            .iter()
+            .any(|path| path.starts_with("/rest?user=enterprise-user")));
+        assert!(requests.iter().any(|path| path.starts_with("/csv?")));
     }
 }
