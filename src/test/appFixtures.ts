@@ -55,6 +55,19 @@ function trend(id: string): MetricDefinition {
   };
 }
 
+function value(id: string, label: string, sourceId: string): MetricDefinition {
+  return {
+    id,
+    label,
+    source: { kind: 'value', sourceId },
+    pinnable: true,
+    defaultEnabled: true,
+    defaultSection: 'onDemand',
+    defaultPinned: false,
+    tray: { shortLabel: label.slice(0, 1), suffix: null },
+  };
+}
+
 export const providerCatalog: ProviderCatalog = {
   providers: [
     {
@@ -124,6 +137,25 @@ export const providerCatalog: ProviderCatalog = {
         quota('antigravity.geminiWeekly', 'Weekly', 'geminiWeekly'),
         quota('antigravity.claude', 'Claude', 'claude', true),
         quota('antigravity.claudeWeekly', 'Claude Weekly', 'claudeWeekly'),
+      ],
+    },
+    {
+      id: 'openrouter',
+      displayName: 'OpenRouter',
+      shortName: 'OR',
+      fallbackEnabled: false,
+      localUsageSourceNote: null,
+      links: [
+        { label: 'Activity', url: 'https://openrouter.ai/activity' },
+        { label: 'Credits', url: 'https://openrouter.ai/settings/credits' },
+      ],
+      metrics: [
+        quota('openrouter.credits', 'Credits', 'credits'),
+        value('openrouter.balance', 'Balance', 'balance'),
+        value('openrouter.today', 'Today', 'today'),
+        value('openrouter.week', 'This Week', 'week'),
+        value('openrouter.month', 'This Month', 'month'),
+        quota('openrouter.keyLimit', 'Key Limit', 'keyLimit'),
       ],
     },
   ],

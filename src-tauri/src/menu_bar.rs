@@ -26,6 +26,7 @@ const CLAUDE_ICON: &str = include_str!("../../src/assets/provider-icons/claude.s
 const CODEX_ICON: &str = include_str!("../../src/assets/provider-icons/codex.svg");
 const CURSOR_ICON: &str = include_str!("../../src/assets/provider-icons/cursor.svg");
 const ANTIGRAVITY_ICON: &str = include_str!("../../src/assets/provider-icons/antigravity.svg");
+const OPENROUTER_ICON: &str = include_str!("../../src/assets/provider-icons/openrouter.svg");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextGroup {
@@ -265,11 +266,13 @@ fn provider_path(provider_id: &str) -> Option<&'static Path> {
     static CODEX: OnceLock<Path> = OnceLock::new();
     static CURSOR: OnceLock<Path> = OnceLock::new();
     static ANTIGRAVITY: OnceLock<Path> = OnceLock::new();
+    static OPENROUTER: OnceLock<Path> = OnceLock::new();
     match provider_id {
         "claude" => Some(parsed(CLAUDE_ICON, &CLAUDE)),
         "codex" => Some(parsed(CODEX_ICON, &CODEX)),
         "cursor" => Some(parsed(CURSOR_ICON, &CURSOR)),
         "antigravity" => Some(parsed(ANTIGRAVITY_ICON, &ANTIGRAVITY)),
+        "openrouter" => Some(parsed(OPENROUTER_ICON, &OPENROUTER)),
         _ => None,
     }
 }
@@ -509,7 +512,7 @@ mod tests {
 
     #[test]
     fn bundled_provider_marks_and_font_render_into_a_retina_text_strip() {
-        for provider in ["claude", "codex", "cursor", "antigravity"] {
+        for provider in ["claude", "codex", "cursor", "antigravity", "openrouter"] {
             let path = provider_path(provider).expect("known provider mark should exist");
             assert!(path.bounds().width() > 0.0);
             assert!(path.bounds().height() > 0.0);

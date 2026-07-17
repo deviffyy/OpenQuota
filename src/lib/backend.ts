@@ -3,6 +3,7 @@ import { listen } from '@tauri-apps/api/event';
 import type {
   AppSettings,
   BootstrapState,
+  ProviderApiKeyState,
   SettingsViewState,
   UpdateProgress,
   UpdateStatus,
@@ -30,6 +31,18 @@ export function refreshProviderUsage(providerId: string) {
 
 export function openProviderLink(providerId: string, linkIndex: number) {
   return invoke<void>('open_provider_link', { providerId, linkIndex });
+}
+
+export function getProviderApiKeyState(providerId: string) {
+  return invoke<ProviderApiKeyState | null>('get_provider_api_key_state', { providerId });
+}
+
+export function saveProviderApiKey(providerId: string, apiKey: string) {
+  return invoke<ProviderApiKeyState>('save_provider_api_key', { providerId, apiKey });
+}
+
+export function deleteProviderApiKey(providerId: string) {
+  return invoke<ProviderApiKeyState>('delete_provider_api_key', { providerId });
 }
 
 export function getAppSettings() {

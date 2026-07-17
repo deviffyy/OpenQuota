@@ -138,6 +138,13 @@ export interface ProviderLink {
   url: string;
 }
 
+export type ApiKeyStatus = 'notSet' | 'fromEnvironment' | 'saved' | 'overrideActive';
+
+export interface ProviderApiKeyState {
+  providerId: string;
+  status: ApiKeyStatus;
+}
+
 export interface ProviderDefinition {
   id: string;
   displayName: string;

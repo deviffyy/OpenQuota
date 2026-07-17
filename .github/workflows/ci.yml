@@ -82,6 +82,37 @@ jobs:
       - name: Test Rust
         run: cargo test --manifest-path src-tauri/Cargo.toml --all-targets
 
+      - name: Test Windows Credential Manager integration
+        if: runner.os == 'Windows'
+        env:
+          OPENQUOTA_TEST_CREDENTIAL_STORE: '1'
+        run: >-
+          cargo test --manifest-path src-tauri/Cargo.toml
+          providers::credential_store::tests::system_credential_store_round_trip_when_requested
+          -- --exact --nocapture
+
+      - name: Test macOS Keychain integration
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          original_keychain="$(security default-keychain -d user | tr -d '"')"
+          test_keychain="${RUNNER_TEMP}/openquota-credential-test.keychain-db"
+          cleanup() {
+            security default-keychain -d user -s "${original_keychain}" || true
+            security list-keychains -d user -s "${original_keychain}" || true
+            security delete-keychain "${test_keychain}" || true
+          }
+          trap cleanup EXIT
+          security create-keychain -p openquota-test "${test_keychain}"
+          security set-keychain-settings -lut 21600 "${test_keychain}"
+          security unlock-keychain -p openquota-test "${test_keychain}"
+          security list-keychains -d user -s "${test_keychain}" "${original_keychain}"
+          security default-keychain -d user -s "${test_keychain}"
+          export OPENQUOTA_TEST_CREDENTIAL_STORE=1
+          cargo test --manifest-path src-tauri/Cargo.toml \
+            providers::credential_store::tests::system_credential_store_round_trip_when_requested \
+            -- --exact --nocapture
+
       - name: Test Linux Secret Service integration
         if: runner.os == 'Linux'
         run: |
@@ -91,9 +122,9 @@ jobs:
             export HOME="${RUNNER_TEMP}/openquota-secret-service-home"
             mkdir -p "${HOME}/.local/share/keyrings"
             eval "$(printf "\n" | gnome-keyring-daemon --unlock --components=secrets)"
-            export OPENQUOTA_TEST_SECRET_SERVICE=1
+            export OPENQUOTA_TEST_CREDENTIAL_STORE=1
             cargo test --manifest-path src-tauri/Cargo.toml \
-              providers::credential_store::tests::linux_secret_service_round_trip_when_requested \
+              providers::credential_store::tests::system_credential_store_round_trip_when_requested \
               -- --exact --nocapture
           '
 

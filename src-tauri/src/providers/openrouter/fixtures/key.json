@@ -1,0 +1,10 @@
+{
+  "data": {
+    "is_free_tier": false,
+    "usage_daily": 0,
+    "usage_weekly": 2,
+    "usage_monthly": 6.5,
+    "usage": 4,
+    "limit": 10
+  }
+}

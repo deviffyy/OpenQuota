@@ -243,6 +243,35 @@ impl SettingsService {
         self.update(settings)
     }
 
+    pub fn apply_provider_credential_state(
+        &self,
+        provider_id: &str,
+        detected: bool,
+        enable: bool,
+    ) -> Result<AppSettings, String> {
+        let mut current = self
+            .settings
+            .write()
+            .map_err(|_| "OpenQuota settings are temporarily unavailable.".to_owned())?;
+        let enabled_before = enabled_provider_set(&current);
+        let provider = current
+            .providers
+            .iter_mut()
+            .find(|provider| provider.id == provider_id)
+            .ok_or_else(|| "Provider settings are unavailable.".to_owned())?;
+        provider.detected = detected;
+        if enable {
+            provider.enabled = true;
+        }
+        self.storage
+            .save_settings(&current)
+            .map_err(|_| "OpenQuota settings could not be saved.".to_owned())?;
+        if enabled_provider_set(&current) != enabled_before {
+            self.enablement_revision.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(current.clone())
+    }
+
     pub fn default_settings(&self, detected: &HashSet<String>) -> AppSettings {
         default_settings(&self.registry, detected)
     }
@@ -460,7 +489,8 @@ mod tests {
     use crate::{
         models::{MetricSection, ProviderDefinition, ProviderSnapshot},
         providers::{
-            antigravity, claude, codex, cursor, ProviderError, ProviderRegistry, UsageProvider,
+            antigravity, claude, codex, cursor, openrouter, ProviderError, ProviderRegistry,
+            UsageProvider,
         },
         storage::Storage,
     };
@@ -489,6 +519,7 @@ mod tests {
             codex::definition(),
             cursor::definition(),
             antigravity::definition(),
+            openrouter::definition(),
         ]
         .into_iter()
         .map(|definition| Arc::new(CatalogProvider(definition)) as Arc<dyn UsageProvider>)
@@ -860,7 +891,7 @@ mod tests {
                 .iter()
                 .map(|provider| provider.id.as_str())
                 .collect::<Vec<_>>(),
-            ["claude", "codex", "cursor", "antigravity"]
+            ["claude", "codex", "cursor", "antigravity", "openrouter"]
         );
     }
 
@@ -932,5 +963,34 @@ mod tests {
         assert!(codex.detected);
         assert!(!codex.expanded);
         assert_eq!(codex.metrics, default_codex.metrics);
+    }
+
+    #[test]
+    fn api_key_save_marks_and_enables_provider_while_delete_only_clears_detection() {
+        let directory = tempdir().unwrap();
+        let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
+        let service = SettingsService::new_for_test(storage, catalog(), &HashSet::new()).unwrap();
+
+        let saved = service
+            .apply_provider_credential_state("openrouter", true, true)
+            .unwrap();
+        let openrouter = saved
+            .providers
+            .iter()
+            .find(|provider| provider.id == "openrouter")
+            .unwrap();
+        assert!(openrouter.detected);
+        assert!(openrouter.enabled);
+
+        let deleted = service
+            .apply_provider_credential_state("openrouter", false, false)
+            .unwrap();
+        let openrouter = deleted
+            .providers
+            .iter()
+            .find(|provider| provider.id == "openrouter")
+            .unwrap();
+        assert!(!openrouter.detected);
+        assert!(openrouter.enabled);
     }
 }

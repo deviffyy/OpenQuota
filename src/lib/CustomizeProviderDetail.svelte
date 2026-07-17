@@ -4,6 +4,7 @@
   import type { ProviderCatalogIndex } from './metrics';
   import type { AppSettings, MetricLayout, MetricSection, ProviderLayout } from './types';
   import Icon from './Icon.svelte';
+  import ProviderApiKeySection from './ProviderApiKeySection.svelte';
   import { reorderFlip } from './motion';
   import { pointerReorder } from './pointerReorder';
 
@@ -205,6 +206,10 @@
         </div>
       </div>
     {/each}
+    <ProviderApiKeySection
+      providerId={provider.id}
+      providerName={providerDisplayName(provider.id)}
+    />
     {#if message}
       <div class:denied={messageKind === 'denied'} class="customization-pill" role="status">
         <Icon
@@ -219,16 +224,12 @@
 
 <style>
   :global {
-    .metric-section {
-      margin-top: 4px;
-    }
-
     .customize-metric-row {
       display: flex;
-      min-height: 39px;
+      min-height: 42px;
       align-items: center;
-      gap: 4px;
-      padding: 4px 6px;
+      gap: 10px;
+      padding: 9px 12px;
       border-top: 1px solid var(--separator);
     }
 
@@ -246,7 +247,7 @@
       flex: 1;
       align-items: center;
       gap: 5px;
-      font-size: 10px;
+      font-size: 12px;
     }
 
     .pin-button.pinned {
@@ -256,16 +257,6 @@
     .metric-section {
       margin-top: 0;
       margin-bottom: 14px;
-    }
-
-    .customize-metric-row {
-      min-height: 42px;
-      gap: 10px;
-      padding: 9px 12px;
-    }
-
-    .customize-metric-row > label {
-      font-size: 12px;
     }
 
     .customize-metric-name {

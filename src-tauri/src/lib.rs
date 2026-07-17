@@ -45,7 +45,8 @@ use crate::{
     pricing::PricingStore,
     providers::{
         antigravity::AntigravityProvider, claude::ClaudeProvider, codex::CodexProvider,
-        cursor::CursorProvider, detect_local_credentials, ProviderRegistry, UsageProvider,
+        cursor::CursorProvider, detect_local_credentials, openrouter::OpenRouterProvider,
+        ProviderRegistry, UsageProvider,
     },
     storage::Storage,
     window::{handle_window_event, open_screen, show_popup, toggle_popup, MAIN_WINDOW},
@@ -210,6 +211,7 @@ pub fn run() {
                 Arc::new(CodexProvider::new(storage.clone(), pricing.clone())?),
                 Arc::new(CursorProvider::new(pricing.clone())?),
                 Arc::new(AntigravityProvider::new()?),
+                Arc::new(OpenRouterProvider::new()?),
             ];
             let registry = Arc::new(ProviderRegistry::new(providers)?);
             let service = Arc::new(ProviderService::new(registry.clone(), storage.clone()));
@@ -335,6 +337,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::bootstrap::get_bootstrap_state,
             commands::provider::open_provider_link,
+            commands::provider::get_provider_api_key_state,
+            commands::provider::save_provider_api_key,
+            commands::provider::delete_provider_api_key,
             commands::usage::refresh_usage,
             commands::usage::refresh_provider_usage,
             commands::settings::get_app_settings,

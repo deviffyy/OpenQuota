@@ -20,7 +20,7 @@ const frontendConsumers = [
   'src/lib/metrics.ts',
   'src/lib/shareCard.ts',
 ];
-const providerLiteral = /["'](?:claude|codex|cursor|antigravity)["']/;
+const providerLiteral = /["'](?:claude|codex|cursor|antigravity|openrouter)["']/;
 
 for (const file of rustConsumers) {
   const source = fs.readFileSync(new URL(file, root), 'utf8').split('#[cfg(test)]')[0];

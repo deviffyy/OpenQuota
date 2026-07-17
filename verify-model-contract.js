@@ -25,6 +25,7 @@ const contracts = [
   'TrayMetricDefinition',
   'MetricDefinition',
   'ProviderLink',
+  'ProviderApiKeyState',
   'ProviderDefinition',
   'ProviderCatalog',
   'MetricLayout',

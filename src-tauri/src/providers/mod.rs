@@ -1,4 +1,5 @@
 pub mod antigravity;
+pub mod api_key;
 pub mod claude;
 pub mod codex;
 pub mod credential_store;
@@ -6,6 +7,7 @@ pub mod cursor;
 mod daily_usage;
 mod detection;
 mod log_usage;
+pub mod openrouter;
 mod registry;
 #[cfg(test)]
 pub mod test_http;
@@ -13,7 +15,7 @@ pub mod test_http;
 pub use detection::detect_local_credentials;
 pub use registry::ProviderRegistry;
 
-use crate::models::{ProviderDefinition, ProviderErrorKind, ProviderSnapshot};
+use crate::models::{ApiKeyStatus, ProviderDefinition, ProviderErrorKind, ProviderSnapshot};
 
 #[derive(Debug, thiserror::Error)]
 #[error("{message}")]
@@ -43,11 +45,29 @@ pub trait UsageProvider: Send + Sync {
     fn definition(&self) -> ProviderDefinition;
     fn has_local_credentials(&self) -> bool;
     fn refresh(&self) -> Result<ProviderSnapshot, ProviderError>;
+
+    fn api_key_status(&self) -> Option<Result<ApiKeyStatus, ProviderError>> {
+        None
+    }
+
+    fn save_api_key(&self, _value: &str) -> Result<(), ProviderError> {
+        Err(ProviderError::new(
+            ProviderErrorKind::Internal,
+            "That provider does not accept an API key.",
+        ))
+    }
+
+    fn delete_api_key(&self) -> Result<(), ProviderError> {
+        Err(ProviderError::new(
+            ProviderErrorKind::Internal,
+            "That provider does not accept an API key.",
+        ))
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{antigravity, claude, codex, cursor, ProviderError};
+    use super::{antigravity, claude, codex, cursor, openrouter, ProviderError};
     use crate::models::ProviderErrorKind;
 
     #[test]
@@ -103,5 +123,15 @@ mod tests {
             ]
         );
         assert!(links(antigravity::definition()).is_empty());
+        assert_eq!(
+            links(openrouter::definition()),
+            [
+                ("Activity".into(), "https://openrouter.ai/activity".into()),
+                (
+                    "Credits".into(),
+                    "https://openrouter.ai/settings/credits".into()
+                ),
+            ]
+        );
     }
 }

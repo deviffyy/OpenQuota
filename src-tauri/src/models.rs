@@ -1,6 +1,22 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ApiKeyStatus {
+    NotSet,
+    FromEnvironment,
+    Saved,
+    OverrideActive,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderApiKeyState {
+    pub provider_id: String,
+    pub status: ApiKeyStatus,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct QuotaWindow {
@@ -656,8 +672,8 @@ pub struct SettingsViewState {
 #[cfg(test)]
 mod tests {
     use super::{
-        AppSettings, LogLevel, ProviderErrorKind, ProviderLink, ProviderSnapshot,
-        ProviderViewState, UsagePeriod,
+        ApiKeyStatus, AppSettings, LogLevel, ProviderApiKeyState, ProviderErrorKind, ProviderLink,
+        ProviderSnapshot, ProviderViewState, UsagePeriod,
     };
 
     #[test]
@@ -692,6 +708,22 @@ mod tests {
 
         let value = serde_json::to_value(state).unwrap();
         assert_eq!(value["errorKind"], "network");
+    }
+
+    #[test]
+    fn api_key_state_exposes_status_without_a_secret_field() {
+        let value = serde_json::to_value(ProviderApiKeyState {
+            provider_id: "openrouter".into(),
+            status: ApiKeyStatus::OverrideActive,
+        })
+        .unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "providerId": "openrouter",
+                "status": "overrideActive"
+            })
+        );
     }
 
     #[test]

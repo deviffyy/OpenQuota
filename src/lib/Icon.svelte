@@ -3,6 +3,7 @@
     | 'about'
     | 'back'
     | 'check'
+    | 'clear-filled'
     | 'close'
     | 'chevron-down'
     | 'chevron-left'
@@ -12,7 +13,10 @@
     | 'flame-filled'
     | 'grip-dots'
     | 'grip-lines'
+    | 'lock'
     | 'external-link'
+    | 'eye'
+    | 'eye-off'
     | 'power'
     | 'refresh'
     | 'reset'
@@ -73,12 +77,30 @@
     <path d="M12 3v12M8 7l4-4 4 4" /><path d="M6 11H4v9h16v-9h-2" />
   {:else if name === 'external-link'}
     <path d="M14 5h5v5" /><path d="m19 5-8 8" /><path d="M17 13v6H5V7h6" />
+  {:else if name === 'eye'}
+    <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" /><circle
+      cx="12"
+      cy="12"
+      r="2.5"
+    />
+  {:else if name === 'eye-off'}
+    <path d="m3 3 18 18" /><path
+      d="M10.6 6.2A10 10 0 0 1 12 6c6 0 9.5 6 9.5 6a16 16 0 0 1-2.1 2.8M6.1 6.1C3.8 7.7 2.5 12 2.5 12s3.5 6 9.5 6a9.7 9.7 0 0 0 4-.9"
+    /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+  {:else if name === 'lock'}
+    <rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" />
   {:else if name === 'about'}
     <circle cx="12" cy="12" r="9" /><path d="M12 11v6" /><path d="M12 7h.01" />
   {:else if name === 'power'}
     <path d="M12 2v10" /><path d="M7.1 5.4a8 8 0 1 0 9.8 0" />
   {:else if name === 'check'}
     <path d="m5 12 4 4L19 6" />
+  {:else if name === 'clear-filled'}
+    <circle cx="12" cy="12" r="9" fill="currentColor" stroke="none" /><path
+      d="m9 9 6 6m0-6-6 6"
+      stroke="var(--tray)"
+      stroke-width="2"
+    />
   {:else if name === 'close'}
     <path d="M6.5 6.5 17.5 17.5M17.5 6.5 6.5 17.5" />
   {:else if name === 'warning'}

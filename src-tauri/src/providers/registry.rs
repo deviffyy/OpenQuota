@@ -439,13 +439,14 @@ mod tests {
 
     #[test]
     fn builtin_provider_catalog_keeps_the_product_defaults() {
-        use crate::providers::{antigravity, claude, codex, cursor};
+        use crate::providers::{antigravity, claude, codex, cursor, openrouter};
 
         let registry = ProviderRegistry::new(vec![
             runtime(claude::definition()),
             runtime(codex::definition()),
             runtime(cursor::definition()),
             runtime(antigravity::definition()),
+            runtime(openrouter::definition()),
         ])
         .unwrap();
         let catalog = registry.catalog();
@@ -456,7 +457,7 @@ mod tests {
                 .iter()
                 .map(|provider| provider.id.as_str())
                 .collect::<Vec<_>>(),
-            ["claude", "codex", "cursor", "antigravity"]
+            ["claude", "codex", "cursor", "antigravity", "openrouter"]
         );
         assert_eq!(
             registry
@@ -483,6 +484,7 @@ mod tests {
         assert!(registry.definition("claude").unwrap().fallback_enabled);
         assert!(registry.definition("cursor").unwrap().fallback_enabled);
         assert!(!registry.definition("antigravity").unwrap().fallback_enabled);
+        assert!(!registry.definition("openrouter").unwrap().fallback_enabled);
         assert!(registry
             .metric("claude.session")
             .unwrap()

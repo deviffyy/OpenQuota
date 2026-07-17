@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 describe('native visual contract', () => {
-  it.each(['claude', 'codex', 'cursor', 'antigravity'])(
+  it.each(['claude', 'codex', 'cursor', 'antigravity', 'openrouter'])(
     'packages the exact %s provider icon',
     (providerId) => {
       const { container } = render(ProviderIcon, { providerId });
@@ -32,6 +32,9 @@ describe('native visual contract', () => {
     cleanup();
     const antigravity = render(ProviderIcon, { providerId: 'antigravity' });
     expect(antigravity.container.querySelector('path')).toHaveAttribute('fill', '#4285F4');
+    cleanup();
+    const openrouter = render(ProviderIcon, { providerId: 'openrouter' });
+    expect(openrouter.container.querySelector('path')).toHaveAttribute('fill', 'currentColor');
   });
 
   it('uses the shared hover dwell and grace timing for Usage Trend details', async () => {

@@ -46,12 +46,12 @@ OpenQuota checks for updates automatically. Installable updates are cryptographi
   spend
 - **Cursor** — total, Auto and API usage, credits, token history, and estimated spend
 - **Antigravity** — shared Gemini and Claude quota pools
+- **OpenRouter** — credit balance and daily, weekly and monthly spend (API key)
 
-OpenQuota uses the provider sign-ins already available on your computer. Sign in through the
-provider's app or CLI first, then open OpenQuota.
-
-Codex subscription limits require a ChatGPT login. API-key-only sessions do not expose subscription
-quota information.
+Most providers use credentials already available on your computer. OpenRouter requires an API key,
+which you can add in Customize; OpenQuota stores it securely in your operating system's credential
+store. Codex subscription limits require a ChatGPT login and are not available in API-key-only
+sessions.
 
 ## Features
 
