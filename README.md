@@ -19,7 +19,7 @@ in one compact panel. Pin the metrics you care about to the tray and see what re
 interrupting your work.
 
 <p align="center">
-  <img src="assets/screenshot.png" alt="OpenQuota dashboard showing AI provider quotas, usage, and estimated spend" width="720">
+  <img src="assets/screenshot.png" alt="OpenQuota dashboard showing AI provider quotas, usage, and estimated spend" width="420">
 </p>
 
 ## Download
