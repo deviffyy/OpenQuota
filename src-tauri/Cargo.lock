@@ -2774,7 +2774,7 @@ dependencies = [
 
 [[package]]
 name = "openquota"
-version = "0.2.4"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
