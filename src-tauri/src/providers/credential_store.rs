@@ -361,5 +361,4 @@ mod tests {
             .unwrap()
             .is_none());
     }
-
 }
