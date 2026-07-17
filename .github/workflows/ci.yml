@@ -116,7 +116,7 @@ jobs:
       - name: Test Linux Secret Service integration
         if: runner.os == 'Linux'
         run: |
-          dbus-run-session -- xvfb-run -a bash -euo pipefail -c '
+          xvfb-run -a dbus-run-session -- bash -euo pipefail -c '
             original_home="${HOME}"
             export RUSTUP_HOME="${RUSTUP_HOME:-${original_home}/.rustup}"
             export HOME="${RUNNER_TEMP}/openquota-secret-service-home"
