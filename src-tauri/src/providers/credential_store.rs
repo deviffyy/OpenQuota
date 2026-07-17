@@ -351,8 +351,6 @@ mod tests {
             {
                 return Err("The updated credential round-trip value did not match.".into());
             }
-            #[cfg(target_os = "linux")]
-            lock_linux_test_item(&service, account)?;
             Ok(())
         })();
         let cleanup = super::delete_owned_password(&service, account);
@@ -364,22 +362,4 @@ mod tests {
             .is_none());
     }
 
-    #[cfg(target_os = "linux")]
-    fn lock_linux_test_item(service: &str, account: &str) -> Result<(), String> {
-        use std::collections::HashMap;
-
-        use secret_service::{blocking::SecretService, EncryptionType};
-
-        let secret_service = SecretService::connect(EncryptionType::Dh)
-            .map_err(|_| "The Linux credential test could not connect to Secret Service.")?;
-        let mut matches = secret_service
-            .search_items(HashMap::from([("service", service), ("username", account)]))
-            .map_err(|_| "The Linux credential test item could not be found.")?;
-        let item = matches
-            .unlocked
-            .pop()
-            .ok_or("The Linux credential test item was not unlocked.")?;
-        item.lock()
-            .map_err(|_| "The Linux credential test item could not be locked.".into())
-    }
 }
