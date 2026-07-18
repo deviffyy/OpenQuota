@@ -229,6 +229,18 @@ impl NotificationEvaluator {
             return Vec::new();
         };
         let mut alerts = Vec::new();
+        let provider_metric_ids = provider_definition
+            .metrics
+            .iter()
+            .filter(|metric| {
+                matches!(
+                    metric.source,
+                    MetricSource::Quota { .. } | MetricSource::QuotaOrValue { .. }
+                )
+            })
+            .map(|metric| metric.id.as_str())
+            .collect::<HashSet<_>>();
+        let mut present_metric_ids = HashSet::new();
         for window in &snapshot.quotas {
             let Some(metric_definition) = provider_definition.metrics.iter().find(|metric| {
                 matches!(
@@ -244,6 +256,7 @@ impl NotificationEvaluator {
                 continue;
             }
             let metric_id = metric_definition.id.clone();
+            present_metric_ids.insert(metric_id.clone());
             let is_session_window = metric_definition.source.session_window();
             let projection = project(window, now, is_session_window);
             let state = states.entry(metric_id.clone()).or_default();
@@ -265,6 +278,10 @@ impl NotificationEvaluator {
             }
             alerts.extend(new_alerts);
         }
+        states.retain(|metric_id, _| {
+            !provider_metric_ids.contains(metric_id.as_str())
+                || present_metric_ids.contains(metric_id)
+        });
         alerts
     }
 }
@@ -715,6 +732,113 @@ mod tests {
         let states = evaluator.states.lock().unwrap();
         assert!(states.contains_key("custom.rolling"));
         assert!(!states.contains_key("custom.bucket"));
+    }
+
+    #[test]
+    fn evaluator_prunes_quota_state_missing_from_a_successful_snapshot() {
+        let quota_metric = |id: &str, source_id: &str, label: &str| {
+            MetricDefinition::new(
+                id,
+                label,
+                MetricSource::Quota {
+                    source_id: source_id.into(),
+                    session_window: false,
+                },
+                true,
+                true,
+                MetricSection::AlwaysVisible,
+                false,
+                Some(label),
+                None,
+            )
+        };
+        let registry = ProviderRegistry::from_definitions(vec![ProviderDefinition {
+            id: "switching".into(),
+            display_name: "Switching".into(),
+            short_name: "Sw".into(),
+            fallback_enabled: true,
+            local_usage_source_note: None,
+            links: vec![],
+            metrics: vec![
+                quota_metric("switching.session", "session", "S"),
+                quota_metric("switching.weekly", "weekly", "W"),
+            ],
+        }])
+        .unwrap();
+        let settings = AppSettings {
+            providers: vec![ProviderLayout {
+                id: "switching".into(),
+                enabled: true,
+                detected: true,
+                expanded: false,
+                metrics: vec![
+                    MetricLayout {
+                        id: "switching.session".into(),
+                        enabled: true,
+                        section: MetricSection::AlwaysVisible,
+                        pinned: false,
+                    },
+                    MetricLayout {
+                        id: "switching.weekly".into(),
+                        enabled: true,
+                        section: MetricSection::AlwaysVisible,
+                        pinned: false,
+                    },
+                ],
+            }],
+            ..AppSettings::default()
+        };
+        let snapshot = |source_id: &str, label: &str, used_percent: f64| ProviderSnapshot {
+            provider_id: "switching".into(),
+            plan: None,
+            quotas: vec![QuotaWindow {
+                id: source_id.into(),
+                label: label.into(),
+                used_percent,
+                resets_at: Some(Utc::now() + Duration::hours(4)),
+                period_seconds: 18_000,
+                format: crate::models::QuotaFormat::Percent,
+                used_value: None,
+                limit_value: None,
+            }],
+            value_metrics: Vec::new(),
+            notices: Vec::new(),
+            usage: UsageHistory::default(),
+            warnings: Vec::new(),
+            refreshed_at: Utc::now(),
+        };
+        let evaluator = NotificationEvaluator::default();
+
+        evaluator.evaluate(
+            &snapshot("session", "Session", 10.0),
+            &settings,
+            &registry,
+            Utc::now(),
+        );
+        assert!(evaluator
+            .states
+            .lock()
+            .unwrap()
+            .contains_key("switching.session"));
+
+        evaluator.evaluate(
+            &snapshot("weekly", "Weekly", 20.0),
+            &settings,
+            &registry,
+            Utc::now(),
+        );
+        let states = evaluator.states.lock().unwrap();
+        assert!(!states.contains_key("switching.session"));
+        assert!(states.contains_key("switching.weekly"));
+        drop(states);
+
+        let alerts = evaluator.evaluate(
+            &snapshot("session", "Session", 95.0),
+            &settings,
+            &registry,
+            Utc::now(),
+        );
+        assert!(alerts.is_empty());
     }
 
     #[test]
