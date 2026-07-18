@@ -118,7 +118,7 @@ pub enum ClaudeError {
     #[error("Not logged in. Run `claude` to authenticate.")]
     NotLoggedIn,
     #[error(
-        "Signed in to the Claude desktop app? OpenQuota needs a CLI login — run `claude` in a terminal and sign in once."
+        "Claude Desktop login found, but its macOS-only encrypted session cannot be reused safely. Run `claude` in a terminal and sign in once."
     )]
     DesktopAppOnly,
     #[error("Your Claude session expired. Run `claude` to sign in again.")]

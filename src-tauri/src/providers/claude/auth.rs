@@ -1,4 +1,7 @@
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -133,23 +136,39 @@ pub fn has_local_credentials() -> bool {
 }
 
 pub fn has_desktop_app_data() -> bool {
-    let home = home_directory();
-    let mut paths = vec![
-        home.join("Library")
-            .join("Application Support")
-            .join("Claude Code"),
-        home.join("Library")
-            .join("Application Support")
-            .join("Claude")
-            .join("claude-code"),
-        home.join(".config").join("Claude"),
-        home.join(".config").join("Claude Code"),
-    ];
-    if let Some(app_data) = std::env::var_os("APPDATA").map(PathBuf::from) {
-        paths.push(app_data.join("Claude"));
-        paths.push(app_data.join("Claude Code"));
+    #[cfg(target_os = "macos")]
+    {
+        has_desktop_app_material_at(&home_directory())
     }
-    paths.into_iter().any(|path| path.is_dir())
+    #[cfg(not(target_os = "macos"))]
+    {
+        false
+    }
+}
+
+fn has_desktop_app_material_at(home: &Path) -> bool {
+    let root = home
+        .join("Library")
+        .join("Application Support")
+        .join("Claude");
+    let Ok(document) = fs::read(root.join("config.json")) else {
+        return false;
+    };
+    let Ok(config) = serde_json::from_slice::<serde_json::Value>(&document) else {
+        return false;
+    };
+    let has_token_cache = ["oauth:tokenCacheV2", "oauth:tokenCache"]
+        .into_iter()
+        .any(|key| {
+            config
+                .get(key)
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|value| !value.trim().is_empty())
+        });
+    has_token_cache
+        && [root.join("Cookies"), root.join("Network").join("Cookies")]
+            .into_iter()
+            .any(|path| path.is_file())
 }
 
 pub fn load_candidates() -> Vec<ClaudeCredential> {
@@ -347,7 +366,8 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        parse_credentials, ClaudeCredential, ClaudeCredentialsFile, ClaudeOAuth, CredentialSource,
+        has_desktop_app_material_at, parse_credentials, ClaudeCredential, ClaudeCredentialsFile,
+        ClaudeOAuth, CredentialSource,
     };
     use crate::providers::claude::ClaudeError;
 
@@ -418,5 +438,44 @@ mod tests {
             original,
             credential("different-access", "refresh-a").fingerprint()
         );
+    }
+
+    #[test]
+    fn desktop_detection_requires_token_cache_and_cookie_database() {
+        let directory = tempdir().unwrap();
+        let root = directory
+            .path()
+            .join("Library")
+            .join("Application Support")
+            .join("Claude");
+        fs::create_dir_all(root.join("Network")).unwrap();
+
+        assert!(!has_desktop_app_material_at(directory.path()));
+        fs::write(
+            root.join("config.json"),
+            br#"{"oauth:tokenCacheV2":"encrypted-cache"}"#,
+        )
+        .unwrap();
+        assert!(!has_desktop_app_material_at(directory.path()));
+
+        fs::write(root.join("Network").join("Cookies"), b"sqlite").unwrap();
+        assert!(has_desktop_app_material_at(directory.path()));
+    }
+
+    #[test]
+    fn desktop_detection_rejects_empty_or_invalid_cache_documents() {
+        let directory = tempdir().unwrap();
+        let root = directory
+            .path()
+            .join("Library")
+            .join("Application Support")
+            .join("Claude");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("Cookies"), b"sqlite").unwrap();
+
+        fs::write(root.join("config.json"), br#"{"oauth:tokenCache":""}"#).unwrap();
+        assert!(!has_desktop_app_material_at(directory.path()));
+        fs::write(root.join("config.json"), b"not-json").unwrap();
+        assert!(!has_desktop_app_material_at(directory.path()));
     }
 }
