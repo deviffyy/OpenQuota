@@ -340,6 +340,7 @@ mod tests {
                 plan: None,
                 quotas: Vec::new(),
                 value_metrics: Vec::new(),
+                status_metrics: Vec::new(),
                 notices: Vec::new(),
                 usage: cached_usage.clone(),
                 warnings: Vec::new(),

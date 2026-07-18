@@ -22,6 +22,7 @@ pub struct DailyUsageAccumulator {
 struct DayAccumulator {
     tokens: u64,
     cost: f64,
+    cost_estimated: bool,
     models: HashMap<String, ModelAccumulator>,
 }
 
@@ -83,10 +84,18 @@ impl ModelAccumulator {
 }
 
 impl DailyUsageAccumulator {
+    /// Adds usage whose dollar cost was derived from a pricing estimate.
     pub fn add(&mut self, date: NaiveDate, tokens: u64, cost: f64, model: &str) {
-        self.add_internal(date, tokens, cost, model, None);
+        self.add_internal(date, tokens, cost, model, None, true);
     }
 
+    /// Adds usage whose dollar cost was recorded exactly by the source.
+    #[allow(dead_code)]
+    pub fn add_exact(&mut self, date: NaiveDate, tokens: u64, cost: f64, model: &str) {
+        self.add_internal(date, tokens, cost, model, None, false);
+    }
+
+    /// Adds variant usage whose dollar cost was derived from a pricing estimate.
     pub fn add_variant(
         &mut self,
         date: NaiveDate,
@@ -96,7 +105,21 @@ impl DailyUsageAccumulator {
         variant: &str,
     ) {
         let variant = normalized_model_name(variant);
-        self.add_internal(date, tokens, cost, family, Some(variant));
+        self.add_internal(date, tokens, cost, family, Some(variant), true);
+    }
+
+    /// Adds variant usage whose dollar cost was recorded exactly by the source.
+    #[allow(dead_code)]
+    pub fn add_exact_variant(
+        &mut self,
+        date: NaiveDate,
+        tokens: u64,
+        cost: f64,
+        family: &str,
+        variant: &str,
+    ) {
+        let variant = normalized_model_name(variant);
+        self.add_internal(date, tokens, cost, family, Some(variant), false);
     }
 
     fn add_internal(
@@ -106,11 +129,13 @@ impl DailyUsageAccumulator {
         cost: f64,
         family: &str,
         variant: Option<&str>,
+        cost_estimated: bool,
     ) {
         let family = normalized_model_name(family);
         let day = self.days.entry(date).or_default();
         day.tokens = day.tokens.saturating_add(tokens);
         day.cost += cost;
+        day.cost_estimated |= cost_estimated;
         day.models
             .entry(family.to_lowercase())
             .or_default()
@@ -189,6 +214,7 @@ impl DailyUsageAccumulator {
             if let Some(day) = self.days.get(date) {
                 total.tokens = total.tokens.saturating_add(day.tokens);
                 total.cost += day.cost;
+                total.cost_estimated |= day.cost_estimated;
                 for (key, model) in &day.models {
                     total.models.entry(key.clone()).or_default().merge(model);
                 }
@@ -205,7 +231,7 @@ impl DailyUsageAccumulator {
         Some(UsagePeriod {
             tokens: total.tokens,
             estimated_cost_usd: Some(total.cost),
-            cost_estimated: true,
+            cost_estimated: total.cost_estimated,
             estimate_complete: unknown_models.is_empty(),
             model_breakdown: model_breakdown(&total, source_note),
             unknown_models,
@@ -429,6 +455,35 @@ mod tests {
         );
         assert_eq!(history.last_30_days.as_ref().unwrap().tokens, 1_000);
         assert_eq!(history.daily.len(), 2);
+    }
+
+    #[test]
+    fn exact_only_costs_stay_exact_in_period_aggregates() {
+        let now = Utc.with_ymd_and_hms(2026, 6, 26, 12, 0, 0).unwrap();
+        let mut accumulator = DailyUsageAccumulator::default();
+        accumulator.add_exact(day(2026, 6, 26), 300, 3.0, "alpha");
+        accumulator.add_exact_variant(day(2026, 6, 25), 700, 7.0, "beta", "beta-2");
+
+        let history = accumulator.build(now, "From exact records");
+
+        assert!(!history.today.as_ref().unwrap().cost_estimated);
+        assert!(!history.yesterday.as_ref().unwrap().cost_estimated);
+        assert!(!history.last_30_days.as_ref().unwrap().cost_estimated);
+    }
+
+    #[test]
+    fn one_estimated_cost_marks_its_period_and_combined_period_estimated() {
+        let now = Utc.with_ymd_and_hms(2026, 6, 26, 12, 0, 0).unwrap();
+        let mut accumulator = DailyUsageAccumulator::default();
+        accumulator.add_exact(day(2026, 6, 26), 300, 3.0, "alpha");
+        accumulator.add_variant(day(2026, 6, 26), 200, 2.0, "alpha", "alpha-2");
+        accumulator.add_exact(day(2026, 6, 25), 700, 7.0, "beta");
+
+        let history = accumulator.build(now, "From mixed records");
+
+        assert!(history.today.as_ref().unwrap().cost_estimated);
+        assert!(!history.yesterday.as_ref().unwrap().cost_estimated);
+        assert!(history.last_30_days.as_ref().unwrap().cost_estimated);
     }
 
     #[test]

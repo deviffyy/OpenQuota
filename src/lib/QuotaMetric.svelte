@@ -34,11 +34,15 @@
   }: Props = $props();
   const used = $derived(Math.min(100, Math.max(0, quota.usedPercent)));
   const remaining = $derived(Math.max(0, 100 - used));
+  const countUnit = $derived(quota.unit?.trim() || 'requests');
+  const estimateNote = $derived(
+    quota.sourceNote?.trim() || 'Estimated from local usage data and may differ from billed usage.',
+  );
   const reading = $derived.by(() => {
     if (quota.format === 'count' && quota.usedValue !== null && quota.limitValue !== null) {
       const value =
         usageDisplay === 'left' ? Math.max(0, quota.limitValue - quota.usedValue) : quota.usedValue;
-      return `${value.toFixed(0)} requests ${usageDisplay}`;
+      return `${value.toFixed(0)} ${countUnit} ${usageDisplay}`;
     }
     if (quota.format === 'dollars' && quota.usedValue !== null) {
       if (usageDisplay === 'left' && quota.limitValue !== null) {
@@ -52,7 +56,7 @@
     if (quota.format === 'count' && quota.usedValue !== null && quota.limitValue !== null) {
       const opposite =
         usageDisplay === 'left' ? quota.usedValue : Math.max(0, quota.limitValue - quota.usedValue);
-      return `${opposite.toFixed(0)} requests ${usageDisplay === 'left' ? 'used' : 'left'}`;
+      return `${opposite.toFixed(0)} ${countUnit} ${usageDisplay === 'left' ? 'used' : 'left'}`;
     }
     if (quota.format === 'dollars' && quota.usedValue !== null) {
       if (usageDisplay === 'left') return `$${quota.usedValue.toFixed(2)} spent`;
@@ -132,7 +136,17 @@
 
 <section class="metric" aria-label={`${quota.label} quota`}>
   <div class="metric__heading">
-    <h2>{quota.label}</h2>
+    <h2>
+      {quota.label}
+      {#if quota.estimated}
+        <span
+          class="metric-estimate"
+          data-tooltip={estimateNote}
+          aria-label="Estimated quota"
+          role="img"><Icon name="about" size={11} strokeWidth={1.9} /></span
+        >
+      {/if}
+    </h2>
     {#if showPace}
       {#if pace.severity === 'spent' || pace.severity === 'runningOut'}
         {#if pace.severity === 'runningOut' && paceLabel}
@@ -216,6 +230,13 @@
       font: inherit;
       font-size: 13px;
       line-height: 17px;
+    }
+
+    .metric__heading .metric-estimate {
+      display: inline-flex;
+      margin-left: 3px;
+      color: var(--secondary);
+      vertical-align: -1px;
     }
 
     .metric__heading .pace-warning__icon {

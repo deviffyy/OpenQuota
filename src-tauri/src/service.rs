@@ -299,6 +299,14 @@ fn validate_snapshot(
             _ => None,
         })
         .collect::<std::collections::HashSet<_>>();
+    let status_sources = definition
+        .metrics
+        .iter()
+        .filter_map(|metric| match &metric.source {
+            MetricSource::Status { source_id } => Some(source_id.as_str()),
+            _ => None,
+        })
+        .collect::<std::collections::HashSet<_>>();
     if snapshot
         .quotas
         .iter()
@@ -307,10 +315,48 @@ fn validate_snapshot(
             .value_metrics
             .iter()
             .any(|metric| !value_sources.contains(metric.id.as_str()))
+        || snapshot
+            .status_metrics
+            .iter()
+            .any(|metric| !status_sources.contains(metric.id.as_str()))
+        || has_duplicate_ids(snapshot.quotas.iter().map(|metric| metric.id.as_str()))
+        || has_duplicate_ids(
+            snapshot
+                .value_metrics
+                .iter()
+                .map(|metric| metric.id.as_str()),
+        )
+        || has_duplicate_ids(
+            snapshot
+                .status_metrics
+                .iter()
+                .map(|metric| metric.id.as_str()),
+        )
+        || snapshot.quotas.iter().any(|quota| {
+            (quota.format == crate::models::QuotaFormat::Count
+                && quota
+                    .unit
+                    .as_deref()
+                    .is_none_or(|unit| unit.trim().is_empty()))
+                || (quota.estimated
+                    && quota
+                        .source_note
+                        .as_deref()
+                        .is_none_or(|note| note.trim().is_empty()))
+        })
+        || snapshot
+            .status_metrics
+            .iter()
+            .any(|metric| metric.text.trim().is_empty() || metric.label.trim().is_empty())
     {
         return Err(snapshot_contract_error());
     }
     Ok(snapshot)
+}
+
+fn has_duplicate_ids<'a>(mut ids: impl Iterator<Item = &'a str>) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    ids.any(|id| !seen.insert(id))
 }
 
 fn snapshot_contract_error() -> ProviderError {
@@ -359,7 +405,8 @@ mod tests {
     use crate::{
         models::{
             MetricDefinition, MetricSection, MetricSource, ProviderDefinition, ProviderErrorKind,
-            ProviderSnapshot, ProviderViewState, UsageHistory,
+            ProviderSnapshot, ProviderViewState, QuotaFormat, QuotaWindow, StatusMetric,
+            StatusTone, UsageHistory,
         },
         policy::FAILURE_RETRY_BACKOFF,
         providers::{ProviderError, ProviderRegistry, UsageProvider},
@@ -446,6 +493,7 @@ mod tests {
             plan: None,
             quotas: Vec::new(),
             value_metrics: Vec::new(),
+            status_metrics: Vec::new(),
             notices: Vec::new(),
             usage: UsageHistory::default(),
             warnings: Vec::new(),
@@ -460,6 +508,7 @@ mod tests {
             plan: None,
             quotas: Vec::new(),
             value_metrics: Vec::new(),
+            status_metrics: Vec::new(),
             notices: Vec::new(),
             usage: UsageHistory::default(),
             warnings: Vec::new(),
@@ -503,8 +552,86 @@ mod tests {
             format: crate::models::QuotaFormat::Percent,
             used_value: None,
             limit_value: None,
+            unit: None,
+            estimated: false,
+            source_note: None,
         });
         assert!(validate_snapshot(&registry, "contract", unknown_source).is_err());
+    }
+
+    #[test]
+    fn snapshot_contract_validates_dynamic_metric_metadata_and_unique_ids() {
+        let definition = ProviderDefinition {
+            id: "dynamic".into(),
+            display_name: "Dynamic".into(),
+            short_name: "D".into(),
+            fallback_enabled: true,
+            local_usage_source_note: None,
+            links: Vec::new(),
+            metrics: vec![
+                MetricDefinition::quota(
+                    "dynamic.searches",
+                    "Web Searches",
+                    "searches",
+                    false,
+                    true,
+                    MetricSection::AlwaysVisible,
+                    true,
+                    "S",
+                ),
+                MetricDefinition::status(
+                    "dynamic.extra",
+                    "Extra Usage",
+                    "extra",
+                    true,
+                    MetricSection::OnDemand,
+                    false,
+                    "E",
+                ),
+            ],
+        };
+        let registry = ProviderRegistry::from_definitions(vec![definition]).unwrap();
+        let mut snapshot = test_snapshot("dynamic");
+        snapshot.quotas.push(QuotaWindow {
+            id: "searches".into(),
+            label: "Web Searches".into(),
+            used_percent: 25.0,
+            resets_at: None,
+            period_seconds: 86_400,
+            format: QuotaFormat::Count,
+            used_value: Some(25.0),
+            limit_value: Some(100.0),
+            unit: Some("searches".into()),
+            estimated: false,
+            source_note: None,
+        });
+        snapshot.status_metrics.push(StatusMetric {
+            id: "extra".into(),
+            label: "Extra Usage".into(),
+            text: "2500 cap".into(),
+            tone: StatusTone::Positive,
+            subtitle: None,
+        });
+
+        assert!(validate_snapshot(&registry, "dynamic", snapshot.clone()).is_ok());
+
+        let mut missing_unit = snapshot.clone();
+        missing_unit.quotas[0].unit = Some(" ".into());
+        assert!(validate_snapshot(&registry, "dynamic", missing_unit).is_err());
+
+        let mut missing_estimate_source = snapshot.clone();
+        missing_estimate_source.quotas[0].estimated = true;
+        assert!(validate_snapshot(&registry, "dynamic", missing_estimate_source).is_err());
+
+        let mut duplicate_quota = snapshot.clone();
+        duplicate_quota
+            .quotas
+            .push(duplicate_quota.quotas[0].clone());
+        assert!(validate_snapshot(&registry, "dynamic", duplicate_quota).is_err());
+
+        let mut unknown_status = snapshot;
+        unknown_status.status_metrics[0].id = "unknown".into();
+        assert!(validate_snapshot(&registry, "dynamic", unknown_status).is_err());
     }
 
     #[test]

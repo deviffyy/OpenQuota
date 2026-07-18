@@ -185,6 +185,7 @@ export const codexState: ProviderViewState = {
         format: 'percent',
         usedValue: null,
         limitValue: null,
+        estimated: false,
       },
       {
         id: 'weekly',
@@ -195,25 +196,27 @@ export const codexState: ProviderViewState = {
         format: 'percent',
         usedValue: null,
         limitValue: null,
+        estimated: false,
       },
     ],
     valueMetrics: [
       {
         id: 'rateLimitResets',
         label: 'Rate Limit Resets',
-        values: [{ number: 2, kind: 'count', label: 'available' }],
+        values: [{ number: 2, kind: 'count', label: 'available', estimated: false }],
         expiriesAt: ['2099-01-02T00:00:00Z', '2099-01-03T00:00:00Z'],
       },
       {
         id: 'credits',
         label: 'Extra Usage',
         values: [
-          { number: 32.84, kind: 'dollars' },
-          { number: 821, kind: 'count', label: 'credits' },
+          { number: 32.84, kind: 'dollars', estimated: true },
+          { number: 821, kind: 'count', label: 'credits', estimated: false },
         ],
         expiriesAt: [],
       },
     ],
+    statusMetrics: [],
     notices: [],
     usage: {
       today: {
@@ -266,6 +269,7 @@ export const claudeState: ProviderViewState = {
         format: 'percent',
         usedValue: null,
         limitValue: null,
+        estimated: false,
       },
       {
         id: 'extra',
@@ -276,9 +280,11 @@ export const claudeState: ProviderViewState = {
         format: 'dollars',
         usedValue: 12.5,
         limitValue: 50,
+        estimated: false,
       },
     ],
     valueMetrics: [],
+    statusMetrics: [],
     notices: [],
     usage: { today: null, yesterday: null, last30Days: null, daily: [], unknownModels: [] },
   },
@@ -306,6 +312,7 @@ export const antigravityState: ProviderViewState = {
         format: 'percent',
         usedValue: null,
         limitValue: null,
+        estimated: false,
       },
       {
         id: 'geminiWeekly',
@@ -316,9 +323,11 @@ export const antigravityState: ProviderViewState = {
         format: 'percent',
         usedValue: null,
         limitValue: null,
+        estimated: false,
       },
     ],
     valueMetrics: [],
+    statusMetrics: [],
     notices: [],
     usage: { today: null, yesterday: null, last30Days: null, daily: [], unknownModels: [] },
   },

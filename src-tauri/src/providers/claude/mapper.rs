@@ -84,6 +84,9 @@ pub fn map_usage(
                         format: QuotaFormat::Dollars,
                         used_value: Some(used),
                         limit_value: Some(limit_value),
+                        unit: None,
+                        estimated: false,
+                        source_note: None,
                     });
                 } else if used > 0.0 {
                     value_metrics.push(ValueMetric {
@@ -93,6 +96,7 @@ pub fn map_usage(
                             number: used,
                             kind: MetricValueKind::Dollars,
                             label: Some("spent".into()),
+                            estimated: false,
                         }],
                         expiries_at: Vec::new(),
                     });
@@ -150,6 +154,9 @@ fn append_percent(
         format: QuotaFormat::Percent,
         used_value: None,
         limit_value: None,
+        unit: None,
+        estimated: false,
+        source_note: None,
     });
 }
 

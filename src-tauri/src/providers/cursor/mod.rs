@@ -445,6 +445,7 @@ fn snapshot(
         plan: mapped.plan,
         quotas: mapped.quotas,
         value_metrics: mapped.value_metrics,
+        status_metrics: Vec::new(),
         notices: Vec::new(),
         usage,
         warnings,

@@ -7,12 +7,16 @@ export interface QuotaWindow {
   format: 'percent' | 'dollars' | 'count';
   usedValue: number | null;
   limitValue: number | null;
+  unit?: string | null;
+  estimated: boolean;
+  sourceNote?: string | null;
 }
 
 export interface MetricValue {
   number: number;
   kind: 'count' | 'dollars';
   label?: string | null;
+  estimated: boolean;
 }
 
 export interface ValueMetric {
@@ -20,6 +24,14 @@ export interface ValueMetric {
   label: string;
   values: MetricValue[];
   expiriesAt: string[];
+}
+
+export interface StatusMetric {
+  id: string;
+  label: string;
+  text: string;
+  tone: 'neutral' | 'positive' | 'warning' | 'danger';
+  subtitle?: string | null;
 }
 
 export type ResetClaimOutcome = 'success' | 'nothingToReset' | 'noCredit' | 'failed';
@@ -78,6 +90,7 @@ export interface ProviderSnapshot {
   plan: string | null;
   quotas: QuotaWindow[];
   valueMetrics: ValueMetric[];
+  statusMetrics: StatusMetric[];
   notices: ProviderNotice[];
   usage: UsageHistory;
   warnings: string[];
@@ -116,6 +129,7 @@ export type MetricSource =
   | { kind: 'quota'; sourceId: string; sessionWindow: boolean }
   | { kind: 'quotaOrValue'; sourceId: string; sessionWindow: boolean }
   | { kind: 'value'; sourceId: string }
+  | { kind: 'status'; sourceId: string }
   | { kind: 'usage'; period: 'today' | 'yesterday' | 'last30Days' }
   | { kind: 'trend' };
 

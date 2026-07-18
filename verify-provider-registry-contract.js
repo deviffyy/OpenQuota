@@ -16,6 +16,7 @@ const frontendConsumers = [
   'src/lib/CustomizeProviderList.svelte',
   'src/lib/Dashboard.svelte',
   'src/lib/MetricRenderer.svelte',
+  'src/lib/StatusMetric.svelte',
   'src/lib/TotalSpend.svelte',
   'src/lib/metrics.ts',
   'src/lib/shareCard.ts',

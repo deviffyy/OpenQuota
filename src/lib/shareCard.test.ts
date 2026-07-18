@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { codexState, providerCatalogIndex, settingsState } from '../test/appFixtures';
+import { ProviderCatalogIndex } from './metrics';
 import totalSpendSource from './TotalSpend.svelte?raw';
 import {
   buildProviderShareRows as buildProviderShareRowsWithCatalog,
@@ -123,6 +124,97 @@ describe('share card layout', () => {
       label: 'Live usage paused',
       value: 'Retrying in about 5 minutes',
     });
+  });
+
+  it('keeps provider-supplied count units in exported quota rows', () => {
+    const snapshot = structuredClone(codexState.snapshot!);
+    snapshot.quotas[0] = {
+      ...snapshot.quotas[0],
+      format: 'count',
+      usedPercent: 25,
+      usedValue: 25,
+      limitValue: 100,
+      unit: 'searches',
+    };
+
+    const rows = buildProviderShareRows(
+      'codex',
+      snapshot,
+      settingsState.settings.providers[0],
+      settingsState.settings,
+      Date.now(),
+    );
+
+    expect(rows[0]).toMatchObject({ kind: 'quota', reading: '75 searches left' });
+  });
+
+  it('exports customizable status metrics as text rows', () => {
+    const catalog = new ProviderCatalogIndex({
+      providers: [
+        {
+          id: 'grok',
+          displayName: 'Grok',
+          shortName: 'G',
+          fallbackEnabled: false,
+          localUsageSourceNote: null,
+          links: [],
+          metrics: [
+            {
+              id: 'grok.payAsYouGo',
+              label: 'Extra Usage',
+              source: { kind: 'status', sourceId: 'payAsYouGo' },
+              pinnable: true,
+              defaultEnabled: true,
+              defaultSection: 'alwaysVisible',
+              defaultPinned: true,
+              tray: { shortLabel: 'E', suffix: null },
+            },
+          ],
+        },
+      ],
+    });
+    const snapshot: ProviderSnapshot = {
+      providerId: 'grok',
+      plan: null,
+      quotas: [],
+      valueMetrics: [],
+      statusMetrics: [
+        {
+          id: 'payAsYouGo',
+          label: 'Extra Usage',
+          text: '2500 cap',
+          tone: 'positive',
+        },
+      ],
+      notices: [],
+      usage: { today: null, yesterday: null, last30Days: null, daily: [], unknownModels: [] },
+      warnings: [],
+      refreshedAt: '2026-07-18T00:00:00Z',
+    };
+    const layout: ProviderLayout = {
+      id: 'grok',
+      enabled: true,
+      detected: true,
+      expanded: false,
+      metrics: [
+        {
+          id: 'grok.payAsYouGo',
+          enabled: true,
+          section: 'alwaysVisible',
+          pinned: true,
+        },
+      ],
+    };
+
+    expect(
+      buildProviderShareRowsWithCatalog(
+        catalog,
+        snapshot,
+        layout,
+        settingsState.settings,
+        Date.now(),
+      ),
+    ).toEqual([{ kind: 'text', label: 'Extra Usage', value: '2500 cap', condensed: false }]);
   });
 
   it('keeps always-visible rows ahead of expanded rows like the dashboard', () => {

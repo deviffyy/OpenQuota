@@ -32,6 +32,12 @@ pub struct QuotaWindow {
     pub used_value: Option<f64>,
     #[serde(default)]
     pub limit_value: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    #[serde(default)]
+    pub estimated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_note: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -48,6 +54,8 @@ pub struct MetricValue {
     pub kind: MetricValueKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    #[serde(default)]
+    pub estimated: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -58,6 +66,28 @@ pub struct ValueMetric {
     pub values: Vec<MetricValue>,
     #[serde(default)]
     pub expiries_at: Vec<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum StatusTone {
+    #[default]
+    Neutral,
+    Positive,
+    Warning,
+    Danger,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StatusMetric {
+    pub id: String,
+    pub label: String,
+    pub text: String,
+    #[serde(default)]
+    pub tone: StatusTone,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -156,6 +186,8 @@ pub struct ProviderSnapshot {
     #[serde(default)]
     pub value_metrics: Vec<ValueMetric>,
     #[serde(default)]
+    pub status_metrics: Vec<StatusMetric>,
+    #[serde(default)]
     pub notices: Vec<ProviderNotice>,
     pub usage: UsageHistory,
     pub warnings: Vec<String>,
@@ -247,6 +279,10 @@ pub enum MetricSource {
         #[serde(rename = "sourceId")]
         source_id: String,
     },
+    Status {
+        #[serde(rename = "sourceId")]
+        source_id: String,
+    },
     Usage {
         period: UsagePeriodSelection,
     },
@@ -258,7 +294,8 @@ impl MetricSource {
         match self {
             Self::Quota { source_id, .. }
             | Self::QuotaOrValue { source_id, .. }
-            | Self::Value { source_id } => Some(source_id),
+            | Self::Value { source_id }
+            | Self::Status { source_id } => Some(source_id),
             Self::Usage { .. } | Self::Trend => None,
         }
     }
@@ -401,6 +438,31 @@ impl MetricDefinition {
             default_pinned,
             Some(tray_short_label),
             tray_suffix,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments, dead_code)]
+    pub fn status(
+        id: &str,
+        label: &str,
+        source_id: &str,
+        default_enabled: bool,
+        default_section: MetricSection,
+        default_pinned: bool,
+        tray_short_label: &str,
+    ) -> Self {
+        Self::new(
+            id,
+            label,
+            MetricSource::Status {
+                source_id: source_id.into(),
+            },
+            true,
+            default_enabled,
+            default_section,
+            default_pinned,
+            Some(tray_short_label),
+            None,
         )
     }
 
@@ -742,14 +804,33 @@ mod tests {
             r#"{
                 "providerId":"codex",
                 "plan":null,
-                "quotas":[],
+                "quotas":[{
+                    "id":"session",
+                    "label":"Session",
+                    "usedPercent":10,
+                    "resetsAt":null,
+                    "periodSeconds":18000,
+                    "format":"percent",
+                    "usedValue":null,
+                    "limitValue":null
+                }],
+                "valueMetrics":[{
+                    "id":"credits",
+                    "label":"Credits",
+                    "values":[{"number":2,"kind":"count"}],
+                    "expiriesAt":[]
+                }],
                 "usage":{"today":null,"yesterday":null,"last30Days":null,"daily":[],"unknownModels":[]},
                 "warnings":[],
                 "refreshedAt":"2026-07-15T00:00:00Z"
             }"#,
         )
         .unwrap();
-        assert!(snapshot.value_metrics.is_empty());
+        assert_eq!(snapshot.quotas[0].unit, None);
+        assert!(!snapshot.quotas[0].estimated);
+        assert_eq!(snapshot.quotas[0].source_note, None);
+        assert!(!snapshot.value_metrics[0].values[0].estimated);
+        assert!(snapshot.status_metrics.is_empty());
         assert!(snapshot.notices.is_empty());
     }
 

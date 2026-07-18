@@ -262,9 +262,10 @@ fn tray_metric(
                             UsageDisplay::Used => "used",
                             UsageDisplay::Left => "left",
                         };
+                        let unit = quota.unit.as_deref().unwrap_or("requests");
                         return TrayMetric {
                             value: format!("{value:.0}"),
-                            detail: format!("{} {value:.0} requests {word}", quota.label),
+                            detail: format!("{} {value:.0} {unit} {word}", quota.label),
                             gauge: used_fraction.map(|used_fraction| TrayGauge {
                                 display_fraction: match display {
                                     UsageDisplay::Used => used_fraction,
@@ -305,6 +306,7 @@ fn tray_metric(
         MetricSource::Value { source_id } => {
             value_metric(snapshot, source_id, tray.suffix.as_deref())
         }
+        MetricSource::Status { source_id } => status_metric(snapshot, source_id),
         MetricSource::Usage { period } => {
             usage_metric(&definition.label, usage_period(snapshot, *period))
         }
@@ -318,6 +320,18 @@ fn usage_period(snapshot: &ProviderSnapshot, period: UsagePeriodSelection) -> Op
         UsagePeriodSelection::Yesterday => snapshot.usage.yesterday.as_ref(),
         UsagePeriodSelection::Last30Days => snapshot.usage.last_30_days.as_ref(),
     }
+}
+
+fn status_metric(snapshot: &ProviderSnapshot, source_id: &str) -> Option<TrayMetric> {
+    let metric = snapshot
+        .status_metrics
+        .iter()
+        .find(|metric| metric.id == source_id)?;
+    Some(TrayMetric {
+        value: metric.text.clone(),
+        detail: format!("{} {}", metric.label, metric.text),
+        gauge: None,
+    })
 }
 
 fn value_metric(
@@ -412,8 +426,9 @@ mod tests {
 
     use crate::{
         models::{
-            MetricValue, MetricValueKind, ProviderSnapshot, ProviderViewState, QuotaWindow,
-            SnapshotSource, UsageHistory, ValueMetric,
+            MetricDefinition, MetricSection, MetricValue, MetricValueKind, ProviderSnapshot,
+            ProviderViewState, QuotaWindow, SnapshotSource, StatusMetric, StatusTone, UsageHistory,
+            ValueMetric,
         },
         providers::{codex, cursor, ProviderRegistry},
         settings::default_settings,
@@ -572,6 +587,9 @@ mod tests {
                     format: crate::models::QuotaFormat::Percent,
                     used_value: None,
                     limit_value: None,
+                    unit: None,
+                    estimated: false,
+                    source_note: None,
                 },
                 QuotaWindow {
                     id: "weekly".into(),
@@ -582,9 +600,13 @@ mod tests {
                     format: crate::models::QuotaFormat::Percent,
                     used_value: None,
                     limit_value: None,
+                    unit: None,
+                    estimated: false,
+                    source_note: None,
                 },
             ],
             value_metrics: Vec::new(),
+            status_metrics: Vec::new(),
             notices: Vec::new(),
             usage: UsageHistory::default(),
             warnings: Vec::new(),
@@ -659,8 +681,12 @@ mod tests {
                 format: crate::models::QuotaFormat::Count,
                 used_value: Some(25.0),
                 limit_value: Some(100.0),
+                unit: Some("searches".into()),
+                estimated: false,
+                source_note: None,
             }],
             value_metrics: Vec::new(),
+            status_metrics: Vec::new(),
             notices: Vec::new(),
             usage: UsageHistory::default(),
             warnings: Vec::new(),
@@ -675,9 +701,9 @@ mod tests {
             super::tray_metric(definition, &snapshot, crate::models::UsageDisplay::Used).unwrap();
 
         assert_eq!(left.value, "75");
-        assert_eq!(left.detail, "Requests 75 requests left");
+        assert_eq!(left.detail, "Requests 75 searches left");
         assert_eq!(used.value, "25");
-        assert_eq!(used.detail, "Requests 25 requests used");
+        assert_eq!(used.detail, "Requests 25 searches used");
         assert_eq!(
             left.gauge,
             Some(TrayGauge {
@@ -759,15 +785,18 @@ mod tests {
                         number: 32.84,
                         kind: MetricValueKind::Dollars,
                         label: None,
+                        estimated: true,
                     },
                     MetricValue {
                         number: 821.0,
                         kind: MetricValueKind::Count,
                         label: Some("credits".into()),
+                        estimated: false,
                     },
                 ],
                 expiries_at: Vec::new(),
             }],
+            status_metrics: Vec::new(),
             notices: Vec::new(),
             usage: UsageHistory::default(),
             warnings: Vec::new(),
@@ -783,5 +812,47 @@ mod tests {
         assert_eq!(metric.value, "$33 · 821 credits");
         assert_eq!(metric.detail, "Extra Usage $32.84 · 821 credits");
         assert_eq!(metric.gauge, None);
+    }
+
+    #[test]
+    fn pinned_status_metrics_keep_text_and_never_create_a_gauge() {
+        let snapshot = ProviderSnapshot {
+            provider_id: "grok".into(),
+            plan: None,
+            quotas: Vec::new(),
+            value_metrics: Vec::new(),
+            status_metrics: vec![StatusMetric {
+                id: "payAsYouGo".into(),
+                label: "Extra Usage".into(),
+                text: "2500 cap".into(),
+                tone: StatusTone::Positive,
+                subtitle: None,
+            }],
+            notices: Vec::new(),
+            usage: UsageHistory::default(),
+            warnings: Vec::new(),
+            refreshed_at: Utc::now(),
+        };
+        let definition = MetricDefinition::status(
+            "grok.payAsYouGo",
+            "Extra Usage",
+            "payAsYouGo",
+            true,
+            MetricSection::AlwaysVisible,
+            true,
+            "E",
+        );
+
+        let metric =
+            super::tray_metric(&definition, &snapshot, crate::models::UsageDisplay::Left).unwrap();
+
+        assert_eq!(metric.value, "2500 cap");
+        assert_eq!(metric.detail, "Extra Usage 2500 cap");
+        assert_eq!(metric.gauge, None);
+        assert!(bar_fractions(&[TrayGroup {
+            provider_id: "grok".into(),
+            metrics: vec![metric],
+        }])
+        .is_empty());
     }
 }

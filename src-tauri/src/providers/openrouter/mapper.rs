@@ -83,6 +83,9 @@ fn dollars_quota(id: &str, label: &str, used: f64, limit: f64) -> QuotaWindow {
         format: QuotaFormat::Dollars,
         used_value: Some(used),
         limit_value: Some(limit),
+        unit: None,
+        estimated: false,
+        source_note: None,
     }
 }
 
@@ -94,6 +97,7 @@ fn dollars_value(id: &str, label: &str, number: f64) -> ValueMetric {
             number,
             kind: MetricValueKind::Dollars,
             label: None,
+            estimated: false,
         }],
         expiries_at: Vec::new(),
     }

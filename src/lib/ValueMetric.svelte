@@ -2,6 +2,7 @@
   import { onDestroy } from 'svelte';
   import { formatMetricValue } from './metricFormat';
   import { formatReset } from './pacing';
+  import Icon from './Icon.svelte';
   import ResetCreditsDetail from './ResetCreditsDetail.svelte';
   import type { ValueMetric } from './types';
 
@@ -19,6 +20,7 @@
   let showTimer: ReturnType<typeof setTimeout> | undefined;
   let hideTimer: ReturnType<typeof setTimeout> | undefined;
   const showsResetDetail = $derived(metric?.id === 'rateLimitResets');
+  const hasEstimatedValue = $derived(metric?.values.some((value) => value.estimated) ?? false);
 
   const reading = $derived(
     metric?.values
@@ -119,9 +121,27 @@
       {#if expirySeverity}<i class="expiry-dot expiry-dot--{expirySeverity}" aria-hidden="true"
         ></i>{/if}
       {reading}
+      {#if hasEstimatedValue}
+        <span
+          class="value-estimate"
+          data-tooltip="Estimated locally, so it may differ from billed usage."
+          aria-label="Estimated value"
+          role="img"><Icon name="about" size={11} strokeWidth={1.9} /></span
+        >
+      {/if}
     </button>
   {:else}
-    <span class="value-reading" data-tooltip={tooltip}>{reading}</span>
+    <span class="value-reading" data-tooltip={tooltip}>
+      {reading}
+      {#if hasEstimatedValue}
+        <span
+          class="value-estimate"
+          data-tooltip="Estimated locally, so it may differ from billed usage."
+          aria-label="Estimated value"
+          role="img"><Icon name="about" size={11} strokeWidth={1.9} /></span
+        >
+      {/if}
+    </span>
   {/if}
 </div>
 
@@ -161,6 +181,11 @@
       align-items: center;
       gap: 5px;
       text-align: right;
+    }
+
+    .value-estimate {
+      display: inline-flex;
+      color: var(--secondary);
     }
 
     .value-reading--interactive {

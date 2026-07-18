@@ -153,6 +153,18 @@ export function buildProviderShareRows(
       continue;
     }
 
+    if (source.kind === 'status') {
+      const statusMetric = snapshot.statusMetrics.find((item) => item.id === source.sourceId);
+      rows.push({
+        kind: 'text',
+        label: definition.label,
+        value: statusMetric?.text ?? 'No data',
+        condensed: previousTextSection === metric.section,
+      });
+      previousTextSection = metric.section;
+      continue;
+    }
+
     if (source.kind === 'value') {
       const valueMetric = snapshot.valueMetrics.find((item) => item.id === source.sourceId);
       rows.push({
@@ -299,7 +311,7 @@ function quotaShareRow(
       settings.usageDisplay === 'left'
         ? Math.max(0, quota.limitValue - quota.usedValue)
         : quota.usedValue;
-    reading = `${displayed.toFixed(0)} requests ${settings.usageDisplay}`;
+    reading = `${displayed.toFixed(0)} ${quota.unit?.trim() || 'requests'} ${settings.usageDisplay}`;
   }
   if (quota.format === 'dollars' && quota.usedValue !== null) {
     const displayed =

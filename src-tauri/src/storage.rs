@@ -95,7 +95,18 @@ impl Storage {
             )
             .optional()?;
         payload
-            .map(|json| serde_json::from_str(&json).map_err(StorageError::from))
+            .map(|json| {
+                let mut snapshot: ProviderSnapshot = serde_json::from_str(&json)?;
+                // Count quotas predate the unit field. The only count quota persisted by older
+                // releases was request-based, so normalize it once at the cache boundary instead of
+                // teaching every presentation surface to infer provider semantics.
+                for quota in &mut snapshot.quotas {
+                    if quota.format == crate::models::QuotaFormat::Count && quota.unit.is_none() {
+                        quota.unit = Some("requests".into());
+                    }
+                }
+                Ok(snapshot)
+            })
             .transpose()
     }
 
@@ -282,7 +293,7 @@ mod tests {
     use super::Storage;
     use crate::models::{
         AppSettings, DailyUsage, ModelUsageBreakdown, ModelUsageEntry, ProviderSnapshot,
-        UsageHistory, UsagePeriod,
+        QuotaFormat, QuotaWindow, UsageHistory, UsagePeriod,
     };
 
     #[test]
@@ -294,6 +305,7 @@ mod tests {
             plan: Some("Plus".into()),
             quotas: Vec::new(),
             value_metrics: Vec::new(),
+            status_metrics: Vec::new(),
             notices: Vec::new(),
             usage: UsageHistory {
                 today: Some(UsagePeriod {
@@ -331,6 +343,42 @@ mod tests {
         let database = String::from_utf8_lossy(&bytes);
         assert!(!database.contains("access_token"));
         assert!(!database.contains("refresh_token"));
+    }
+
+    #[test]
+    fn legacy_count_quota_cache_is_normalized_at_load_boundary() {
+        let directory = tempdir().unwrap();
+        let storage = Storage::open(&directory.path().join("openquota.db")).unwrap();
+        let snapshot = ProviderSnapshot {
+            provider_id: "cursor".into(),
+            plan: None,
+            quotas: vec![QuotaWindow {
+                id: "requests".into(),
+                label: "Requests".into(),
+                used_percent: 25.0,
+                resets_at: None,
+                period_seconds: 2_592_000,
+                format: QuotaFormat::Count,
+                used_value: Some(25.0),
+                limit_value: Some(100.0),
+                unit: None,
+                estimated: false,
+                source_note: None,
+            }],
+            value_metrics: Vec::new(),
+            status_metrics: Vec::new(),
+            notices: Vec::new(),
+            usage: UsageHistory::default(),
+            warnings: Vec::new(),
+            refreshed_at: Utc::now(),
+        };
+
+        storage.save_snapshot(&snapshot).unwrap();
+
+        assert_eq!(
+            storage.load_snapshot("cursor").unwrap().unwrap().quotas[0].unit,
+            Some("requests".into())
+        );
     }
 
     #[test]

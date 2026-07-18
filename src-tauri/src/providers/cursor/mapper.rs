@@ -538,6 +538,9 @@ fn quota(
         format,
         used_value: Some(used),
         limit_value: Some(limit),
+        unit: (format == QuotaFormat::Count).then(|| "requests".into()),
+        estimated: false,
+        source_note: None,
     }
 }
 
@@ -557,6 +560,9 @@ fn percent_quota(
         format: QuotaFormat::Percent,
         used_value: None,
         limit_value: None,
+        unit: None,
+        estimated: false,
+        source_note: None,
     }
 }
 
@@ -568,6 +574,7 @@ fn dollar_value(id: &str, label: &str, amount: f64) -> ValueMetric {
             number: amount,
             kind: MetricValueKind::Dollars,
             label: None,
+            estimated: false,
         }],
         expiries_at: Vec::new(),
     }

@@ -190,6 +190,7 @@ impl OpenRouterProvider {
                 plan,
                 quotas,
                 value_metrics: values,
+                status_metrics: Vec::new(),
                 notices: Vec::new(),
                 usage: UsageHistory::default(),
                 warnings: Vec::new(),

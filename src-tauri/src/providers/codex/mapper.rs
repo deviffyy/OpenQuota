@@ -236,6 +236,9 @@ fn map_window(
         format: QuotaFormat::Percent,
         used_value: None,
         limit_value: None,
+        unit: None,
+        estimated: false,
+        source_note: None,
     })
 }
 
@@ -266,6 +269,7 @@ fn map_reset_credits(body: &Value, dedicated: Option<&UsageResponse>) -> Option<
             number: count.floor(),
             kind: MetricValueKind::Count,
             label: Some("available".into()),
+            estimated: false,
         }],
         expiries_at,
     })
@@ -294,11 +298,13 @@ fn credits_metric(remaining: f64) -> ValueMetric {
                 number: credits * CREDIT_USD_RATE,
                 kind: MetricValueKind::Dollars,
                 label: None,
+                estimated: true,
             },
             MetricValue {
                 number: credits,
                 kind: MetricValueKind::Count,
                 label: Some("credits".into()),
+                estimated: false,
             },
         ],
         expiries_at: Vec::new(),

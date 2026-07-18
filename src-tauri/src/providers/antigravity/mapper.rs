@@ -76,6 +76,9 @@ pub fn parse_quota_summary(value: &Value) -> Option<Vec<QuotaWindow>> {
                     format: QuotaFormat::Percent,
                     used_value: None,
                     limit_value: None,
+                    unit: None,
+                    estimated: false,
+                    source_note: None,
                 })
             })
             .collect(),
@@ -208,6 +211,9 @@ pub fn build_legacy_quotas(configs: Vec<ModelConfig>) -> Vec<QuotaWindow> {
             format: QuotaFormat::Percent,
             used_value: None,
             limit_value: None,
+            unit: None,
+            estimated: false,
+            source_note: None,
         })
     })
     .collect()

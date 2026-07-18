@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { ProviderCatalogIndex } from './metrics';
   import QuotaMetric from './QuotaMetric.svelte';
+  import StatusMetric from './StatusMetric.svelte';
   import UsageMetric from './UsageMetric.svelte';
   import UsageTrend from './UsageTrend.svelte';
   import ValueMetric from './ValueMetric.svelte';
@@ -35,6 +36,11 @@
     const source = definition?.source;
     if (source?.kind !== 'value' && source?.kind !== 'quotaOrValue') return null;
     return snapshot.valueMetrics.find((item) => item.id === source.sourceId) ?? null;
+  });
+  const statusMetric = $derived.by(() => {
+    const source = definition?.source;
+    if (source?.kind !== 'status') return null;
+    return snapshot.statusMetrics.find((item) => item.id === source.sourceId) ?? null;
   });
   const usageSourceNote = $derived(catalog.localUsageSourceNote(snapshot.providerId));
 </script>
@@ -84,6 +90,8 @@
   </section>
 {:else if definition?.source.kind === 'trend'}
   <UsageTrend daily={snapshot.usage.daily} sourceNote={usageSourceNote} />
+{:else if definition?.source.kind === 'status'}
+  <StatusMetric label={definition.label} metric={statusMetric} />
 {:else if definition?.source.kind === 'usage'}
   <UsageMetric label={definition.label} {period} />
 {:else if definition?.source.kind === 'value'}

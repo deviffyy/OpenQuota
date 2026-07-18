@@ -16,6 +16,7 @@ function quota(
     format: 'percent',
     usedValue: null,
     limitValue: null,
+    estimated: false,
     periodSeconds,
     resetsAt: new Date(now + (1 - elapsedFraction) * periodSeconds * 1000).toISOString(),
     ...overrides,

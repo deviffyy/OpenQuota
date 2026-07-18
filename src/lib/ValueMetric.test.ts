@@ -17,8 +17,8 @@ describe('ValueMetric', () => {
         id: 'credits',
         label: 'Extra Usage',
         values: [
-          { number: 1200, kind: 'dollars' },
-          { number: 30000, kind: 'count', label: 'credits' },
+          { number: 1200, kind: 'dollars', estimated: false },
+          { number: 30000, kind: 'count', label: 'credits', estimated: false },
         ],
         expiriesAt: [],
       },
@@ -33,13 +33,36 @@ describe('ValueMetric', () => {
     );
   });
 
+  it('marks only value rows that contain an estimated value', () => {
+    render(ValueMetric, {
+      label: 'Extra Usage',
+      metric: {
+        id: 'credits',
+        label: 'Extra Usage',
+        values: [
+          { number: 4, kind: 'dollars', estimated: true },
+          { number: 100, kind: 'count', label: 'credits', estimated: false },
+        ],
+        expiriesAt: [],
+      },
+      now: Date.parse('2026-02-20T16:00:00Z'),
+      resetDisplay: 'countdown',
+      timeFormat: 'twentyFourHour',
+    });
+
+    expect(screen.getByLabelText('Estimated value')).toHaveAttribute(
+      'data-tooltip',
+      'Estimated locally, so it may differ from billed usage.',
+    );
+  });
+
   it('opens a sorted reset-expiry timeline and distinguishes count-only fallback', async () => {
     const { rerender } = render(ValueMetric, {
       label: 'Rate Limit Resets',
       metric: {
         id: 'rateLimitResets',
         label: 'Rate Limit Resets',
-        values: [{ number: 2, kind: 'count', label: 'available' }],
+        values: [{ number: 2, kind: 'count', label: 'available', estimated: false }],
         expiriesAt: ['2026-02-20T19:00:00Z', '2026-02-20T17:30:00Z'],
       },
       now: Date.parse('2026-02-20T16:00:00Z'),
@@ -59,7 +82,7 @@ describe('ValueMetric', () => {
       metric: {
         id: 'rateLimitResets',
         label: 'Rate Limit Resets',
-        values: [{ number: 3, kind: 'count', label: 'available' }],
+        values: [{ number: 3, kind: 'count', label: 'available', estimated: false }],
         expiriesAt: [],
       },
       now: Date.parse('2026-02-20T16:00:00Z'),
@@ -77,7 +100,7 @@ describe('ValueMetric', () => {
       metric: {
         id: 'rateLimitResets',
         label: 'Rate Limit Resets',
-        values: [{ number: 1, kind: 'count', label: 'available' }],
+        values: [{ number: 1, kind: 'count', label: 'available', estimated: false }],
         expiriesAt: ['2026-02-20T19:00:00Z'],
       },
       now: Date.parse('2026-02-20T16:00:00Z'),
@@ -108,7 +131,7 @@ describe('ValueMetric', () => {
       metric: {
         id: 'rateLimitResets',
         label: 'Rate Limit Resets',
-        values: [{ number: 1, kind: 'count', label: 'available' }],
+        values: [{ number: 1, kind: 'count', label: 'available', estimated: false }],
         expiriesAt: ['2026-02-20T19:00:00Z'],
       },
       now: Date.parse('2026-02-20T16:00:00Z'),

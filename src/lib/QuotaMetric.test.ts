@@ -16,6 +16,7 @@ function quota(usedPercent: number, elapsedFraction = 0.5): QuotaWindow {
     format: 'percent',
     usedValue: null,
     limitValue: null,
+    estimated: false,
     periodSeconds,
     resetsAt: new Date(now + (1 - elapsedFraction) * periodSeconds * 1000).toISOString(),
   };
@@ -92,7 +93,7 @@ describe('quota pacing presentation', () => {
     expect(container.querySelector('.meter-shell')).not.toHaveAttribute('data-tooltip');
   });
 
-  it('renders request quotas as counts instead of percentages', () => {
+  it('renders provider-supplied count units instead of a hardcoded request label', () => {
     show({
       ...quota(24),
       id: 'requests',
@@ -100,10 +101,24 @@ describe('quota pacing presentation', () => {
       format: 'count',
       usedValue: 120,
       limitValue: 500,
+      unit: 'searches',
     });
-    expect(screen.getByRole('button', { name: '380 requests left' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: '380 searches left' })).toHaveAttribute(
       'data-tooltip',
-      '120 requests used',
+      '120 searches used',
+    );
+  });
+
+  it('marks inferred quotas with their source note', () => {
+    show({
+      ...quota(24),
+      estimated: true,
+      sourceNote: 'Estimated from local records.',
+    });
+
+    expect(screen.getByLabelText('Estimated quota')).toHaveAttribute(
+      'data-tooltip',
+      'Estimated from local records.',
     );
   });
 });
