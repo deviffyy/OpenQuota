@@ -26,7 +26,9 @@ const CLAUDE_ICON: &str = include_str!("../../src/assets/provider-icons/claude.s
 const CODEX_ICON: &str = include_str!("../../src/assets/provider-icons/codex.svg");
 const CURSOR_ICON: &str = include_str!("../../src/assets/provider-icons/cursor.svg");
 const ANTIGRAVITY_ICON: &str = include_str!("../../src/assets/provider-icons/antigravity.svg");
+const GROK_ICON: &str = include_str!("../../src/assets/provider-icons/grok.svg");
 const OPENROUTER_ICON: &str = include_str!("../../src/assets/provider-icons/openrouter.svg");
+const ZAI_ICON: &str = include_str!("../../src/assets/provider-icons/zai.svg");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextGroup {
@@ -266,73 +268,104 @@ fn provider_path(provider_id: &str) -> Option<&'static Path> {
     static CODEX: OnceLock<Path> = OnceLock::new();
     static CURSOR: OnceLock<Path> = OnceLock::new();
     static ANTIGRAVITY: OnceLock<Path> = OnceLock::new();
+    static GROK: OnceLock<Path> = OnceLock::new();
     static OPENROUTER: OnceLock<Path> = OnceLock::new();
+    static ZAI: OnceLock<Path> = OnceLock::new();
     match provider_id {
         "claude" => Some(parsed(CLAUDE_ICON, &CLAUDE)),
         "codex" => Some(parsed(CODEX_ICON, &CODEX)),
         "cursor" => Some(parsed(CURSOR_ICON, &CURSOR)),
         "antigravity" => Some(parsed(ANTIGRAVITY_ICON, &ANTIGRAVITY)),
+        "grok" => Some(parsed(GROK_ICON, &GROK)),
         "openrouter" => Some(parsed(OPENROUTER_ICON, &OPENROUTER)),
+        "zai" => Some(parsed(ZAI_ICON, &ZAI)),
         _ => None,
     }
 }
 
 fn parse_svg_path(source: &str) -> Result<Path, String> {
     let document = Document::parse(source).map_err(|error| error.to_string())?;
-    let data = document
+    let path_data = document
         .descendants()
-        .find(|node| node.is_element() && node.tag_name().name() == "path")
-        .and_then(|node| node.attribute("d"))
-        .ok_or_else(|| "missing path data".to_owned())?;
+        .filter(|node| node.is_element() && node.tag_name().name() == "path")
+        .filter_map(|node| node.attribute("d"))
+        .collect::<Vec<_>>();
+    if path_data.is_empty() {
+        return Err("missing path data".to_owned());
+    }
+
     let mut builder = PathBuilder::new();
-    let mut current = None;
-    let mut subpath_start = None;
-    for segment in PathParser::from(data) {
-        match segment.map_err(|error| error.to_string())? {
-            PathSegment::MoveTo { abs: true, x, y } => {
-                let point = (x as f32, y as f32);
-                builder.move_to(point.0, point.1);
-                current = Some(point);
-                subpath_start = Some(point);
+    for data in path_data {
+        let mut current = None;
+        let mut subpath_start = None;
+        for segment in PathParser::from(data) {
+            match segment.map_err(|error| error.to_string())? {
+                PathSegment::MoveTo { abs, x, y } => {
+                    let origin = if abs {
+                        (0.0, 0.0)
+                    } else {
+                        current.unwrap_or((0.0, 0.0))
+                    };
+                    let point = (origin.0 + x as f32, origin.1 + y as f32);
+                    builder.move_to(point.0, point.1);
+                    current = Some(point);
+                    subpath_start = Some(point);
+                }
+                PathSegment::LineTo { abs, x, y } => {
+                    let origin = if abs {
+                        (0.0, 0.0)
+                    } else {
+                        current.ok_or_else(|| "relative line has no current point".to_owned())?
+                    };
+                    let point = (origin.0 + x as f32, origin.1 + y as f32);
+                    builder.line_to(point.0, point.1);
+                    current = Some(point);
+                }
+                PathSegment::HorizontalLineTo { abs, x } => {
+                    let (current_x, current_y) =
+                        current.ok_or_else(|| "horizontal line has no current point".to_owned())?;
+                    let point = (if abs { x as f32 } else { current_x + x as f32 }, current_y);
+                    builder.line_to(point.0, point.1);
+                    current = Some(point);
+                }
+                PathSegment::VerticalLineTo { abs, y } => {
+                    let (current_x, current_y) =
+                        current.ok_or_else(|| "vertical line has no current point".to_owned())?;
+                    let point = (current_x, if abs { y as f32 } else { current_y + y as f32 });
+                    builder.line_to(point.0, point.1);
+                    current = Some(point);
+                }
+                PathSegment::CurveTo {
+                    abs,
+                    x1,
+                    y1,
+                    x2,
+                    y2,
+                    x,
+                    y,
+                } => {
+                    let origin = if abs {
+                        (0.0, 0.0)
+                    } else {
+                        current.ok_or_else(|| "relative curve has no current point".to_owned())?
+                    };
+                    let end = (origin.0 + x as f32, origin.1 + y as f32);
+                    builder.cubic_to(
+                        origin.0 + x1 as f32,
+                        origin.1 + y1 as f32,
+                        origin.0 + x2 as f32,
+                        origin.1 + y2 as f32,
+                        end.0,
+                        end.1,
+                    );
+                    current = Some(end);
+                }
+                PathSegment::ClosePath { .. } => {
+                    builder.close();
+                    current = subpath_start;
+                }
+                _ => return Err("only M, L, H, V, C and Z path commands are supported".into()),
             }
-            PathSegment::LineTo { abs: true, x, y } => {
-                let point = (x as f32, y as f32);
-                builder.line_to(point.0, point.1);
-                current = Some(point);
-            }
-            PathSegment::HorizontalLineTo { abs: true, x } => {
-                let (_, y) =
-                    current.ok_or_else(|| "horizontal line has no current point".to_owned())?;
-                let point = (x as f32, y);
-                builder.line_to(point.0, point.1);
-                current = Some(point);
-            }
-            PathSegment::VerticalLineTo { abs: true, y } => {
-                let (x, _) =
-                    current.ok_or_else(|| "vertical line has no current point".to_owned())?;
-                let point = (x, y as f32);
-                builder.line_to(point.0, point.1);
-                current = Some(point);
-            }
-            PathSegment::CurveTo {
-                abs: true,
-                x1,
-                y1,
-                x2,
-                y2,
-                x,
-                y,
-            } => {
-                builder.cubic_to(
-                    x1 as f32, y1 as f32, x2 as f32, y2 as f32, x as f32, y as f32,
-                );
-                current = Some((x as f32, y as f32));
-            }
-            PathSegment::ClosePath { .. } => {
-                builder.close();
-                current = subpath_start;
-            }
-            _ => return Err("only absolute M, L, H, V, C and Z commands are supported".into()),
         }
     }
     builder.finish().ok_or_else(|| "path is empty".into())
@@ -499,8 +532,8 @@ fn fill_rounded_bar(
 #[cfg(test)]
 mod tests {
     use super::{
-        bar_fill, bar_icon, provider_path, render_bar_rgba, render_text_strip, text_icon,
-        visual_bar_fraction, TextGroup, ICON_SIZE, MAX_BARS, TEXT_HEIGHT,
+        bar_fill, bar_icon, parse_svg_path, provider_path, render_bar_rgba, render_text_strip,
+        text_icon, visual_bar_fraction, TextGroup, ICON_SIZE, MAX_BARS, TEXT_HEIGHT,
     };
 
     fn text_group(provider_id: &str, values: &[&str]) -> TextGroup {
@@ -512,7 +545,15 @@ mod tests {
 
     #[test]
     fn bundled_provider_marks_and_font_render_into_a_retina_text_strip() {
-        for provider in ["claude", "codex", "cursor", "antigravity", "openrouter"] {
+        for provider in [
+            "claude",
+            "codex",
+            "cursor",
+            "antigravity",
+            "grok",
+            "openrouter",
+            "zai",
+        ] {
             let path = provider_path(provider).expect("known provider mark should exist");
             assert!(path.bounds().width() > 0.0);
             assert!(path.bounds().height() > 0.0);
@@ -531,6 +572,17 @@ mod tests {
             .expect("public text renderer should return an image");
         assert_eq!(icon.height(), TEXT_HEIGHT);
         assert!(icon.width() > TEXT_HEIGHT);
+    }
+
+    #[test]
+    fn provider_mark_parser_combines_paths_and_resolves_relative_commands() {
+        let path = parse_svg_path(
+            r#"<svg><path d="M1 1l2 0v2h-2z"/><path d="M10 10c1 0 2 1 3 2"/></svg>"#,
+        )
+        .expect("valid provider paths should be combined");
+
+        assert!(path.bounds().width() >= 12.0);
+        assert!(path.bounds().height() >= 11.0);
     }
 
     #[test]

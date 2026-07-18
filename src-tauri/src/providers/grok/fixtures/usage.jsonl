@@ -1,0 +1,4 @@
+{"ts":"2026-06-18T09:00:00.000Z","pid":100,"msg":"model catalog: notifying clients","ctx":{"current_model_id":"grok-build"}}
+{"ts":"2026-06-18T10:00:00.000Z","pid":100,"msg":"shell.turn.inference_done","ctx":{"prompt_tokens":1000000,"cached_prompt_tokens":0,"completion_tokens":1000000,"reasoning_tokens":0}}
+{"ts":"2026-06-17T09:00:00.000Z","pid":200,"msg":"model changed","ctx":{"model":"grok-composer-2.5-fast"}}
+{"ts":"2026-06-17T10:00:00.000Z","pid":200,"msg":"shell.turn.inference_done","ctx":{"prompt_tokens":1000000,"cached_prompt_tokens":0,"completion_tokens":1000000,"reasoning_tokens":0}}

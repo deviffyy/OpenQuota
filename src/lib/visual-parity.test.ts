@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 describe('native visual contract', () => {
-  it.each(['claude', 'codex', 'cursor', 'antigravity', 'openrouter'])(
+  it.each(['claude', 'codex', 'cursor', 'antigravity', 'grok', 'openrouter', 'zai'])(
     'packages the exact %s provider icon',
     (providerId) => {
       const { container } = render(ProviderIcon, { providerId });
@@ -33,8 +33,14 @@ describe('native visual contract', () => {
     const antigravity = render(ProviderIcon, { providerId: 'antigravity' });
     expect(antigravity.container.querySelector('path')).toHaveAttribute('fill', '#4285F4');
     cleanup();
+    const grok = render(ProviderIcon, { providerId: 'grok' });
+    expect(grok.container.querySelector('path')).toHaveAttribute('fill', 'currentColor');
+    cleanup();
     const openrouter = render(ProviderIcon, { providerId: 'openrouter' });
     expect(openrouter.container.querySelector('path')).toHaveAttribute('fill', 'currentColor');
+    cleanup();
+    const zai = render(ProviderIcon, { providerId: 'zai' });
+    expect(zai.container.querySelector('path')).toHaveAttribute('fill', 'currentColor');
   });
 
   it('uses the shared hover dwell and grace timing for Usage Trend details', async () => {

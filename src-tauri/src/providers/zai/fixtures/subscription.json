@@ -1,0 +1,14 @@
+{
+  "code": 200,
+  "msg": "Operation successful",
+  "data": [
+    {
+      "productName": "GLM Coding Pro",
+      "status": "VALID",
+      "nextRenewTime": "2026-07-29",
+      "billingCycle": "monthly",
+      "inCurrentPeriod": true
+    }
+  ],
+  "success": true
+}

@@ -6,11 +6,13 @@ pub mod credential_store;
 pub mod cursor;
 mod daily_usage;
 mod detection;
+pub mod grok;
 mod log_usage;
 pub mod openrouter;
 mod registry;
 #[cfg(test)]
 pub mod test_http;
+pub mod zai;
 
 pub use detection::detect_local_credentials;
 pub use registry::ProviderRegistry;
@@ -67,7 +69,7 @@ pub trait UsageProvider: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::{antigravity, claude, codex, cursor, openrouter, ProviderError};
+    use super::{antigravity, claude, codex, cursor, grok, openrouter, zai, ProviderError};
     use crate::models::ProviderErrorKind;
 
     #[test]
@@ -124,12 +126,29 @@ mod tests {
         );
         assert!(links(antigravity::definition()).is_empty());
         assert_eq!(
+            links(grok::definition()),
+            [("Usage".into(), "https://grok.com/?_s=usage".into())]
+        );
+        assert_eq!(
             links(openrouter::definition()),
             [
                 ("Activity".into(), "https://openrouter.ai/activity".into()),
                 (
                     "Credits".into(),
                     "https://openrouter.ai/settings/credits".into()
+                ),
+            ]
+        );
+        assert_eq!(
+            links(zai::definition()),
+            [
+                (
+                    "Dashboard".into(),
+                    "https://z.ai/manage-apikey/coding-plan/personal/my-plan".into()
+                ),
+                (
+                    "API Keys".into(),
+                    "https://z.ai/manage-apikey/apikey-list".into()
                 ),
             ]
         );
