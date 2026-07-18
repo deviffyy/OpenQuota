@@ -131,7 +131,7 @@
                   bind:value={apiKey}
                   autocomplete="off"
                   spellcheck="false"
-                  placeholder="sk-or-v1-…"
+                  placeholder="Paste API key"
                   aria-label={`${providerName} API key`}
                   disabled={saving}
                 />

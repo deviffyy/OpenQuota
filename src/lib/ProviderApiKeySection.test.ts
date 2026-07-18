@@ -32,6 +32,7 @@ describe('ProviderApiKeySection', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     const input = screen.getByLabelText('OpenRouter API key');
     expect(input).toHaveAttribute('type', 'password');
+    expect(input).toHaveAttribute('placeholder', 'Paste API key');
     await fireEvent.input(input, { target: { value: 'sk-or-secret' } });
     await fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
