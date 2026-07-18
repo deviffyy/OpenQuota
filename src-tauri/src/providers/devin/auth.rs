@@ -422,6 +422,7 @@ fn credential_paths(platform: HostPlatform, directories: &PlatformDirectories) -
 }
 
 fn state_db_paths(platform: HostPlatform, directories: &PlatformDirectories) -> Vec<PathBuf> {
+    #[cfg(any(not(target_os = "macos"), test))]
     let suffix = "Devin/User/globalStorage/state.vscdb";
     let mut paths = Vec::new();
     match platform {

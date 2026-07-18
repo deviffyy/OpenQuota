@@ -168,6 +168,24 @@ impl PricingStore {
         )
     }
 
+    #[cfg(test)]
+    pub(crate) fn new_without_refresh_for_test(
+        cache_directory: PathBuf,
+    ) -> Result<Self, PricingStoreError> {
+        // Provider unit tests use bundled prices and must not start background network refreshes.
+        let store = Self::new(cache_directory)?;
+        let now = (store.now)();
+        let mut states = store
+            .source_states
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for source in SourceId::ALL {
+            states.entry(source).or_default().fetched_at = Some(now);
+        }
+        drop(states);
+        Ok(store)
+    }
+
     fn with_dependencies(
         cache_directory: PathBuf,
         bundled: BundledSources,

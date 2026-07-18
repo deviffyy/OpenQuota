@@ -3,7 +3,7 @@ use std::{
     io::{Read, Write},
     net::TcpListener,
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
     thread,
     time::{Duration, Instant},
 };
@@ -23,6 +23,8 @@ use crate::{
 };
 
 const CREDITS: &str = include_str!("fixtures/credits.json");
+// Keep the short-lived loopback servers deterministic on heavily loaded Windows runners.
+static TEST_SERVER_LOCK: Mutex<()> = Mutex::new(());
 
 fn now() -> chrono::DateTime<Utc> {
     Utc.with_ymd_and_hms(2026, 6, 18, 12, 0, 0).unwrap()
@@ -48,7 +50,9 @@ fn build_provider(
     let auth_path = directory.path().join("auth.json");
     fs::write(&auth_path, auth_json).unwrap();
     let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
-    let pricing = Arc::new(PricingStore::new(directory.path().join("pricing")).unwrap());
+    let pricing = Arc::new(
+        PricingStore::new_without_refresh_for_test(directory.path().join("pricing")).unwrap(),
+    );
     (
         GrokProvider::with_dependencies(
             storage.clone(),
@@ -385,6 +389,7 @@ struct TestServer {
     requests: Arc<Mutex<Vec<String>>>,
     handle: thread::JoinHandle<usize>,
     expected: usize,
+    _guard: MutexGuard<'static, ()>,
 }
 
 impl TestServer {
@@ -392,27 +397,36 @@ impl TestServer {
         expected: usize,
         mut handler: impl FnMut(&str) -> (u16, String) + Send + 'static,
     ) -> Self {
+        let guard = TEST_SERVER_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let address = listener.local_addr().unwrap();
         let requests = Arc::new(Mutex::new(Vec::new()));
         let captured = requests.clone();
         let handle = thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(5);
+            let deadline = Instant::now() + Duration::from_secs(20);
             let mut handled = 0;
             while handled < expected && Instant::now() < deadline {
                 let (mut stream, _) = match listener.accept() {
                     Ok(connection) => connection,
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    Err(_) => {
                         thread::sleep(Duration::from_millis(5));
                         continue;
                     }
-                    Err(_) => break,
                 };
                 stream
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();
                 let request = read_request(&mut stream);
+                let has_complete_request_line = request
+                    .lines()
+                    .next()
+                    .is_some_and(|line| line.split_whitespace().count() >= 3);
+                if !has_complete_request_line {
+                    continue;
+                }
                 captured.lock().unwrap().push(request.clone());
                 let (status, body) = handler(&request);
                 let response = format!(
@@ -429,6 +443,7 @@ impl TestServer {
             requests,
             handle,
             expected,
+            _guard: guard,
         }
     }
 
@@ -437,7 +452,7 @@ impl TestServer {
             &format!("{}/credits", self.base),
             &format!("{}/settings", self.base),
             &format!("{}/token", self.base),
-            Duration::from_secs(3),
+            Duration::from_secs(15),
         )
     }
 

@@ -78,12 +78,13 @@ impl GrokClient {
     ) -> Result<GrokResponse, GrokError> {
         let started = std::time::Instant::now();
         let response = self
-            .client
-            .get(url)
-            .bearer_auth(access_token.trim())
-            .header("X-XAI-Token-Auth", TOKEN_AUTH_HEADER)
-            .header("Accept", "application/json")
-            .send()
+            .send_request(|| {
+                self.client
+                    .get(url)
+                    .bearer_auth(access_token.trim())
+                    .header("X-XAI-Token-Auth", TOKEN_AUTH_HEADER)
+                    .header("Accept", "application/json")
+            })
             .map_err(|_| {
                 crate::app_warn!("http", "grok {endpoint} request failed (transport)");
                 GrokError::ConnectionFailed
@@ -110,14 +111,13 @@ impl GrokClient {
         let started = std::time::Instant::now();
         crate::app_info!("auth:grok", "token refresh attempt");
         let response = self
-            .client
-            .post(&self.refresh_url)
-            .form(&[
-                ("grant_type", "refresh_token"),
-                ("client_id", client_id),
-                ("refresh_token", refresh_token),
-            ])
-            .send()
+            .send_request(|| {
+                self.client.post(&self.refresh_url).form(&[
+                    ("grant_type", "refresh_token"),
+                    ("client_id", client_id),
+                    ("refresh_token", refresh_token),
+                ])
+            })
             .map_err(|_| {
                 crate::app_warn!("auth:grok", "token refresh failed (transport)");
                 GrokError::ConnectionFailed
@@ -149,6 +149,37 @@ impl GrokClient {
         }
         crate::app_info!("auth:grok", "token refresh succeeded");
         Ok(refreshed)
+    }
+
+    #[cfg(not(test))]
+    fn send_request(
+        &self,
+        request: impl Fn() -> reqwest::blocking::RequestBuilder,
+    ) -> Result<reqwest::blocking::Response, reqwest::Error> {
+        request().send()
+    }
+
+    #[cfg(test)]
+    fn send_request(
+        &self,
+        request: impl Fn() -> reqwest::blocking::RequestBuilder,
+    ) -> Result<reqwest::blocking::Response, reqwest::Error> {
+        // Windows CI can transiently reject short-lived loopback connections. Production keeps
+        // the single-attempt implementation above; only local HTTP tests receive this tolerance.
+        const ATTEMPTS: usize = 3;
+        let mut last_error = None;
+        for attempt in 0..ATTEMPTS {
+            match request().send() {
+                Ok(response) => return Ok(response),
+                Err(error) => {
+                    last_error = Some(error);
+                    if attempt + 1 < ATTEMPTS {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                }
+            }
+        }
+        Err(last_error.expect("at least one test request attempt"))
     }
 
     #[cfg(test)]

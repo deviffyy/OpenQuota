@@ -94,6 +94,7 @@ ConvertTo-Json -InputObject @($items) -Compress -Depth 4
     language_server_from_processes(values)
 }
 
+#[cfg(any(test, target_os = "windows"))]
 fn parse_windows_processes(bytes: &[u8]) -> Option<Vec<serde_json::Value>> {
     match serde_json::from_slice(bytes).ok()? {
         serde_json::Value::Array(values) => Some(values),
@@ -103,6 +104,7 @@ fn parse_windows_processes(bytes: &[u8]) -> Option<Vec<serde_json::Value>> {
     }
 }
 
+#[cfg(any(test, target_os = "windows"))]
 fn language_server_from_processes(values: Vec<serde_json::Value>) -> Option<LanguageServer> {
     for options in DISCOVERY_OPTIONS {
         let mut candidates = values
