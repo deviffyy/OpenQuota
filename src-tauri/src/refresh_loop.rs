@@ -17,7 +17,12 @@ pub fn spawn(
         loop {
             let provider_ids = settings.enabled_provider_ids();
             if !provider_ids.is_empty() {
-                let state = service.refresh_all(&provider_ids, false).await;
+                let progress_app = app.clone();
+                let state = service
+                    .refresh_all_with_progress(&provider_ids, false, move |state| {
+                        let _ = progress_app.emit("usage-state", state);
+                    })
+                    .await;
                 let _ = app.emit("usage-state", &state);
                 finish_refresh(&app, &state, &settings, &notifications);
             }

@@ -1,11 +1,10 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     sync::{Arc, Mutex, RwLock},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use chrono::Utc;
-use tokio::sync::Mutex as AsyncMutex;
 
 use crate::{
     models::{
@@ -15,6 +14,8 @@ use crate::{
     providers::{ProviderError, ProviderRegistry},
     storage::Storage,
 };
+
+const PROVIDER_REFRESH_TIMEOUT: Duration = Duration::from_secs(45);
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,16 +28,24 @@ pub struct ProviderService {
     registry: Arc<ProviderRegistry>,
     storage: Arc<Storage>,
     states: RwLock<BTreeMap<String, ProviderViewState>>,
-    refresh_gates: HashMap<String, Arc<AsyncMutex<()>>>,
+    active_workers: Arc<Mutex<HashSet<String>>>,
     last_live_refresh: Mutex<HashMap<String, Instant>>,
     last_failed_refresh: Mutex<HashMap<String, Instant>>,
     last_full_refresh_at: RwLock<Option<chrono::DateTime<Utc>>>,
+    refresh_timeout: Duration,
 }
 
 impl ProviderService {
     pub fn new(registry: Arc<ProviderRegistry>, storage: Arc<Storage>) -> Self {
+        Self::with_refresh_timeout(registry, storage, PROVIDER_REFRESH_TIMEOUT)
+    }
+
+    fn with_refresh_timeout(
+        registry: Arc<ProviderRegistry>,
+        storage: Arc<Storage>,
+        refresh_timeout: Duration,
+    ) -> Self {
         let mut states = BTreeMap::new();
-        let mut refresh_gates = HashMap::new();
         for definition in &registry.catalog().providers {
             let id = definition.id.clone();
             let state = match storage.load_snapshot(&id) {
@@ -54,16 +63,16 @@ impl ProviderService {
                 }
             };
             states.insert(id.clone(), state);
-            refresh_gates.insert(id.clone(), Arc::new(AsyncMutex::new(())));
         }
         Self {
             registry,
             storage,
             states: RwLock::new(states),
-            refresh_gates,
+            active_workers: Arc::new(Mutex::new(HashSet::new())),
             last_live_refresh: Mutex::new(HashMap::new()),
             last_failed_refresh: Mutex::new(HashMap::new()),
             last_full_refresh_at: RwLock::new(None),
+            refresh_timeout,
         }
     }
 
@@ -102,10 +111,6 @@ impl ProviderService {
                 ..ProviderViewState::default()
             };
         };
-        let Some(gate) = self.refresh_gates.get(provider_id).cloned() else {
-            return ProviderViewState::default();
-        };
-        let _guard = gate.lock().await;
         if !force && self.is_fresh_this_session(provider_id) {
             crate::app_debug!("refresh", "cache hit {provider_id}");
             return self.provider_state(provider_id);
@@ -118,24 +123,56 @@ impl ProviderService {
             );
             return self.provider_state(provider_id);
         }
+        let Some(worker_lease) =
+            RefreshWorkerLease::try_acquire(self.active_workers.clone(), provider_id)
+        else {
+            crate::app_debug!(
+                "refresh",
+                "single-flight skip {provider_id} (refresh worker already active)"
+            );
+            return self.provider_state(provider_id);
+        };
         let started = Instant::now();
         let tag = format!("plugin:{provider_id}");
         crate::app_info!(&tag, "refresh start (force={force})");
+        let previous_state = self.provider_state(provider_id);
         self.update_state(provider_id, |state| {
             state.refreshing = true;
             state.error = None;
             state.error_kind = None;
             state.last_attempt_at = Some(Utc::now());
         });
-
-        let result = tauri::async_runtime::spawn_blocking(move || provider.refresh()).await;
-        let refresh_result = match result {
-            Ok(result) => result,
-            Err(_) => {
+        let state_lease = worker_lease.clone();
+        let mut worker = tauri::async_runtime::spawn_blocking(move || {
+            let result = provider.refresh();
+            (worker_lease, result)
+        });
+        let mut state_guard =
+            RefreshStateGuard::new(self, provider_id, &previous_state, state_lease);
+        let mut late_worker = None;
+        let mut completed_worker_lease = None;
+        let refresh_result = match tokio::time::timeout(self.refresh_timeout, &mut worker).await {
+            Ok(Ok((worker_lease, result))) => {
+                completed_worker_lease = Some(worker_lease);
+                result
+            }
+            Ok(Err(_)) => {
                 crate::app_error!(&tag, "refresh worker stopped unexpectedly");
                 Err(ProviderError::new(
                     ProviderErrorKind::Internal,
                     "Provider refresh stopped unexpectedly.",
+                ))
+            }
+            Err(_) => {
+                crate::app_warn!(
+                    &tag,
+                    "refresh timed out after {}ms; late result will be discarded",
+                    self.refresh_timeout.as_millis()
+                );
+                late_worker = Some(worker);
+                Err(ProviderError::new(
+                    ProviderErrorKind::Network,
+                    "Provider refresh timed out.",
                 ))
             }
         };
@@ -161,36 +198,80 @@ impl ProviderService {
         } else if let Ok(mut failures) = self.last_failed_refresh.lock() {
             failures.insert(provider_id.to_owned(), Instant::now());
         }
+        state_guard.disarm();
+        drop(completed_worker_lease);
+        if let Some(worker) = late_worker {
+            let late_tag = tag.clone();
+            tauri::async_runtime::spawn(async move {
+                match worker.await {
+                    Ok((worker_lease, _)) => {
+                        crate::app_debug!(
+                            &late_tag,
+                            "timed-out refresh worker finished; discarded late result"
+                        );
+                        drop(worker_lease);
+                    }
+                    Err(_) => crate::app_debug!(
+                        &late_tag,
+                        "timed-out refresh worker stopped; discarded late failure"
+                    ),
+                }
+            });
+        }
         state
     }
 
-    pub async fn refresh_enabled(
+    #[cfg(test)]
+    async fn refresh_enabled(
         self: &Arc<Self>,
         provider_ids: &[String],
         force: bool,
     ) -> UsageViewState {
+        self.refresh_enabled_with_progress(provider_ids, force, |_| {})
+            .await
+    }
+
+    pub async fn refresh_enabled_with_progress<F>(
+        self: &Arc<Self>,
+        provider_ids: &[String],
+        force: bool,
+        mut on_progress: F,
+    ) -> UsageViewState
+    where
+        F: FnMut(&UsageViewState) + Send,
+    {
         let started = Instant::now();
         crate::app_info!(
             "refresh",
             "batch start ({} providers, force={force})",
             provider_ids.len()
         );
-        let mut tasks = Vec::with_capacity(provider_ids.len());
+        let (completed_tx, mut completed_rx) = tokio::sync::mpsc::unbounded_channel();
         for provider_id in provider_ids {
             let service = self.clone();
             let provider_id = provider_id.clone();
-            tasks.push(tauri::async_runtime::spawn(async move {
-                service.refresh(&provider_id, force).await
-            }));
+            let completed_tx = completed_tx.clone();
+            tauri::async_runtime::spawn(async move {
+                let state = service.refresh(&provider_id, force).await;
+                let _ = completed_tx.send(state);
+            });
         }
+        drop(completed_tx);
+
         let mut succeeded = 0;
         let mut failed = 0;
-        for task in tasks {
-            match task.await {
-                Ok(state) if state.error.is_none() => succeeded += 1,
-                _ => failed += 1,
+        let mut completed = 0;
+        while let Some(state) = completed_rx.recv().await {
+            completed += 1;
+            if state.error.is_none() {
+                succeeded += 1;
+            } else {
+                failed += 1;
             }
+            let current = self.state();
+            on_progress(&current);
         }
+        failed += provider_ids.len().saturating_sub(completed);
         crate::app_info!(
             "refresh",
             "batch end ({}ms, {succeeded} ok / {failed} failed)",
@@ -199,12 +280,23 @@ impl ProviderService {
         self.state()
     }
 
-    pub async fn refresh_all(
+    #[cfg(test)]
+    async fn refresh_all(self: &Arc<Self>, provider_ids: &[String], force: bool) -> UsageViewState {
+        self.refresh_all_with_progress(provider_ids, force, |_| {})
+            .await
+    }
+
+    pub async fn refresh_all_with_progress<F>(
         self: &Arc<Self>,
         provider_ids: &[String],
         force: bool,
-    ) -> UsageViewState {
-        self.refresh_enabled(provider_ids, force).await;
+        on_progress: F,
+    ) -> UsageViewState
+    where
+        F: FnMut(&UsageViewState) + Send,
+    {
+        self.refresh_enabled_with_progress(provider_ids, force, on_progress)
+            .await;
         if let Ok(mut completed_at) = self.last_full_refresh_at.write() {
             *completed_at = Some(Utc::now());
         }
@@ -264,6 +356,86 @@ impl ProviderService {
     fn update_state(&self, provider_id: &str, update: impl FnOnce(&mut ProviderViewState)) {
         if let Ok(mut states) = self.states.write() {
             update(states.entry(provider_id.to_owned()).or_default());
+        }
+    }
+}
+
+#[derive(Clone)]
+struct RefreshWorkerLease {
+    _inner: Arc<RefreshWorkerLeaseInner>,
+}
+
+struct RefreshWorkerLeaseInner {
+    provider_id: String,
+    active_workers: Arc<Mutex<HashSet<String>>>,
+}
+
+struct RefreshStateGuard<'a> {
+    service: &'a ProviderService,
+    provider_id: String,
+    previous_error: Option<String>,
+    previous_error_kind: Option<ProviderErrorKind>,
+    worker_lease: Option<RefreshWorkerLease>,
+    armed: bool,
+}
+
+impl<'a> RefreshStateGuard<'a> {
+    fn new(
+        service: &'a ProviderService,
+        provider_id: &str,
+        previous_state: &ProviderViewState,
+        worker_lease: RefreshWorkerLease,
+    ) -> Self {
+        Self {
+            service,
+            provider_id: provider_id.to_owned(),
+            previous_error: previous_state.error.clone(),
+            previous_error_kind: previous_state.error_kind,
+            worker_lease: Some(worker_lease),
+            armed: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+        self.worker_lease.take();
+    }
+}
+
+impl Drop for RefreshStateGuard<'_> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        self.service.update_state(&self.provider_id, |state| {
+            state.refreshing = false;
+            state.error = self.previous_error.clone();
+            state.error_kind = self.previous_error_kind;
+        });
+        self.worker_lease.take();
+    }
+}
+
+impl RefreshWorkerLease {
+    fn try_acquire(active_workers: Arc<Mutex<HashSet<String>>>, provider_id: &str) -> Option<Self> {
+        let mut active = active_workers.lock().ok()?;
+        if !active.insert(provider_id.to_owned()) {
+            return None;
+        }
+        drop(active);
+        Some(Self {
+            _inner: Arc::new(RefreshWorkerLeaseInner {
+                provider_id: provider_id.to_owned(),
+                active_workers,
+            }),
+        })
+    }
+}
+
+impl Drop for RefreshWorkerLeaseInner {
+    fn drop(&mut self) {
+        if let Ok(mut active) = self.active_workers.lock() {
+            active.remove(&self.provider_id);
         }
     }
 }
@@ -392,16 +564,19 @@ mod tests {
     use std::{
         sync::{
             atomic::{AtomicUsize, Ordering},
-            Arc,
+            Arc, Mutex,
         },
         thread,
-        time::Duration,
+        time::{Duration, Instant},
     };
 
     use chrono::Utc;
     use tempfile::tempdir;
 
-    use super::{merge_refresh_result, validate_snapshot, ProviderService};
+    use super::{
+        merge_refresh_result, validate_snapshot, ProviderService, RefreshStateGuard,
+        RefreshWorkerLease,
+    };
     use crate::{
         models::{
             MetricDefinition, MetricSection, MetricSource, ProviderDefinition, ProviderErrorKind,
@@ -415,8 +590,10 @@ mod tests {
 
     struct SlowProvider {
         id: &'static str,
+        calls: Arc<AtomicUsize>,
         active: Arc<AtomicUsize>,
         maximum: Arc<AtomicUsize>,
+        delay: Duration,
     }
 
     struct SequenceProvider {
@@ -435,9 +612,10 @@ mod tests {
         }
 
         fn refresh(&self) -> Result<ProviderSnapshot, ProviderError> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
             let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
             self.maximum.fetch_max(active, Ordering::SeqCst);
-            thread::sleep(Duration::from_millis(75));
+            thread::sleep(self.delay);
             self.active.fetch_sub(1, Ordering::SeqCst);
             Ok(test_snapshot(self.id))
         }
@@ -532,8 +710,10 @@ mod tests {
     fn snapshot_contract_rejects_wrong_provider_and_unknown_sources() {
         let provider = SlowProvider {
             id: "contract",
+            calls: Arc::new(AtomicUsize::new(0)),
             active: Arc::new(AtomicUsize::new(0)),
             maximum: Arc::new(AtomicUsize::new(0)),
+            delay: Duration::ZERO,
         };
         let registry = ProviderRegistry::from_definitions(vec![provider.definition()]).unwrap();
         let snapshot = provider.refresh().unwrap();
@@ -640,13 +820,16 @@ mod tests {
         let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
         let active = Arc::new(AtomicUsize::new(0));
         let maximum = Arc::new(AtomicUsize::new(0));
+        let calls = Arc::new(AtomicUsize::new(0));
         let providers = ["claude", "antigravity"]
             .into_iter()
             .map(|id| {
                 Arc::new(SlowProvider {
                     id,
+                    calls: calls.clone(),
                     active: active.clone(),
                     maximum: maximum.clone(),
+                    delay: Duration::from_millis(75),
                 }) as Arc<dyn UsageProvider>
             })
             .collect();
@@ -664,6 +847,250 @@ mod tests {
             service.refresh_all(&["claude".into(), "antigravity".into()], true),
         );
         assert!(completed.last_full_refresh_at.is_some());
+    }
+
+    #[test]
+    fn timed_out_refresh_preserves_last_good_and_bounds_late_worker() {
+        let directory = tempdir().unwrap();
+        let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
+        let mut cached = test_snapshot("slow");
+        cached.plan = Some("cached".into());
+        storage.save_snapshot(&cached).unwrap();
+
+        let active = Arc::new(AtomicUsize::new(0));
+        let maximum = Arc::new(AtomicUsize::new(0));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let provider = Arc::new(SlowProvider {
+            id: "slow",
+            calls,
+            active: active.clone(),
+            maximum: maximum.clone(),
+            delay: Duration::from_millis(140),
+        }) as Arc<dyn UsageProvider>;
+        let registry = Arc::new(ProviderRegistry::new(vec![provider]).unwrap());
+        let service = Arc::new(ProviderService::with_refresh_timeout(
+            registry,
+            storage.clone(),
+            Duration::from_millis(25),
+        ));
+
+        let started = Instant::now();
+        let timed_out = tauri::async_runtime::block_on(service.refresh("slow", true));
+        assert!(started.elapsed() < Duration::from_millis(120));
+        assert_eq!(
+            timed_out.error.as_deref(),
+            Some("Provider refresh timed out.")
+        );
+        assert_eq!(timed_out.error_kind, Some(ProviderErrorKind::Network));
+        assert!(timed_out.stale);
+        assert_eq!(
+            timed_out
+                .snapshot
+                .as_ref()
+                .and_then(|snapshot| snapshot.plan.as_deref()),
+            Some("cached")
+        );
+
+        let duplicate_started = Instant::now();
+        let duplicate = tauri::async_runtime::block_on(service.refresh("slow", true));
+        assert!(duplicate_started.elapsed() < Duration::from_millis(100));
+        assert_eq!(duplicate.error, timed_out.error);
+        assert_eq!(maximum.load(Ordering::SeqCst), 1);
+
+        thread::sleep(Duration::from_millis(180));
+        assert_eq!(active.load(Ordering::SeqCst), 0);
+        assert!(!service.active_workers.lock().unwrap().contains("slow"));
+        assert_eq!(
+            service
+                .state()
+                .providers
+                .get("slow")
+                .and_then(|state| state.snapshot.as_ref())
+                .and_then(|snapshot| snapshot.plan.as_deref()),
+            Some("cached")
+        );
+        assert_eq!(
+            storage
+                .load_snapshot("slow")
+                .unwrap()
+                .and_then(|snapshot| snapshot.plan),
+            Some("cached".into())
+        );
+    }
+
+    #[test]
+    fn cancelled_refresh_keeps_single_flight_until_blocking_worker_finishes() {
+        let directory = tempdir().unwrap();
+        let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
+        let calls = Arc::new(AtomicUsize::new(0));
+        let active = Arc::new(AtomicUsize::new(0));
+        let maximum = Arc::new(AtomicUsize::new(0));
+        let provider = Arc::new(SlowProvider {
+            id: "cancelled",
+            calls: calls.clone(),
+            active: active.clone(),
+            maximum: maximum.clone(),
+            delay: Duration::from_millis(180),
+        }) as Arc<dyn UsageProvider>;
+        let registry = Arc::new(ProviderRegistry::new(vec![provider]).unwrap());
+        let service = Arc::new(ProviderService::with_refresh_timeout(
+            registry,
+            storage,
+            Duration::from_secs(1),
+        ));
+
+        let first_service = service.clone();
+        let first =
+            tauri::async_runtime::spawn(
+                async move { first_service.refresh("cancelled", true).await },
+            );
+        let started = Instant::now();
+        while active.load(Ordering::SeqCst) == 0 && started.elapsed() < Duration::from_secs(1) {
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(active.load(Ordering::SeqCst), 1);
+
+        first.abort();
+        let _ = tauri::async_runtime::block_on(first);
+        assert!(!service
+            .state()
+            .providers
+            .get("cancelled")
+            .is_some_and(|state| state.refreshing));
+
+        let retry = tauri::async_runtime::block_on(service.refresh("cancelled", true));
+        assert!(!retry.refreshing);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(maximum.load(Ordering::SeqCst), 1);
+
+        let draining = Instant::now();
+        while service.active_workers.lock().unwrap().contains("cancelled")
+            && draining.elapsed() < Duration::from_secs(1)
+        {
+            thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(active.load(Ordering::SeqCst), 0);
+        assert!(!service.active_workers.lock().unwrap().contains("cancelled"));
+
+        let completed = tauri::async_runtime::block_on(service.refresh("cancelled", true));
+        assert!(completed.error.is_none());
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert_eq!(maximum.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn completed_worker_output_keeps_single_flight_until_state_cleanup() {
+        let directory = tempdir().unwrap();
+        let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
+        let provider = Arc::new(SlowProvider {
+            id: "lifecycle",
+            calls: Arc::new(AtomicUsize::new(0)),
+            active: Arc::new(AtomicUsize::new(0)),
+            maximum: Arc::new(AtomicUsize::new(0)),
+            delay: Duration::ZERO,
+        }) as Arc<dyn UsageProvider>;
+        let registry = Arc::new(ProviderRegistry::new(vec![provider]).unwrap());
+        let service = ProviderService::new(registry, storage);
+
+        let worker_lease =
+            RefreshWorkerLease::try_acquire(service.active_workers.clone(), "lifecycle").unwrap();
+        let state_lease = worker_lease.clone();
+        let previous_state = service.provider_state("lifecycle");
+        service.update_state("lifecycle", |state| state.refreshing = true);
+        let state_guard =
+            RefreshStateGuard::new(&service, "lifecycle", &previous_state, state_lease);
+        let completed_output = (
+            worker_lease,
+            Ok::<ProviderSnapshot, ProviderError>(test_snapshot("lifecycle")),
+        );
+
+        drop(completed_output);
+        assert!(service.active_workers.lock().unwrap().contains("lifecycle"));
+        assert!(
+            RefreshWorkerLease::try_acquire(service.active_workers.clone(), "lifecycle").is_none()
+        );
+
+        drop(state_guard);
+        assert!(!service.active_workers.lock().unwrap().contains("lifecycle"));
+        assert!(!service.provider_state("lifecycle").refreshing);
+
+        let next_lease =
+            RefreshWorkerLease::try_acquire(service.active_workers.clone(), "lifecycle").unwrap();
+        service.update_state("lifecycle", |state| state.refreshing = true);
+        assert!(service.provider_state("lifecycle").refreshing);
+        drop(next_lease);
+    }
+
+    #[test]
+    fn progress_reports_fast_provider_before_slow_provider_deadline() {
+        let directory = tempdir().unwrap();
+        let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
+        let active = Arc::new(AtomicUsize::new(0));
+        let maximum = Arc::new(AtomicUsize::new(0));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let providers = [
+            ("slow", Duration::from_millis(160)),
+            ("fast", Duration::ZERO),
+        ]
+        .into_iter()
+        .map(|(id, delay)| {
+            Arc::new(SlowProvider {
+                id,
+                calls: calls.clone(),
+                active: active.clone(),
+                maximum: maximum.clone(),
+                delay,
+            }) as Arc<dyn UsageProvider>
+        })
+        .collect();
+        let registry = Arc::new(ProviderRegistry::new(providers).unwrap());
+        let service = Arc::new(ProviderService::with_refresh_timeout(
+            registry,
+            storage.clone(),
+            Duration::from_millis(40),
+        ));
+        let observations = Arc::new(Mutex::new(Vec::new()));
+        let observed = observations.clone();
+        let started = Instant::now();
+
+        let final_state = tauri::async_runtime::block_on(service.refresh_enabled_with_progress(
+            &["slow".into(), "fast".into()],
+            true,
+            move |state| {
+                observed
+                    .lock()
+                    .unwrap()
+                    .push((started.elapsed(), state.clone()));
+            },
+        ));
+
+        let observations = observations.lock().unwrap();
+        assert_eq!(observations.len(), 2);
+        assert!(observations[0].0 < Duration::from_millis(120));
+        assert!(observations[0]
+            .1
+            .providers
+            .get("fast")
+            .and_then(|state| state.snapshot.as_ref())
+            .is_some());
+        assert!(observations[0]
+            .1
+            .providers
+            .get("slow")
+            .and_then(|state| state.error.as_ref())
+            .is_none());
+        assert!(storage.load_snapshot("fast").unwrap().is_some());
+        assert_eq!(
+            final_state
+                .providers
+                .get("slow")
+                .and_then(|state| state.error.as_deref()),
+            Some("Provider refresh timed out.")
+        );
+        drop(observations);
+
+        thread::sleep(Duration::from_millis(180));
+        assert_eq!(active.load(Ordering::SeqCst), 0);
     }
 
     #[test]

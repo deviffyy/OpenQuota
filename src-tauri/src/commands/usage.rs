@@ -49,8 +49,11 @@ pub async fn refresh_usage(
     settings: State<'_, Arc<SettingsService>>,
     notifications: State<'_, Arc<NotificationEvaluator>>,
 ) -> Result<UsageViewState, ()> {
+    let progress_app = app.clone();
     let state = service
-        .refresh_all(&settings.enabled_provider_ids(), true)
+        .refresh_all_with_progress(&settings.enabled_provider_ids(), true, move |state| {
+            let _ = progress_app.emit("usage-state", state);
+        })
         .await;
     let _ = app.emit("usage-state", &state);
     finish_refresh(&app, &state, &settings, &notifications);

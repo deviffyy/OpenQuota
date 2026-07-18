@@ -100,7 +100,12 @@ pub async fn save_app_settings(
         .map(|provider| provider.id.clone())
         .collect::<Vec<_>>();
     if !newly_enabled.is_empty() {
-        service.refresh_enabled(&newly_enabled, true).await;
+        let progress_app = app.clone();
+        service
+            .refresh_enabled_with_progress(&newly_enabled, true, move |state| {
+                let _ = progress_app.emit("usage-state", state);
+            })
+            .await;
         let state = service.state();
         let _ = app.emit("usage-state", &state);
         finish_refresh(&app, &state, &settings_service, &notifications);
@@ -135,8 +140,11 @@ pub async fn reset_customization(
     );
     let state = settings_view_state(&app, &settings);
     let _ = app.emit("settings-state", &state);
+    let progress_app = app.clone();
     let usage_state = service
-        .refresh_all(&settings.enabled_provider_ids(), true)
+        .refresh_all_with_progress(&settings.enabled_provider_ids(), true, move |state| {
+            let _ = progress_app.emit("usage-state", state);
+        })
         .await;
     let _ = app.emit("usage-state", &usage_state);
     finish_refresh(&app, &usage_state, &settings, &notifications);
