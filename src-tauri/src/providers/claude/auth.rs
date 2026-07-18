@@ -1,10 +1,12 @@
 use std::{
     fs,
+    io::Write,
     path::{Path, PathBuf},
 };
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tempfile::NamedTempFile;
 
 use crate::providers::credential_store::{read_generic_password, write_generic_password};
 
@@ -15,7 +17,7 @@ const DEFAULT_REFRESH_URL: &str = "https://platform.claude.com/v1/oauth/token";
 const DEFAULT_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const NON_PROD_CLIENT_ID: &str = "22422756-60c9-4084-8eb7-27705fd5cf9a";
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ClaudeOAuth {
     pub access_token: Option<String>,
@@ -32,7 +34,7 @@ struct ClaudeCredentialsFile {
     claude_ai_oauth: Option<ClaudeOAuth>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum CredentialSource {
     File(PathBuf),
     Keychain { service: String, account: String },
@@ -45,6 +47,42 @@ pub struct ClaudeCredential {
     source: CredentialSource,
     document: ClaudeCredentialsFile,
     pub inference_only: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClaudeCredentialGeneration {
+    entries: Vec<ClaudeCredentialGenerationEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ClaudeCredentialGenerationEntry {
+    source: CredentialSource,
+    oauth_fingerprint: [u8; 32],
+}
+
+impl ClaudeCredentialGeneration {
+    pub fn from_candidates(candidates: &[ClaudeCredential]) -> Self {
+        Self {
+            entries: candidates
+                .iter()
+                .filter(|candidate| !candidate.inference_only)
+                .map(|candidate| ClaudeCredentialGenerationEntry {
+                    source: candidate.source.clone(),
+                    oauth_fingerprint: oauth_generation_fingerprint(&candidate.oauth),
+                })
+                .collect(),
+        }
+    }
+
+    pub fn replacing(&self, credential: &ClaudeCredential) -> Option<Self> {
+        let mut updated = self.clone();
+        let entry = updated
+            .entries
+            .iter_mut()
+            .find(|entry| entry.source == credential.source)?;
+        entry.oauth_fingerprint = oauth_generation_fingerprint(&credential.oauth);
+        Some(updated)
+    }
 }
 
 impl ClaudeCredential {
@@ -98,7 +136,33 @@ impl ClaudeCredential {
         refresh_token: Option<String>,
         expires_in: Option<f64>,
         now_millis: i64,
-    ) -> Result<(), ClaudeError> {
+        expected_generation: &ClaudeCredentialGeneration,
+    ) -> Result<bool, ClaudeError> {
+        self.update_and_save_with_generation(
+            access_token,
+            refresh_token,
+            expires_in,
+            now_millis,
+            expected_generation,
+            credential_generation,
+        )
+    }
+
+    fn update_and_save_with_generation<F>(
+        &mut self,
+        access_token: String,
+        refresh_token: Option<String>,
+        expires_in: Option<f64>,
+        now_millis: i64,
+        expected_generation: &ClaudeCredentialGeneration,
+        current_generation: F,
+    ) -> Result<bool, ClaudeError>
+    where
+        F: FnOnce() -> ClaudeCredentialGeneration,
+    {
+        if current_generation() != *expected_generation {
+            return Err(ClaudeError::CredentialsChanged);
+        }
         self.oauth.access_token = Some(access_token);
         if let Some(refresh_token) = refresh_token.filter(|value| !value.is_empty()) {
             self.oauth.refresh_token = Some(refresh_token);
@@ -110,18 +174,88 @@ impl ClaudeCredential {
         let bytes = serde_json::to_vec(&self.document).map_err(|_| ClaudeError::AuthWrite)?;
         match &self.source {
             CredentialSource::File(path) => {
-                let parent = path.parent().ok_or(ClaudeError::AuthWrite)?;
-                fs::create_dir_all(parent).map_err(|_| ClaudeError::AuthWrite)?;
-                let temporary = path.with_extension("json.tmp-openquota");
-                fs::write(&temporary, &bytes).map_err(|_| ClaudeError::AuthWrite)?;
-                fs::rename(temporary, path).map_err(|_| ClaudeError::AuthWrite)
+                write_private_file_atomic(path, &bytes)?;
+                Ok(true)
             }
             CredentialSource::Keychain { service, account } => {
-                write_generic_password(service, account, &bytes).map_err(|_| ClaudeError::AuthWrite)
+                write_generic_password(service, account, &bytes)
+                    .map_err(|_| ClaudeError::AuthWrite)?;
+                Ok(true)
             }
-            CredentialSource::Environment => Ok(()),
+            CredentialSource::Environment => Ok(false),
         }
     }
+}
+
+pub fn credential_generation() -> ClaudeCredentialGeneration {
+    ClaudeCredentialGeneration::from_candidates(&load_candidates())
+}
+
+fn oauth_generation_fingerprint(oauth: &ClaudeOAuth) -> [u8; 32] {
+    let mut fingerprint = Sha256::new();
+    update_optional_text(&mut fingerprint, oauth.access_token.as_deref());
+    update_optional_text(&mut fingerprint, oauth.refresh_token.as_deref());
+    match oauth.expires_at {
+        Some(value) => {
+            fingerprint.update([1]);
+            fingerprint.update(value.to_bits().to_le_bytes());
+        }
+        None => fingerprint.update([0]),
+    }
+    update_optional_text(&mut fingerprint, oauth.subscription_type.as_deref());
+    update_optional_text(&mut fingerprint, oauth.rate_limit_tier.as_deref());
+    match oauth.scopes.as_ref() {
+        Some(scopes) => {
+            fingerprint.update([1]);
+            fingerprint.update((scopes.len() as u64).to_le_bytes());
+            for scope in scopes {
+                update_text(&mut fingerprint, scope);
+            }
+        }
+        None => fingerprint.update([0]),
+    }
+    fingerprint.finalize().into()
+}
+
+fn update_optional_text(fingerprint: &mut Sha256, value: Option<&str>) {
+    match value {
+        Some(value) => {
+            fingerprint.update([1]);
+            update_text(fingerprint, value);
+        }
+        None => fingerprint.update([0]),
+    }
+}
+
+fn update_text(fingerprint: &mut Sha256, value: &str) {
+    fingerprint.update((value.len() as u64).to_le_bytes());
+    fingerprint.update(value.as_bytes());
+}
+
+fn write_private_file_atomic(path: &Path, bytes: &[u8]) -> Result<(), ClaudeError> {
+    let parent = path.parent().ok_or(ClaudeError::AuthWrite)?;
+    fs::create_dir_all(parent).map_err(|_| ClaudeError::AuthWrite)?;
+    let mut temporary = NamedTempFile::new_in(parent).map_err(|_| ClaudeError::AuthWrite)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        temporary
+            .as_file()
+            .set_permissions(fs::Permissions::from_mode(0o600))
+            .map_err(|_| ClaudeError::AuthWrite)?;
+    }
+    temporary
+        .write_all(bytes)
+        .map_err(|_| ClaudeError::AuthWrite)?;
+    temporary.flush().map_err(|_| ClaudeError::AuthWrite)?;
+    temporary
+        .as_file()
+        .sync_all()
+        .map_err(|_| ClaudeError::AuthWrite)?;
+    temporary
+        .persist(path)
+        .map_err(|_| ClaudeError::AuthWrite)?;
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -146,6 +280,7 @@ pub fn has_desktop_app_data() -> bool {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn has_desktop_app_material_at(home: &Path) -> bool {
     let root = home
         .join("Library")
@@ -366,8 +501,9 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        has_desktop_app_material_at, parse_credentials, ClaudeCredential, ClaudeCredentialsFile,
-        ClaudeOAuth, CredentialSource,
+        has_desktop_app_material_at, parse_credentials, write_private_file_atomic,
+        ClaudeCredential, ClaudeCredentialGeneration, ClaudeCredentialsFile, ClaudeOAuth,
+        CredentialSource,
     };
     use crate::providers::claude::ClaudeError;
 
@@ -397,19 +533,125 @@ mod tests {
             document: ClaudeCredentialsFile::default(),
             inference_only: false,
         };
+        let generation = ClaudeCredentialGeneration::from_candidates(&[credential.clone()]);
 
         let error = credential
-            .update_and_save(
+            .update_and_save_with_generation(
                 "secret-access".into(),
                 Some("secret-refresh".into()),
                 Some(3600.0),
                 Utc::now().timestamp_millis(),
+                &generation,
+                || generation.clone(),
             )
             .unwrap_err();
 
         assert!(matches!(error, ClaudeError::AuthWrite));
         assert!(!error.to_string().contains("secret-access"));
         assert!(!error.to_string().contains("secret-refresh"));
+    }
+
+    #[test]
+    fn atomic_credential_write_replaces_an_existing_file() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("credentials.json");
+        fs::write(&path, b"old credential").unwrap();
+
+        write_private_file_atomic(&path, b"new credential").unwrap();
+
+        assert_eq!(fs::read(path).unwrap(), b"new credential");
+    }
+
+    #[test]
+    fn credential_rotation_refuses_to_overwrite_a_changed_login() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("credentials.json");
+        fs::write(&path, b"original credential").unwrap();
+        let mut credential = ClaudeCredential {
+            oauth: ClaudeOAuth {
+                access_token: Some("account-a".into()),
+                refresh_token: Some("refresh-a".into()),
+                ..ClaudeOAuth::default()
+            },
+            source: CredentialSource::File(path.clone()),
+            document: ClaudeCredentialsFile::default(),
+            inference_only: false,
+        };
+        let expected = ClaudeCredentialGeneration::from_candidates(&[credential.clone()]);
+        let changed = ClaudeCredential {
+            oauth: ClaudeOAuth {
+                access_token: Some("account-b".into()),
+                refresh_token: Some("refresh-b".into()),
+                ..ClaudeOAuth::default()
+            },
+            ..credential.clone()
+        };
+        let current = ClaudeCredentialGeneration::from_candidates(&[changed]);
+
+        let error = credential
+            .update_and_save_with_generation(
+                "rotated-a".into(),
+                Some("rotated-refresh-a".into()),
+                Some(3600.0),
+                Utc::now().timestamp_millis(),
+                &expected,
+                || current,
+            )
+            .unwrap_err();
+
+        assert!(matches!(error, ClaudeError::CredentialsChanged));
+        assert_eq!(credential.oauth.access_token.as_deref(), Some("account-a"));
+        assert_eq!(fs::read(path).unwrap(), b"original credential");
+    }
+
+    #[test]
+    fn credential_generation_tracks_order_source_and_complete_oauth_state() {
+        let credential = |source: CredentialSource, access: &str, refresh: &str| ClaudeCredential {
+            oauth: ClaudeOAuth {
+                access_token: Some(access.into()),
+                refresh_token: Some(refresh.into()),
+                expires_at: Some(1.0),
+                subscription_type: Some("pro".into()),
+                rate_limit_tier: Some("tier-a".into()),
+                scopes: Some(vec!["user:profile".into()]),
+            },
+            source,
+            document: ClaudeCredentialsFile::default(),
+            inference_only: false,
+        };
+        let file = credential(
+            CredentialSource::File("credentials.json".into()),
+            "access-a",
+            "refresh-a",
+        );
+        let keychain = credential(
+            CredentialSource::Keychain {
+                service: "service".into(),
+                account: "account".into(),
+            },
+            "access-b",
+            "refresh-b",
+        );
+        let original =
+            ClaudeCredentialGeneration::from_candidates(&[file.clone(), keychain.clone()]);
+
+        assert_ne!(
+            original,
+            ClaudeCredentialGeneration::from_candidates(&[keychain.clone(), file.clone()])
+        );
+        let mut metadata_changed = file.clone();
+        metadata_changed.oauth.rate_limit_tier = Some("tier-b".into());
+        assert_ne!(
+            original,
+            ClaudeCredentialGeneration::from_candidates(&[metadata_changed, keychain.clone()])
+        );
+        let mut rotated = file;
+        rotated.oauth.access_token = Some("rotated".into());
+        let replaced = original.replacing(&rotated).unwrap();
+        assert_eq!(
+            replaced,
+            ClaudeCredentialGeneration::from_candidates(&[rotated, keychain])
+        );
     }
 
     #[test]

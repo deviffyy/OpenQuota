@@ -26,6 +26,12 @@
     --provider-codex: #10a37f;
     --provider-claude: #de7356;
     --provider-antigravity: #4285f4;
+    --provider-copilot: #a855f7;
+    --provider-cursor: #13120a;
+    --provider-grok: #8e8e93;
+    --provider-opencode: #6e6e73;
+    --provider-openrouter: #6467f2;
+    --provider-zai: #2d2d2d;
     --separator: color-mix(in srgb, var(--text) 9%, transparent);
     --button-hover: color-mix(in srgb, var(--text) 8%, transparent);
     --warning: #a85d00;
@@ -51,6 +57,10 @@
     --meter-warning: #ffd54a;
     --meter-critical: #ff6961;
     --provider: #19c39a;
+    --provider-cursor: #f5f5f7;
+    --provider-grok: #98989d;
+    --provider-opencode: #aeaeb2;
+    --provider-zai: #d1d1d6;
     --separator: color-mix(in srgb, var(--text) 9%, transparent);
     --button-hover: color-mix(in srgb, var(--text) 8%, transparent);
     --warning: #ffb95c;
@@ -73,6 +83,10 @@
   --meter-warning: #e5a400;
   --meter-critical: #e3483f;
   --provider: #10a37f;
+  --provider-cursor: #13120a;
+  --provider-grok: #8e8e93;
+  --provider-opencode: #6e6e73;
+  --provider-zai: #2d2d2d;
   --separator: color-mix(in srgb, var(--text) 9%, transparent);
   --button-hover: color-mix(in srgb, var(--text) 8%, transparent);
   --warning: #a85d00;
@@ -94,6 +108,10 @@
   --meter-warning: #ffd54a;
   --meter-critical: #ff6961;
   --provider: #19c39a;
+  --provider-cursor: #f5f5f7;
+  --provider-grok: #98989d;
+  --provider-opencode: #aeaeb2;
+  --provider-zai: #d1d1d6;
   --separator: color-mix(in srgb, var(--text) 9%, transparent);
   --button-hover: color-mix(in srgb, var(--text) 8%, transparent);
   --warning: #ffb95c;

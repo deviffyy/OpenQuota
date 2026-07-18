@@ -15,6 +15,7 @@ use super::CodexError;
 use crate::providers::{
     daily_usage::DailyUsageAccumulator,
     log_usage::{load_or_parse_log, parse_log_timestamp, LogCacheError},
+    pi_usage,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -72,7 +73,24 @@ pub fn scan_local_usage(
     }
     storage.prune_log_events("codex", &seen_paths)?;
 
-    Ok(aggregate(events, now, fast_tier, pricing))
+    let mut accumulator = DailyUsageAccumulator::default();
+    aggregate_into(events, now, fast_tier, pricing, &mut accumulator);
+    let includes_pi = match pi_usage::scan_into(storage, now, pricing, "codex", &mut accumulator) {
+        Ok(includes_pi) => includes_pi,
+        Err(_) => {
+            crate::app_warn!(
+                "plugin:pi",
+                "pi usage history could not be folded into Codex"
+            );
+            false
+        }
+    };
+    let source_note = if includes_pi {
+        "From your Codex logs and pi (estimated)"
+    } else {
+        "From your Codex logs (estimated)"
+    };
+    Ok(accumulator.build(now, source_note))
 }
 
 fn codex_homes(configured_home: Option<&Path>, home: &Path) -> Vec<PathBuf> {
@@ -383,16 +401,28 @@ fn auto_review_fallback(timestamp: &str) -> &'static str {
     .unwrap_or("gpt-5")
 }
 
+#[cfg(test)]
 fn aggregate(
     events: Vec<TokenEvent>,
     now: DateTime<Utc>,
     fast_tier: bool,
     pricing: &ModelPricing,
 ) -> UsageHistory {
+    let mut accumulator = DailyUsageAccumulator::default();
+    aggregate_into(events, now, fast_tier, pricing, &mut accumulator);
+    accumulator.build(now, "From your Codex logs (estimated)")
+}
+
+fn aggregate_into(
+    events: Vec<TokenEvent>,
+    now: DateTime<Utc>,
+    fast_tier: bool,
+    pricing: &ModelPricing,
+    accumulator: &mut DailyUsageAccumulator,
+) {
     let today = now.with_timezone(&Local).date_naive();
     let since = today.checked_sub_days(Days::new(30)).unwrap_or(today);
     let mut seen = HashSet::new();
-    let mut accumulator = DailyUsageAccumulator::default();
 
     for event in events {
         if !seen.insert(event.clone()) {
@@ -408,8 +438,6 @@ fn aggregate(
             accumulator.add_unknown_model(date, &event.model);
         }
     }
-
-    accumulator.build(now, "From your Codex logs (estimated)")
 }
 
 fn estimate_cost(event: &TokenEvent, fast_tier: bool, pricing: &ModelPricing) -> Option<f64> {

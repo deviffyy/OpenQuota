@@ -19,6 +19,7 @@ use super::ClaudeError;
 use crate::providers::{
     daily_usage::DailyUsageAccumulator,
     log_usage::{load_or_parse_log, parse_log_timestamp},
+    pi_usage,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -83,7 +84,24 @@ pub fn scan_local_usage(
     storage
         .prune_log_events("claude", &seen_paths)
         .map_err(|_| ClaudeError::LocalUsage)?;
-    Ok(aggregate(deduplicate(events), now, pricing))
+    let mut accumulator = DailyUsageAccumulator::default();
+    aggregate_into(deduplicate(events), now, pricing, &mut accumulator);
+    let includes_pi = match pi_usage::scan_into(storage, now, pricing, "claude", &mut accumulator) {
+        Ok(includes_pi) => includes_pi,
+        Err(_) => {
+            crate::app_warn!(
+                "plugin:pi",
+                "pi usage history could not be folded into Claude"
+            );
+            false
+        }
+    };
+    let source_note = if includes_pi {
+        "From your Claude usage history and pi (estimated)"
+    } else {
+        "From your Claude usage history (estimated)"
+    };
+    Ok(accumulator.build(now, source_note))
 }
 
 fn discover_files() -> Vec<PathBuf> {
@@ -325,17 +343,28 @@ fn deduplicate(events: Vec<ClaudeTokenEvent>) -> Vec<ClaudeTokenEvent> {
     output
 }
 
+#[cfg(test)]
 fn aggregate(
     events: Vec<ClaudeTokenEvent>,
     now: DateTime<Utc>,
     pricing: &ModelPricing,
 ) -> UsageHistory {
+    let mut accumulator = DailyUsageAccumulator::default();
+    aggregate_into(events, now, pricing, &mut accumulator);
+    accumulator.build(now, "From your Claude usage history (estimated)")
+}
+
+fn aggregate_into(
+    events: Vec<ClaudeTokenEvent>,
+    now: DateTime<Utc>,
+    pricing: &ModelPricing,
+    accumulator: &mut DailyUsageAccumulator,
+) {
     let since = now
         .with_timezone(&Local)
         .date_naive()
         .checked_sub_days(Days::new(30))
         .unwrap_or(NaiveDate::MIN);
-    let mut accumulator = DailyUsageAccumulator::default();
     for event in events {
         let date = event.timestamp.with_timezone(&Local).date_naive();
         if date < since {
@@ -370,7 +399,6 @@ fn aggregate(
             }
         }
     }
-    accumulator.build(now, "From your Claude usage history (estimated)")
 }
 
 fn integer(value: Option<&Value>) -> Option<u64> {

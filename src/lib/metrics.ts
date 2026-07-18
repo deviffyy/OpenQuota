@@ -1,4 +1,9 @@
-import type { MetricDefinition, ProviderCatalog, ProviderDefinition } from './types';
+import type {
+  MetricDefinition,
+  ProviderCatalog,
+  ProviderDefinition,
+  ProviderSnapshot,
+} from './types';
 
 export class ProviderCatalogIndex {
   readonly providers: ProviderDefinition[];
@@ -46,6 +51,15 @@ export class ProviderCatalogIndex {
       provider?.localUsageSourceNote ?? `From your ${provider?.displayName ?? id} usage history`
     );
   }
+}
+
+export function usageSourceNote(catalog: ProviderCatalogIndex, snapshot: ProviderSnapshot) {
+  return (
+    snapshot.usage.last30Days?.modelBreakdown?.sourceNote ??
+    snapshot.usage.today?.modelBreakdown?.sourceNote ??
+    snapshot.usage.yesterday?.modelBreakdown?.sourceNote ??
+    catalog.localUsageSourceNote(snapshot.providerId)
+  );
 }
 
 export const emptyProviderCatalog = new ProviderCatalogIndex({ providers: [] });

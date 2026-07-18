@@ -27,6 +27,18 @@ describe('native UI language contract', () => {
     expect(css).toMatch(/\.metric__heading \.pace-warning\s*{[^}]*color: var\(--secondary\);/s);
   });
 
+  it('keeps spend providers visually distinct in both appearances', () => {
+    for (const provider of ['claude', 'codex', 'cursor', 'grok', 'opencode', 'openrouter']) {
+      expect(tokensCss).toContain(`--provider-${provider}:`);
+    }
+    expect(tokensCss).toMatch(
+      /@media \(prefers-color-scheme: dark\)[\s\S]*--provider-cursor: #f5f5f7;[\s\S]*--provider-opencode: #aeaeb2;/,
+    );
+    expect(tokensCss).toMatch(
+      /:root\[data-theme='dark'\][\s\S]*--provider-cursor: #f5f5f7;[\s\S]*--provider-opencode: #aeaeb2;/,
+    );
+  });
+
   it('keeps Customize concise and free of duplicate status and count copy', () => {
     expect(customizeList).toContain('Notifications, appearance and more');
     expect(customizeList).toContain('{provider.metrics.length} metrics');

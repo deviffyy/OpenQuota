@@ -46,12 +46,17 @@ OpenQuota checks for updates automatically. Installable updates are cryptographi
   spend
 - **Cursor** — total, Auto and API usage, credits, token history, and estimated spend
 - **Antigravity** — shared Gemini and Claude quota pools
+- **Copilot** — premium requests, extra usage, chat and completion quotas, plus organization billing
+- **Devin** — daily and weekly limits, reset times, and extra usage balance
+- **Grok** — weekly allowance, extra usage status, token history, and estimated spend
+- **OpenCode** — OpenCode Go session, weekly and monthly spend caps, plus local hosted usage history
 - **OpenRouter** — credit balance and daily, weekly and monthly spend (API key)
+- **Z.ai** — GLM Coding Plan session, weekly, and web-search quotas (API key)
 
-Most providers use credentials already available on your computer. OpenRouter requires an API key,
-which you can add in Customize; OpenQuota stores it securely in your operating system's credential
-store. Codex subscription limits require a ChatGPT login and are not available in API-key-only
-sessions.
+Most providers use credentials already available on your computer. OpenRouter and Z.ai require API
+keys, which you can add in Customize; OpenQuota stores them securely in your operating system's
+credential store. Codex subscription limits require a ChatGPT login and are not available in
+API-key-only sessions.
 
 ## Features
 

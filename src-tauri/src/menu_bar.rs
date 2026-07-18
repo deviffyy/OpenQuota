@@ -24,9 +24,12 @@ const FONT_SOURCE: &[u8] = include_bytes!("../assets/fonts/Poppins-SemiBold.ttf"
 
 const CLAUDE_ICON: &str = include_str!("../../src/assets/provider-icons/claude.svg");
 const CODEX_ICON: &str = include_str!("../../src/assets/provider-icons/codex.svg");
+const COPILOT_ICON: &str = include_str!("../../src/assets/provider-icons/copilot.svg");
 const CURSOR_ICON: &str = include_str!("../../src/assets/provider-icons/cursor.svg");
+const DEVIN_ICON: &str = include_str!("../../src/assets/provider-icons/devin.svg");
 const ANTIGRAVITY_ICON: &str = include_str!("../../src/assets/provider-icons/antigravity.svg");
 const GROK_ICON: &str = include_str!("../../src/assets/provider-icons/grok.svg");
+const OPENCODE_ICON: &str = include_str!("../../src/assets/provider-icons/opencode.svg");
 const OPENROUTER_ICON: &str = include_str!("../../src/assets/provider-icons/openrouter.svg");
 const ZAI_ICON: &str = include_str!("../../src/assets/provider-icons/zai.svg");
 
@@ -266,17 +269,23 @@ fn provider_path(provider_id: &str) -> Option<&'static Path> {
 
     static CLAUDE: OnceLock<Path> = OnceLock::new();
     static CODEX: OnceLock<Path> = OnceLock::new();
+    static COPILOT: OnceLock<Path> = OnceLock::new();
     static CURSOR: OnceLock<Path> = OnceLock::new();
+    static DEVIN: OnceLock<Path> = OnceLock::new();
     static ANTIGRAVITY: OnceLock<Path> = OnceLock::new();
     static GROK: OnceLock<Path> = OnceLock::new();
+    static OPENCODE: OnceLock<Path> = OnceLock::new();
     static OPENROUTER: OnceLock<Path> = OnceLock::new();
     static ZAI: OnceLock<Path> = OnceLock::new();
     match provider_id {
         "claude" => Some(parsed(CLAUDE_ICON, &CLAUDE)),
         "codex" => Some(parsed(CODEX_ICON, &CODEX)),
+        "copilot" => Some(parsed(COPILOT_ICON, &COPILOT)),
         "cursor" => Some(parsed(CURSOR_ICON, &CURSOR)),
+        "devin" => Some(parsed(DEVIN_ICON, &DEVIN)),
         "antigravity" => Some(parsed(ANTIGRAVITY_ICON, &ANTIGRAVITY)),
         "grok" => Some(parsed(GROK_ICON, &GROK)),
+        "opencode" => Some(parsed(OPENCODE_ICON, &OPENCODE)),
         "openrouter" => Some(parsed(OPENROUTER_ICON, &OPENROUTER)),
         "zai" => Some(parsed(ZAI_ICON, &ZAI)),
         _ => None,
@@ -298,6 +307,7 @@ fn parse_svg_path(source: &str) -> Result<Path, String> {
     for data in path_data {
         let mut current = None;
         let mut subpath_start = None;
+        let mut previous_cubic_control = None;
         for segment in PathParser::from(data) {
             match segment.map_err(|error| error.to_string())? {
                 PathSegment::MoveTo { abs, x, y } => {
@@ -310,6 +320,7 @@ fn parse_svg_path(source: &str) -> Result<Path, String> {
                     builder.move_to(point.0, point.1);
                     current = Some(point);
                     subpath_start = Some(point);
+                    previous_cubic_control = None;
                 }
                 PathSegment::LineTo { abs, x, y } => {
                     let origin = if abs {
@@ -320,6 +331,7 @@ fn parse_svg_path(source: &str) -> Result<Path, String> {
                     let point = (origin.0 + x as f32, origin.1 + y as f32);
                     builder.line_to(point.0, point.1);
                     current = Some(point);
+                    previous_cubic_control = None;
                 }
                 PathSegment::HorizontalLineTo { abs, x } => {
                     let (current_x, current_y) =
@@ -327,6 +339,7 @@ fn parse_svg_path(source: &str) -> Result<Path, String> {
                     let point = (if abs { x as f32 } else { current_x + x as f32 }, current_y);
                     builder.line_to(point.0, point.1);
                     current = Some(point);
+                    previous_cubic_control = None;
                 }
                 PathSegment::VerticalLineTo { abs, y } => {
                     let (current_x, current_y) =
@@ -334,6 +347,7 @@ fn parse_svg_path(source: &str) -> Result<Path, String> {
                     let point = (current_x, if abs { y as f32 } else { current_y + y as f32 });
                     builder.line_to(point.0, point.1);
                     current = Some(point);
+                    previous_cubic_control = None;
                 }
                 PathSegment::CurveTo {
                     abs,
@@ -359,12 +373,33 @@ fn parse_svg_path(source: &str) -> Result<Path, String> {
                         end.1,
                     );
                     current = Some(end);
+                    previous_cubic_control = Some((origin.0 + x2 as f32, origin.1 + y2 as f32));
+                }
+                PathSegment::SmoothCurveTo { abs, x2, y2, x, y } => {
+                    let origin =
+                        current.ok_or_else(|| "smooth curve has no current point".to_owned())?;
+                    let first = previous_cubic_control
+                        .map(|control| (origin.0 * 2.0 - control.0, origin.1 * 2.0 - control.1))
+                        .unwrap_or(origin);
+                    let coordinate_origin = if abs { (0.0, 0.0) } else { origin };
+                    let second = (
+                        coordinate_origin.0 + x2 as f32,
+                        coordinate_origin.1 + y2 as f32,
+                    );
+                    let end = (
+                        coordinate_origin.0 + x as f32,
+                        coordinate_origin.1 + y as f32,
+                    );
+                    builder.cubic_to(first.0, first.1, second.0, second.1, end.0, end.1);
+                    current = Some(end);
+                    previous_cubic_control = Some(second);
                 }
                 PathSegment::ClosePath { .. } => {
                     builder.close();
                     current = subpath_start;
+                    previous_cubic_control = None;
                 }
-                _ => return Err("only M, L, H, V, C and Z path commands are supported".into()),
+                _ => return Err("only M, L, H, V, C, S and Z path commands are supported".into()),
             }
         }
     }
@@ -548,9 +583,12 @@ mod tests {
         for provider in [
             "claude",
             "codex",
+            "copilot",
             "cursor",
+            "devin",
             "antigravity",
             "grok",
+            "opencode",
             "openrouter",
             "zai",
         ] {
@@ -577,12 +615,12 @@ mod tests {
     #[test]
     fn provider_mark_parser_combines_paths_and_resolves_relative_commands() {
         let path = parse_svg_path(
-            r#"<svg><path d="M1 1l2 0v2h-2z"/><path d="M10 10c1 0 2 1 3 2"/></svg>"#,
+            r#"<svg><path d="M1 1l2 0v2h-2z"/><path d="M10 10c1 0 2 1 3 2s2 1 3 2"/></svg>"#,
         )
         .expect("valid provider paths should be combined");
 
-        assert!(path.bounds().width() >= 12.0);
-        assert!(path.bounds().height() >= 11.0);
+        assert!(path.bounds().width() >= 15.0);
+        assert!(path.bounds().height() >= 13.0);
     }
 
     #[test]

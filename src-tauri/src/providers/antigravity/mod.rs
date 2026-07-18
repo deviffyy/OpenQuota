@@ -3,7 +3,7 @@ mod client;
 mod discovery;
 mod mapper;
 
-use std::sync::Mutex;
+use std::path::PathBuf;
 
 use chrono::Utc;
 use serde_json::{json, Value};
@@ -14,8 +14,8 @@ use crate::models::{
 };
 
 use self::{
-    auth::load_token,
-    client::{AntigravityClient, CloudOutcome, RefreshOutcome},
+    auth::{load_token, AccessTokenCache},
+    client::{AntigravityClient, CloudOutcome, CloudUserAgent, RefreshOutcome},
     discovery::discover,
     mapper::{
         build_legacy_quotas, parse_cloud_models, parse_command_model_configs, parse_plan,
@@ -87,26 +87,24 @@ pub enum AntigravityError {
     NotSignedIn,
     #[error("Antigravity sign-in expired. Open Antigravity or run `agy` to refresh.")]
     AuthExpired,
+    #[error("Antigravity credentials could not be read from secure storage.")]
+    CredentialStoreUnreadable,
+    #[error("Antigravity credentials are invalid. Sign in again in Antigravity or `agy`.")]
+    InvalidCredentialData,
     #[error("Antigravity usage is temporarily unavailable. Try again shortly.")]
     Unavailable,
 }
 
 pub struct AntigravityProvider {
     client: AntigravityClient,
-    refreshed_access_token: Mutex<Option<CachedAccessToken>>,
-}
-
-#[derive(Clone)]
-struct CachedAccessToken {
-    value: String,
-    credential_fingerprint: [u8; 32],
+    access_token_cache: AccessTokenCache,
 }
 
 impl AntigravityProvider {
-    pub fn new() -> Result<Self, AntigravityError> {
+    pub fn new(cache_path: PathBuf) -> Result<Self, AntigravityError> {
         Ok(Self {
             client: AntigravityClient::new()?,
-            refreshed_access_token: Mutex::new(None),
+            access_token_cache: AccessTokenCache::new(cache_path),
         })
     }
 
@@ -147,61 +145,79 @@ impl AntigravityProvider {
             }
         }
 
-        let keychain = load_token();
-        let source_fingerprint = keychain
-            .as_ref()
-            .and_then(|token| auth::credential_fingerprint(token.refresh_token.as_deref()));
-        let access_token =
-            matching_cached_access_token(&self.refreshed_access_token, source_fingerprint).or_else(
-                || {
-                    keychain.as_ref().and_then(|token| {
-                        let usable = token.expiry.is_none_or(|expiry| {
-                            expiry > Utc::now() + chrono::Duration::seconds(60)
-                        });
-                        usable.then(|| token.access_token.clone()).flatten()
-                    })
-                },
-            );
-        let tried_credentials = access_token.is_some();
-        if let Some(token) = access_token {
-            match self.fetch_remote(&token) {
+        let keychain = match load_token()? {
+            Some(token) => token,
+            None => {
+                self.access_token_cache.discard();
+                return Err(AntigravityError::NotSignedIn);
+            }
+        };
+        let now = Utc::now();
+        let cached = self
+            .access_token_cache
+            .load(keychain.refresh_token.as_deref(), now);
+        let (access_tokens, access_is_expired) = access_token_candidates(&keychain, cached, now);
+
+        let mut saw_auth_failure = access_is_expired;
+        let mut saw_unavailable = false;
+        for access_token in &access_tokens {
+            match self.fetch_remote(access_token) {
                 Ok(snapshot) => return Ok(snapshot),
-                Err(AntigravityError::AuthExpired) => {}
+                Err(AntigravityError::AuthExpired) => saw_auth_failure = true,
+                Err(AntigravityError::Unavailable) => saw_unavailable = true,
                 Err(error) => return Err(error),
             }
         }
 
-        if let Some(refresh_token) = keychain
-            .as_ref()
-            .and_then(|token| token.refresh_token.as_deref())
-        {
+        let refresh_token = keychain
+            .refresh_token
+            .as_deref()
+            .map(str::trim)
+            .filter(|token| !token.is_empty());
+        if let Some(refresh_token) = refresh_token.filter(|_| {
+            should_refresh_access_token(saw_auth_failure, !access_tokens.is_empty(), true)
+        }) {
             match self.client.refresh_google_token(refresh_token) {
-                RefreshOutcome::Refreshed { access_token } => {
+                RefreshOutcome::Refreshed {
+                    access_token,
+                    expires_in_seconds,
+                } => {
                     crate::app_info!("auth:antigravity", "token refresh succeeded");
-                    let snapshot = self.fetch_remote(&access_token)?;
-                    if let (Some(credential_fingerprint), Ok(mut cached)) =
-                        (source_fingerprint, self.refreshed_access_token.lock())
-                    {
-                        *cached = Some(CachedAccessToken {
-                            value: access_token,
-                            credential_fingerprint,
-                        });
-                    }
-                    return Ok(snapshot);
+                    self.access_token_cache.store(
+                        &access_token,
+                        expires_in_seconds,
+                        Some(refresh_token),
+                        Utc::now(),
+                    );
+                    return match self.fetch_remote(&access_token) {
+                        Err(AntigravityError::AuthExpired) => {
+                            self.access_token_cache.discard();
+                            Err(AntigravityError::AuthExpired)
+                        }
+                        result => result,
+                    };
                 }
-                RefreshOutcome::AuthFailed => return Err(AntigravityError::AuthExpired),
+                RefreshOutcome::AuthFailed => {
+                    self.access_token_cache.discard();
+                    return Err(AntigravityError::AuthExpired);
+                }
                 RefreshOutcome::Unavailable => return Err(AntigravityError::Unavailable),
             }
         }
-        if tried_credentials || keychain.is_some() {
-            Err(AntigravityError::AuthExpired)
-        } else {
-            Err(AntigravityError::NotSignedIn)
-        }
+        Err(credential_failure(
+            saw_auth_failure,
+            saw_unavailable,
+            !access_tokens.is_empty(),
+        ))
     }
 
     fn fetch_remote(&self, token: &str) -> Result<ProviderSnapshot, AntigravityError> {
-        match self.client.cloud_code(QUOTA_SUMMARY_PATH, token, json!({})) {
+        match self.client.cloud_code(
+            QUOTA_SUMMARY_PATH,
+            token,
+            json!({}),
+            CloudUserAgent::Antigravity,
+        ) {
             CloudOutcome::Ok(value) => {
                 if let Some(quotas) = parse_quota_summary(&value) {
                     return Ok(snapshot(self.load_remote_plan(token), quotas));
@@ -211,7 +227,12 @@ impl AntigravityProvider {
             CloudOutcome::Unavailable => {}
         }
 
-        match self.client.cloud_code(FETCH_MODELS_PATH, token, json!({})) {
+        match self.client.cloud_code(
+            FETCH_MODELS_PATH,
+            token,
+            json!({}),
+            CloudUserAgent::Antigravity,
+        ) {
             CloudOutcome::Ok(value) => {
                 let quotas = build_legacy_quotas(parse_cloud_models(&value));
                 if !quotas.is_empty() {
@@ -222,10 +243,12 @@ impl AntigravityProvider {
             CloudOutcome::Unavailable => {}
         }
 
-        let (plan, project) = match self
-            .client
-            .cloud_code(LOAD_CODE_ASSIST_PATH, token, json!({}))
-        {
+        let (plan, project) = match self.client.cloud_code(
+            LOAD_CODE_ASSIST_PATH,
+            token,
+            json!({}),
+            CloudUserAgent::Agy,
+        ) {
             CloudOutcome::Ok(value) => (
                 remote_plan(&value),
                 value
@@ -242,11 +265,13 @@ impl AntigravityProvider {
             .as_ref()
             .map(|project| json!({"project": project}))
             .unwrap_or_else(|| json!({}));
-        let mut quota = self.client.cloud_code(RETRIEVE_QUOTA_PATH, token, body);
+        let mut quota =
+            self.client
+                .cloud_code(RETRIEVE_QUOTA_PATH, token, body, CloudUserAgent::Agy);
         if matches!(quota, CloudOutcome::Unavailable) && project.is_some() {
-            quota = self
-                .client
-                .cloud_code(RETRIEVE_QUOTA_PATH, token, json!({}));
+            quota =
+                self.client
+                    .cloud_code(RETRIEVE_QUOTA_PATH, token, json!({}), CloudUserAgent::Agy);
         }
         match quota {
             CloudOutcome::Ok(value) => {
@@ -264,7 +289,7 @@ impl AntigravityProvider {
     fn load_remote_plan(&self, token: &str) -> Option<String> {
         match self
             .client
-            .cloud_code(LOAD_CODE_ASSIST_PATH, token, json!({}))
+            .cloud_code(LOAD_CODE_ASSIST_PATH, token, json!({}), CloudUserAgent::Agy)
         {
             CloudOutcome::Ok(value) => remote_plan(&value),
             _ => None,
@@ -272,19 +297,54 @@ impl AntigravityProvider {
     }
 }
 
-fn matching_cached_access_token(
-    cache: &Mutex<Option<CachedAccessToken>>,
-    source_fingerprint: Option<[u8; 32]>,
-) -> Option<String> {
-    let mut cache = cache.lock().ok()?;
-    let matches = cache
-        .as_ref()
-        .is_some_and(|cached| Some(cached.credential_fingerprint) == source_fingerprint);
-    if matches {
-        cache.as_ref().map(|cached| cached.value.clone())
+fn access_token_candidates(
+    source: &auth::AntigravityToken,
+    cached: Option<String>,
+    now: chrono::DateTime<Utc>,
+) -> (Vec<String>, bool) {
+    let access_is_expired = source.access_token.as_ref().is_some_and(|_| {
+        source
+            .expiry
+            .is_some_and(|expiry| expiry <= now + chrono::Duration::seconds(60))
+    });
+    let mut candidates = Vec::new();
+    if !access_is_expired {
+        if let Some(access_token) = source
+            .access_token
+            .as_deref()
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+        {
+            candidates.push(access_token.to_owned());
+        }
+    }
+    if let Some(cached) = cached.filter(|token| !token.trim().is_empty()) {
+        if !candidates.iter().any(|token| token == &cached) {
+            candidates.push(cached);
+        }
+    }
+    (candidates, access_is_expired)
+}
+
+fn should_refresh_access_token(
+    saw_auth_failure: bool,
+    has_access_candidate: bool,
+    has_refresh_token: bool,
+) -> bool {
+    has_refresh_token && (saw_auth_failure || !has_access_candidate)
+}
+
+fn credential_failure(
+    saw_auth_failure: bool,
+    saw_unavailable: bool,
+    tried_access_token: bool,
+) -> AntigravityError {
+    if saw_auth_failure {
+        AntigravityError::AuthExpired
+    } else if saw_unavailable || tried_access_token {
+        AntigravityError::Unavailable
     } else {
-        *cache = None;
-        None
+        AntigravityError::NotSignedIn
     }
 }
 
@@ -339,9 +399,10 @@ impl crate::providers::UsageProvider for AntigravityProvider {
             use crate::models::ProviderErrorKind as Kind;
 
             let kind = match error {
-                AntigravityError::NotSignedIn | AntigravityError::AuthExpired => {
-                    Kind::Authentication
-                }
+                AntigravityError::NotSignedIn
+                | AntigravityError::AuthExpired
+                | AntigravityError::InvalidCredentialData => Kind::Authentication,
+                AntigravityError::CredentialStoreUnreadable => Kind::CredentialStorage,
                 AntigravityError::Unavailable => Kind::Network,
             };
             crate::providers::ProviderError::from_display(kind, error)
@@ -351,22 +412,67 @@ impl crate::providers::UsageProvider for AntigravityProvider {
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::Cell, sync::Mutex};
+    use std::cell::Cell;
 
-    use super::{has_refresh_source, matching_cached_access_token, CachedAccessToken};
+    use chrono::{Duration, TimeZone, Utc};
+
+    use super::{
+        access_token_candidates, auth::AntigravityToken, credential_failure, has_refresh_source,
+        should_refresh_access_token, AntigravityError,
+    };
 
     #[test]
-    fn cached_access_token_is_bound_to_its_refresh_credential() {
-        let cache = Mutex::new(Some(CachedAccessToken {
-            value: "derived-access".into(),
-            credential_fingerprint: [1; 32],
-        }));
-        assert_eq!(
-            matching_cached_access_token(&cache, Some([1; 32])).as_deref(),
-            Some("derived-access")
-        );
-        assert!(matching_cached_access_token(&cache, Some([2; 32])).is_none());
-        assert!(cache.lock().unwrap().is_none());
+    fn keychain_access_token_precedes_a_distinct_cached_token() {
+        let now = Utc.with_ymd_and_hms(2026, 7, 18, 12, 0, 0).unwrap();
+        let source = AntigravityToken {
+            access_token: Some("keychain-access".into()),
+            refresh_token: Some("refresh".into()),
+            expiry: Some(now + Duration::hours(1)),
+        };
+
+        let (candidates, expired) =
+            access_token_candidates(&source, Some("cached-access".into()), now);
+        assert_eq!(candidates, ["keychain-access", "cached-access"]);
+        assert!(!expired);
+
+        let (deduplicated, _) =
+            access_token_candidates(&source, Some("keychain-access".into()), now);
+        assert_eq!(deduplicated, ["keychain-access"]);
+    }
+
+    #[test]
+    fn expiring_keychain_tokens_are_skipped_but_count_as_auth_evidence() {
+        let now = Utc.with_ymd_and_hms(2026, 7, 18, 12, 0, 0).unwrap();
+        let source = AntigravityToken {
+            access_token: Some("expiring".into()),
+            refresh_token: Some("refresh".into()),
+            expiry: Some(now + Duration::seconds(30)),
+        };
+
+        let (candidates, expired) = access_token_candidates(&source, None, now);
+        assert!(candidates.is_empty());
+        assert!(expired);
+    }
+
+    #[test]
+    fn refresh_and_terminal_error_decisions_preserve_auth_network_distinction() {
+        assert!(!should_refresh_access_token(false, true, true));
+        assert!(should_refresh_access_token(true, true, true));
+        assert!(should_refresh_access_token(false, false, true));
+        assert!(!should_refresh_access_token(true, true, false));
+
+        assert!(matches!(
+            credential_failure(true, false, true),
+            AntigravityError::AuthExpired
+        ));
+        assert!(matches!(
+            credential_failure(false, true, true),
+            AntigravityError::Unavailable
+        ));
+        assert!(matches!(
+            credential_failure(false, false, false),
+            AntigravityError::NotSignedIn
+        ));
     }
 
     #[test]

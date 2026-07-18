@@ -2,13 +2,17 @@ pub mod antigravity;
 pub mod api_key;
 pub mod claude;
 pub mod codex;
+pub mod copilot;
 pub mod credential_store;
 pub mod cursor;
 mod daily_usage;
 mod detection;
+pub mod devin;
 pub mod grok;
 mod log_usage;
+pub mod opencode;
 pub mod openrouter;
+mod pi_usage;
 mod registry;
 #[cfg(test)]
 pub mod test_http;
@@ -69,7 +73,10 @@ pub trait UsageProvider: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::{antigravity, claude, codex, cursor, grok, openrouter, zai, ProviderError};
+    use super::{
+        antigravity, claude, codex, copilot, cursor, devin, grok, opencode, openrouter, zai,
+        ProviderError,
+    };
     use crate::models::ProviderErrorKind;
 
     #[test]
@@ -126,8 +133,29 @@ mod tests {
         );
         assert!(links(antigravity::definition()).is_empty());
         assert_eq!(
+            links(copilot::definition()),
+            [
+                ("Status".into(), "https://www.githubstatus.com/".into()),
+                (
+                    "Dashboard".into(),
+                    "https://github.com/settings/billing".into()
+                ),
+            ]
+        );
+        assert_eq!(
+            links(devin::definition()),
+            [(
+                "Dashboard".into(),
+                "https://app.devin.ai/settings/plans".into()
+            )]
+        );
+        assert_eq!(
             links(grok::definition()),
             [("Usage".into(), "https://grok.com/?_s=usage".into())]
+        );
+        assert_eq!(
+            links(opencode::definition()),
+            [("Dashboard".into(), "https://opencode.ai/auth".into())]
         );
         assert_eq!(
             links(openrouter::definition()),

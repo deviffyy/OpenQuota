@@ -1,0 +1,17 @@
+{
+  "userStatus": {
+    "name": "Example User",
+    "email": "user@example.test",
+    "planStatus": {
+      "planInfo": {
+        "planName": "Max",
+        "billingStrategy": "BILLING_STRATEGY_QUOTA"
+      },
+      "dailyQuotaRemainingPercent": 100,
+      "weeklyQuotaRemainingPercent": 40,
+      "overageBalanceMicros": "964220000",
+      "dailyQuotaResetAtUnix": "1774080000",
+      "weeklyQuotaResetAtUnix": "1774166400"
+    }
+  }
+}

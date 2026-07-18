@@ -6,7 +6,7 @@ import {
   totalSpendRingCenter,
 } from './metricFormat';
 import { formatLimit, formatReset, projectPace } from './pacing';
-import { providerIconColor, providerIconPath } from './providerIconPaths';
+import { providerIconColor, providerIconPath, providerIconViewBox } from './providerIconPaths';
 import { fillRingSector, spendRingArcs } from './spendRing';
 import type { SpendProjection } from './totalSpend';
 import type {
@@ -653,12 +653,38 @@ function drawProviderMark(
 ) {
   const path = providerIconPath(providerId);
   if (!path || typeof Path2D === 'undefined') return;
+  const placement = providerIconPlacement(providerId, x, y, size);
   context.save();
-  context.translate(x, y);
-  context.scale(size / 100, size / 100);
+  context.translate(placement.x, placement.y);
+  context.scale(placement.scale, placement.scale);
   context.fillStyle = color;
   context.fill(new Path2D(path));
   context.restore();
+}
+
+export function providerIconPlacement(providerId: string, x: number, y: number, size: number) {
+  const values = providerIconViewBox(providerId)
+    .trim()
+    .split(/[\s,]+/)
+    .map(Number);
+  const [minX, minY, width, height] = values;
+  if (
+    values.length !== 4 ||
+    !values.every(Number.isFinite) ||
+    width <= 0 ||
+    height <= 0 ||
+    !Number.isFinite(size) ||
+    size <= 0
+  ) {
+    return { x, y, scale: size / 100 };
+  }
+
+  const scale = Math.min(size / width, size / height);
+  return {
+    x: x + (size - width * scale) / 2 - minX * scale,
+    y: y + (size - height * scale) / 2 - minY * scale,
+    scale,
+  };
 }
 
 function drawRoundedRect(

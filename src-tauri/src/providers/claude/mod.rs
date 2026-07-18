@@ -106,7 +106,7 @@ pub(crate) fn definition() -> ProviderDefinition {
 }
 
 use self::{
-    auth::{load_candidates, oauth_config, ClaudeCredential},
+    auth::{load_candidates, oauth_config, ClaudeCredential, ClaudeCredentialGeneration},
     client::ClaudeClient,
     local_usage::scan_local_usage,
     mapper::map_usage,
@@ -129,6 +129,8 @@ pub enum ClaudeError {
     InvalidOAuthUrl,
     #[error("Refreshed Claude credentials could not be saved.")]
     AuthWrite,
+    #[error("Claude login changed during refresh. Refresh again.")]
+    CredentialsChanged,
     #[error("Claude usage request failed (HTTP {0}).")]
     RequestFailed(u16),
     #[error("Claude returned an invalid usage response.")]
@@ -161,6 +163,22 @@ impl ClaudeProvider {
     }
 
     fn refresh_inner(&self) -> Result<ProviderSnapshot, ClaudeError> {
+        let mut credential_reloads_remaining = 1;
+        loop {
+            match self.refresh_inner_once() {
+                Err(ClaudeError::CredentialsChanged) if credential_reloads_remaining > 0 => {
+                    credential_reloads_remaining -= 1;
+                    crate::app_info!(
+                        "auth:claude",
+                        "credential source changed during refresh; reloading current login"
+                    );
+                }
+                result => return result,
+            }
+        }
+    }
+
+    fn refresh_inner_once(&self) -> Result<ProviderSnapshot, ClaudeError> {
         let candidates = load_candidates();
         if candidates.is_empty() {
             crate::app_info!("auth:claude", "no reusable CLI credentials found");
@@ -178,9 +196,16 @@ impl ClaudeProvider {
         let now = Utc::now();
         let config = oauth_config()?;
         let pricing = self.pricing.current();
+        let mut credential_generation = ClaudeCredentialGeneration::from_candidates(&candidates);
         let mut last_auth_error = None;
         for mut credential in candidates {
-            match self.refresh_candidate(&mut credential, &config, now, &pricing) {
+            match self.refresh_candidate(
+                &mut credential,
+                &config,
+                now,
+                &pricing,
+                &mut credential_generation,
+            ) {
                 Ok(snapshot) => return Ok(snapshot),
                 Err(error @ (ClaudeError::SessionExpired | ClaudeError::TokenExpired)) => {
                     last_auth_error = Some(error);
@@ -197,6 +222,7 @@ impl ClaudeProvider {
         config: &auth::ClaudeOAuthConfig,
         now: chrono::DateTime<Utc>,
         pricing: &ModelPricing,
+        credential_generation: &mut ClaudeCredentialGeneration,
     ) -> Result<ProviderSnapshot, ClaudeError> {
         let mut warnings = Vec::new();
         let usage = scan_or_cached_usage(
@@ -240,7 +266,14 @@ impl ClaudeProvider {
         self.activate_live_usage_cache(credential.fingerprint());
         if credential.needs_refresh(now.timestamp_millis()) {
             let previous_fingerprint = credential.fingerprint();
-            refresh_credential(&self.client, credential, config, now, &mut warnings)?;
+            refresh_credential(
+                &self.client,
+                credential,
+                config,
+                now,
+                &mut warnings,
+                credential_generation,
+            )?;
             self.replace_live_usage_fingerprint(previous_fingerprint, credential.fingerprint());
         }
 
@@ -282,10 +315,20 @@ impl ClaudeProvider {
         let (mut status, mut body, mut retry_after) = self.client.fetch_usage(token, config)?;
         if matches!(status, StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN) {
             let previous_fingerprint = credential.fingerprint();
-            refresh_credential(&self.client, credential, config, now, &mut warnings)?;
+            refresh_credential(
+                &self.client,
+                credential,
+                config,
+                now,
+                &mut warnings,
+                credential_generation,
+            )?;
             self.replace_live_usage_fingerprint(previous_fingerprint, credential.fingerprint());
             let token = credential.access_token().ok_or(ClaudeError::TokenExpired)?;
             (status, body, retry_after) = self.client.fetch_usage(token, config)?;
+        }
+        if auth::credential_generation() != *credential_generation {
+            return Err(ClaudeError::CredentialsChanged);
         }
         if status == StatusCode::TOO_MANY_REQUESTS {
             let retry = retry_after.unwrap_or(5 * 60);
@@ -416,6 +459,7 @@ fn refresh_credential(
     config: &auth::ClaudeOAuthConfig,
     now: chrono::DateTime<Utc>,
     warnings: &mut Vec<String>,
+    credential_generation: &mut ClaudeCredentialGeneration,
 ) -> Result<(), ClaudeError> {
     let refresh_token = credential
         .oauth
@@ -424,22 +468,30 @@ fn refresh_credential(
         .filter(|value| !value.is_empty())
         .ok_or(ClaudeError::TokenExpired)?;
     let refreshed = client.refresh_token(refresh_token, config)?;
-    if credential
-        .update_and_save(
-            refreshed.access_token,
-            refreshed.refresh_token,
-            refreshed.expires_in,
-            now.timestamp_millis(),
-        )
-        .is_err()
-    {
-        crate::app_error!(
-            "auth:claude",
-            "failed to persist rotated credentials; using them for this session only"
-        );
-        warnings.push(
-            "The refreshed Claude login is active for this session but could not be saved.".into(),
-        );
+    match credential.update_and_save(
+        refreshed.access_token,
+        refreshed.refresh_token,
+        refreshed.expires_in,
+        now.timestamp_millis(),
+        credential_generation,
+    ) {
+        Ok(true) => {
+            *credential_generation = credential_generation
+                .replacing(credential)
+                .ok_or(ClaudeError::CredentialsChanged)?;
+        }
+        Ok(false) => {}
+        Err(ClaudeError::CredentialsChanged) => return Err(ClaudeError::CredentialsChanged),
+        Err(_) => {
+            crate::app_error!(
+                "auth:claude",
+                "failed to persist rotated credentials; using them for this session only"
+            );
+            warnings.push(
+                "The refreshed Claude login is active for this session but could not be saved."
+                    .into(),
+            );
+        }
     }
     Ok(())
 }
@@ -471,7 +523,8 @@ impl crate::providers::UsageProvider for ClaudeProvider {
                 ClaudeError::NotLoggedIn
                 | ClaudeError::DesktopAppOnly
                 | ClaudeError::SessionExpired
-                | ClaudeError::TokenExpired => Kind::Authentication,
+                | ClaudeError::TokenExpired
+                | ClaudeError::CredentialsChanged => Kind::Authentication,
                 ClaudeError::InvalidOAuthUrl | ClaudeError::InvalidResponse => {
                     Kind::InvalidResponse
                 }

@@ -389,8 +389,12 @@ mod tests {
 
     use super::{map_usage, SESSION_PERIOD_SECONDS, WEEKLY_PERIOD_SECONDS};
     use crate::{
-        models::{MetricValueKind, ValueMetric},
-        providers::codex::client::UsageResponse,
+        models::{
+            AppSettings, MetricLayout, MetricSection, MetricValueKind, NotificationPreferences,
+            ProviderLayout, ProviderSnapshot, UsageHistory, ValueMetric,
+        },
+        pacing::NotificationEvaluator,
+        providers::{codex::client::UsageResponse, ProviderRegistry},
     };
 
     fn response(body: Value) -> UsageResponse {
@@ -456,6 +460,91 @@ mod tests {
         assert_eq!(mapped.quotas[0].id, "weekly");
         assert_eq!(mapped.quotas[0].used_percent, 5.0);
         assert_eq!(mapped.quotas[0].period_seconds, WEEKLY_PERIOD_SECONDS);
+    }
+
+    #[test]
+    fn weekly_only_mapping_cannot_reuse_a_stale_session_notification_baseline() {
+        let now = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
+        let registry =
+            ProviderRegistry::from_definitions(vec![crate::providers::codex::definition()])
+                .unwrap();
+        let settings = AppSettings {
+            providers: vec![ProviderLayout {
+                id: "codex".into(),
+                enabled: true,
+                detected: true,
+                expanded: false,
+                metrics: ["codex.session", "codex.weekly"]
+                    .into_iter()
+                    .map(|id| MetricLayout {
+                        id: id.into(),
+                        enabled: true,
+                        section: MetricSection::AlwaysVisible,
+                        pinned: false,
+                    })
+                    .collect(),
+            }],
+            notifications: NotificationPreferences {
+                almost_out: false,
+                cutting_it_close: false,
+                will_run_out: true,
+            },
+            ..AppSettings::default()
+        };
+        let snapshot = |duration: u64, used_percent: f64| {
+            let mapped = map_usage(
+                &response(json!({
+                    "rate_limit": {
+                        "primary_window": {
+                            "used_percent": used_percent,
+                            "limit_window_seconds": duration,
+                            "reset_after_seconds": duration / 2
+                        },
+                        "secondary_window": null
+                    }
+                })),
+                None,
+                now,
+            )
+            .unwrap();
+            ProviderSnapshot {
+                provider_id: "codex".into(),
+                plan: mapped.plan,
+                quotas: mapped.quotas,
+                value_metrics: mapped.value_metrics,
+                status_metrics: Vec::new(),
+                notices: Vec::new(),
+                usage: UsageHistory::default(),
+                warnings: Vec::new(),
+                refreshed_at: now,
+            }
+        };
+        let evaluator = NotificationEvaluator::default();
+
+        assert!(evaluator
+            .evaluate(
+                &snapshot(SESSION_PERIOD_SECONDS, 10.0),
+                &settings,
+                &registry,
+                now,
+            )
+            .is_empty());
+        assert!(evaluator
+            .evaluate(
+                &snapshot(WEEKLY_PERIOD_SECONDS, 60.0),
+                &settings,
+                &registry,
+                now,
+            )
+            .is_empty());
+        assert!(evaluator
+            .evaluate(
+                &snapshot(SESSION_PERIOD_SECONDS, 60.0),
+                &settings,
+                &registry,
+                now,
+            )
+            .is_empty());
     }
 
     #[test]

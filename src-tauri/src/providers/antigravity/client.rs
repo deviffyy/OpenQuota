@@ -15,6 +15,7 @@ const GOOGLE_CLIENT_ID: &str =
 // Installed-app OAuth clients cannot keep this value confidential. Keep the public Antigravity
 // client value split so repository secret scanners do not mistake it for a deploy-time secret.
 const GOOGLE_CLIENT_SECRET_PARTS: [&str; 2] = ["GOCSPX-", "K58FWR486LdLJ1mLB8sXC4z6qDAf"];
+const DEFAULT_TOKEN_LIFETIME_SECONDS: f64 = 3_600.0;
 
 pub struct AntigravityClient {
     local: Client,
@@ -29,8 +30,26 @@ pub enum CloudOutcome {
     Unavailable,
 }
 
+#[derive(Clone, Copy)]
+pub enum CloudUserAgent {
+    Antigravity,
+    Agy,
+}
+
+impl CloudUserAgent {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Antigravity => "antigravity",
+            Self::Agy => "agy",
+        }
+    }
+}
+
 pub enum RefreshOutcome {
-    Refreshed { access_token: String },
+    Refreshed {
+        access_token: String,
+        expires_in_seconds: f64,
+    },
     AuthFailed,
     Unavailable,
 }
@@ -38,6 +57,7 @@ pub enum RefreshOutcome {
 #[derive(Deserialize)]
 struct GoogleTokenResponse {
     access_token: Option<String>,
+    expires_in: Option<f64>,
 }
 
 impl AntigravityClient {
@@ -117,14 +137,20 @@ impl AntigravityClient {
         None
     }
 
-    pub fn cloud_code(&self, path: &str, token: &str, body: Value) -> CloudOutcome {
+    pub fn cloud_code(
+        &self,
+        path: &str,
+        token: &str,
+        body: Value,
+        user_agent: CloudUserAgent,
+    ) -> CloudOutcome {
         for base in &self.cloud_bases {
             let response = self
                 .remote
                 .post(format!("{base}{path}"))
                 .bearer_auth(token)
                 .header("Accept", "application/json")
-                .header("User-Agent", "antigravity")
+                .header("User-Agent", user_agent.as_str())
                 .json(&body)
                 .send();
             let Ok(response) = response else {
@@ -177,9 +203,20 @@ impl AntigravityClient {
             return response
                 .json::<GoogleTokenResponse>()
                 .ok()
-                .and_then(|body| body.access_token)
-                .filter(|token| !token.is_empty())
-                .map(|access_token| RefreshOutcome::Refreshed { access_token })
+                .and_then(|body| {
+                    let access_token = body.access_token?.trim().to_owned();
+                    if access_token.is_empty() {
+                        return None;
+                    }
+                    let expires_in_seconds = body
+                        .expires_in
+                        .filter(|seconds| seconds.is_finite() && *seconds > 0.0)
+                        .unwrap_or(DEFAULT_TOKEN_LIFETIME_SECONDS);
+                    Some(RefreshOutcome::Refreshed {
+                        access_token,
+                        expires_in_seconds,
+                    })
+                })
                 .unwrap_or(RefreshOutcome::Unavailable);
         }
         if response.status().is_client_error()
@@ -201,7 +238,7 @@ mod tests {
 
     use serde_json::json;
 
-    use super::{AntigravityClient, CloudOutcome, RefreshOutcome};
+    use super::{AntigravityClient, CloudOutcome, CloudUserAgent, RefreshOutcome};
     use crate::providers::test_http;
 
     fn client(base: &str) -> AntigravityClient {
@@ -216,7 +253,12 @@ mod tests {
     #[test]
     fn cloud_success_and_auth_failures_are_distinct() {
         let success = test_http::serve_once(200, &[], r#"{"quota":"available"}"#);
-        match client(&success).cloud_code("/quota", "secret-token", json!({})) {
+        match client(&success).cloud_code(
+            "/quota",
+            "secret-token",
+            json!({}),
+            CloudUserAgent::Antigravity,
+        ) {
             CloudOutcome::Ok(body) => assert_eq!(body["quota"], "available"),
             _ => panic!("successful cloud response should be returned"),
         }
@@ -224,7 +266,12 @@ mod tests {
         for status in [401, 403] {
             let base = test_http::serve_once(status, &[], r#"{"token":"secret-token"}"#);
             assert!(matches!(
-                client(&base).cloud_code("/quota", "secret-token", json!({})),
+                client(&base).cloud_code(
+                    "/quota",
+                    "secret-token",
+                    json!({}),
+                    CloudUserAgent::Antigravity,
+                ),
                 CloudOutcome::AuthFailed
             ));
         }
@@ -234,23 +281,36 @@ mod tests {
     fn cloud_rate_limits_and_malformed_json_are_unavailable() {
         let limited = test_http::serve_once(429, &[], r#"{"error":"slow_down"}"#);
         assert!(matches!(
-            client(&limited).cloud_code("/quota", "secret-token", json!({})),
+            client(&limited).cloud_code("/quota", "secret-token", json!({}), CloudUserAgent::Agy,),
             CloudOutcome::Unavailable
         ));
 
         let malformed = test_http::serve_once(200, &[], "secret-token: not-json");
         assert!(matches!(
-            client(&malformed).cloud_code("/quota", "secret-token", json!({})),
+            client(&malformed)
+                .cloud_code("/quota", "secret-token", json!({}), CloudUserAgent::Agy,),
             CloudOutcome::Unavailable
         ));
     }
 
     #[test]
     fn token_refresh_maps_success_auth_failure_and_timeout() {
-        let success = test_http::serve_once(200, &[], r#"{"access_token":"fresh-token"}"#);
+        let success = test_http::serve_once(
+            200,
+            &[],
+            r#"{"access_token":"fresh-token","expires_in":1800}"#,
+        );
         assert!(matches!(
             client(&success).refresh_google_token("secret-refresh"),
-            RefreshOutcome::Refreshed { access_token } if access_token == "fresh-token"
+            RefreshOutcome::Refreshed { access_token, expires_in_seconds }
+                if access_token == "fresh-token" && expires_in_seconds == 1800.0
+        ));
+
+        let missing_expiry = test_http::serve_once(200, &[], r#"{"access_token":"fresh-token"}"#);
+        assert!(matches!(
+            client(&missing_expiry).refresh_google_token("secret-refresh"),
+            RefreshOutcome::Refreshed { expires_in_seconds, .. }
+                if expires_in_seconds == 3600.0
         ));
 
         let forbidden = test_http::serve_once(403, &[], r#"{"error":"forbidden"}"#);

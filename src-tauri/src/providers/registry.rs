@@ -439,14 +439,21 @@ mod tests {
 
     #[test]
     fn builtin_provider_catalog_keeps_the_product_defaults() {
-        use crate::providers::{antigravity, claude, codex, cursor, openrouter};
+        use crate::providers::{
+            antigravity, claude, codex, copilot, cursor, devin, grok, opencode, openrouter, zai,
+        };
 
         let registry = ProviderRegistry::new(vec![
             runtime(claude::definition()),
             runtime(codex::definition()),
             runtime(cursor::definition()),
             runtime(antigravity::definition()),
+            runtime(copilot::definition()),
+            runtime(devin::definition()),
+            runtime(grok::definition()),
+            runtime(opencode::definition()),
             runtime(openrouter::definition()),
+            runtime(zai::definition()),
         ])
         .unwrap();
         let catalog = registry.catalog();
@@ -457,7 +464,18 @@ mod tests {
                 .iter()
                 .map(|provider| provider.id.as_str())
                 .collect::<Vec<_>>(),
-            ["claude", "codex", "cursor", "antigravity", "openrouter"]
+            [
+                "claude",
+                "codex",
+                "cursor",
+                "antigravity",
+                "copilot",
+                "devin",
+                "grok",
+                "opencode",
+                "openrouter",
+                "zai",
+            ]
         );
         assert_eq!(
             registry
@@ -483,8 +501,17 @@ mod tests {
         assert!(registry.definition("codex").unwrap().fallback_enabled);
         assert!(registry.definition("claude").unwrap().fallback_enabled);
         assert!(registry.definition("cursor").unwrap().fallback_enabled);
-        assert!(!registry.definition("antigravity").unwrap().fallback_enabled);
-        assert!(!registry.definition("openrouter").unwrap().fallback_enabled);
+        for provider_id in [
+            "antigravity",
+            "copilot",
+            "devin",
+            "grok",
+            "opencode",
+            "openrouter",
+            "zai",
+        ] {
+            assert!(!registry.definition(provider_id).unwrap().fallback_enabled);
+        }
         assert!(registry
             .metric("claude.session")
             .unwrap()

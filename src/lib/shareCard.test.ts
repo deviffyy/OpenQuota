@@ -4,6 +4,7 @@ import { ProviderCatalogIndex } from './metrics';
 import totalSpendSource from './TotalSpend.svelte?raw';
 import {
   buildProviderShareRows as buildProviderShareRowsWithCatalog,
+  providerIconPlacement,
   providerShareCardHeight,
   renderTotalSpendShareCard as renderTotalSpendShareCardWithCatalog,
   SHARE_CARD_SCALE,
@@ -37,6 +38,23 @@ describe('share card layout', () => {
   it('uses the authored width and 4x export scale', () => {
     expect(SHARE_CARD_WIDTH).toBe(360);
     expect(SHARE_CARD_SCALE).toBe(4);
+  });
+
+  it('aspect-fits non-100 provider viewBoxes in exported headers', () => {
+    expect(providerIconPlacement('codex', 16, 16, 22)).toEqual({
+      x: 16,
+      y: 16,
+      scale: 0.22,
+    });
+    expect(providerIconPlacement('devin', 16, 16, 22)).toEqual({
+      x: 17.32,
+      y: 16,
+      scale: 0.44,
+    });
+    const opencode = providerIconPlacement('opencode', 16, 16, 22);
+    expect(opencode.x).toBeCloseTo(18.2);
+    expect(opencode.y).toBe(16);
+    expect(opencode.scale).toBeCloseTo(22 / 30);
   });
 
   it('exports only the provider rows visible on the dashboard', () => {

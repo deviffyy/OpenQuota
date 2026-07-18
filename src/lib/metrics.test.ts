@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { providerCatalog } from '../test/appFixtures';
-import { ProviderCatalogIndex } from './metrics';
+import { codexState, providerCatalog } from '../test/appFixtures';
+import { ProviderCatalogIndex, usageSourceNote } from './metrics';
 
 describe('provider catalog index', () => {
   it('indexes provider identity and metric metadata from bootstrap data', () => {
@@ -32,6 +32,21 @@ describe('provider catalog index', () => {
     expect(catalog.localUsageSourceNote('future-provider')).toBe(
       'From your future-provider usage history',
     );
+  });
+
+  it('prefers the snapshot usage source when an additional local source contributed', () => {
+    const catalog = new ProviderCatalogIndex(providerCatalog);
+    const snapshot = structuredClone(codexState.snapshot!);
+    snapshot.usage.last30Days!.modelBreakdown = {
+      models: [],
+      sourceNote: 'From your Codex logs and pi (estimated)',
+    };
+
+    expect(usageSourceNote(catalog, snapshot)).toBe('From your Codex logs and pi (estimated)');
+    snapshot.usage.last30Days!.modelBreakdown = null;
+    snapshot.usage.today!.modelBreakdown = null;
+    snapshot.usage.yesterday!.modelBreakdown = null;
+    expect(usageSourceNote(catalog, snapshot)).toBe('From your Codex logs (estimated)');
   });
 
   it('rejects duplicate provider and metric ids at the frontend boundary', () => {

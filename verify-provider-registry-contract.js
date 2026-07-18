@@ -21,7 +21,8 @@ const frontendConsumers = [
   'src/lib/metrics.ts',
   'src/lib/shareCard.ts',
 ];
-const providerLiteral = /["'](?:claude|codex|cursor|antigravity|openrouter)["']/;
+const providerLiteral =
+  /["'](?:claude|codex|cursor|antigravity|copilot|devin|grok|opencode|openrouter|zai)["']/;
 
 for (const file of rustConsumers) {
   const source = fs.readFileSync(new URL(file, root), 'utf8').split('#[cfg(test)]')[0];
@@ -67,6 +68,32 @@ const compositionRoot = fs.readFileSync(new URL('src-tauri/src/lib.rs', root), '
 if (/\.has_local_credentials\(\)/.test(compositionRoot)) {
   throw new Error('Tauri setup must not synchronously probe provider credentials.');
 }
+const runtimeBlock = compositionRoot.match(
+  /let providers:\s*Vec<Arc<dyn UsageProvider>>\s*=\s*vec!\[([\s\S]*?)\];/,
+)?.[1];
+if (!runtimeBlock) {
+  throw new Error('Tauri setup does not expose the provider runtime list.');
+}
+const runtimeOrder = [...runtimeBlock.matchAll(/Arc::new\((\w+Provider)::new\b/g)].map(
+  ([, provider]) => provider,
+);
+const expectedRuntimeOrder = [
+  'ClaudeProvider',
+  'CodexProvider',
+  'CursorProvider',
+  'AntigravityProvider',
+  'CopilotProvider',
+  'DevinProvider',
+  'GrokProvider',
+  'OpenCodeProvider',
+  'OpenRouterProvider',
+  'ZaiProvider',
+];
+if (runtimeOrder.join(',') !== expectedRuntimeOrder.join(',')) {
+  throw new Error(
+    `Tauri provider runtime order is incomplete: expected ${expectedRuntimeOrder.join(', ')}, got ${runtimeOrder.join(', ')}`,
+  );
+}
 
 const credentialDetection = fs.readFileSync(
   new URL('src-tauri/src/providers/detection.rs', root),
@@ -88,5 +115,5 @@ if (/pub fn open_provider_link[\s\S]*?url:\s*String/.test(providerCommands)) {
 }
 
 console.log(
-  `${rustConsumers.length + frontendConsumers.length} provider consumers use registry metadata without provider-id or suffix inference.`,
+  `${rustConsumers.length + frontendConsumers.length} provider consumers use registry metadata and ${runtimeOrder.length} runtimes keep the canonical order.`,
 );

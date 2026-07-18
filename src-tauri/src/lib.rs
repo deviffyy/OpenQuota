@@ -45,9 +45,10 @@ use crate::{
     pricing::PricingStore,
     providers::{
         antigravity::AntigravityProvider, claude::ClaudeProvider,
-        codex::reset_claim::CodexResetClaimService, codex::CodexProvider, cursor::CursorProvider,
-        detect_local_credentials, grok::GrokProvider, openrouter::OpenRouterProvider,
-        zai::ZaiProvider, ProviderRegistry, UsageProvider,
+        codex::reset_claim::CodexResetClaimService, codex::CodexProvider, copilot::CopilotProvider,
+        cursor::CursorProvider, detect_local_credentials, devin::DevinProvider, grok::GrokProvider,
+        opencode::OpenCodeProvider, openrouter::OpenRouterProvider, zai::ZaiProvider,
+        ProviderRegistry, UsageProvider,
     },
     storage::Storage,
     window::{handle_window_event, open_screen, show_popup, toggle_popup, MAIN_WINDOW},
@@ -208,18 +209,22 @@ pub fn run() {
             );
             app.manage(desktop_integration.clone());
 
-            let database_path = app.path().app_data_dir()?.join("openquota.db");
+            let app_data_dir = app.path().app_data_dir()?;
+            let database_path = app_data_dir.join("openquota.db");
             let storage = Arc::new(Storage::open(&database_path)?);
             app_debug!("cache", "application database opened");
-            let pricing = Arc::new(PricingStore::new(
-                app.path().app_data_dir()?.join("pricing"),
-            )?);
+            let pricing = Arc::new(PricingStore::new(app_data_dir.join("pricing"))?);
             let providers: Vec<Arc<dyn UsageProvider>> = vec![
                 Arc::new(ClaudeProvider::new(storage.clone(), pricing.clone())?),
                 Arc::new(CodexProvider::new(storage.clone(), pricing.clone())?),
                 Arc::new(CursorProvider::new(pricing.clone())?),
-                Arc::new(AntigravityProvider::new()?),
+                Arc::new(AntigravityProvider::new(
+                    app_data_dir.join("antigravity").join("auth.json"),
+                )?),
+                Arc::new(CopilotProvider::new()?),
+                Arc::new(DevinProvider::new()?),
                 Arc::new(GrokProvider::new(storage.clone(), pricing.clone())?),
+                Arc::new(OpenCodeProvider::new(pricing.clone())),
                 Arc::new(OpenRouterProvider::new()?),
                 Arc::new(ZaiProvider::new()?),
             ];
