@@ -83,10 +83,7 @@ impl ProviderService {
             .map(|value| value.clone())
             .unwrap_or_default();
         for state in providers.values_mut() {
-            if let Some(snapshot) = state.snapshot.as_ref() {
-                state.stale |=
-                    Utc::now().signed_duration_since(snapshot.refreshed_at) >= STALE_AFTER;
-            }
+            update_staleness_from_snapshot_age(state);
         }
         let last_full_refresh_at = self
             .last_full_refresh_at
@@ -304,11 +301,14 @@ impl ProviderService {
     }
 
     fn provider_state(&self, provider_id: &str) -> ProviderViewState {
-        self.states
+        let mut state = self
+            .states
             .read()
             .ok()
             .and_then(|states| states.get(provider_id).cloned())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        update_staleness_from_snapshot_age(&mut state);
+        state
     }
 
     fn apply_refresh_result(
@@ -553,10 +553,15 @@ fn merge_refresh_result(
         Err(error) => {
             state.error_kind = Some(error.kind());
             state.error = Some(error.to_string());
-            state.stale = state.snapshot.is_some();
         }
     }
     state.refreshing = false;
+}
+
+fn update_staleness_from_snapshot_age(state: &mut ProviderViewState) {
+    state.stale = state.snapshot.as_ref().is_some_and(|snapshot| {
+        Utc::now().signed_duration_since(snapshot.refreshed_at) >= STALE_AFTER
+    });
 }
 
 #[cfg(test)]
@@ -580,10 +585,10 @@ mod tests {
     use crate::{
         models::{
             MetricDefinition, MetricSection, MetricSource, ProviderDefinition, ProviderErrorKind,
-            ProviderSnapshot, ProviderViewState, QuotaFormat, QuotaWindow, StatusMetric,
-            StatusTone, UsageHistory,
+            ProviderSnapshot, ProviderViewState, QuotaFormat, QuotaWindow, SnapshotSource,
+            StatusMetric, StatusTone, UsageHistory,
         },
-        policy::FAILURE_RETRY_BACKOFF,
+        policy::{FAILURE_RETRY_BACKOFF, STALE_AFTER},
         providers::{ProviderError, ProviderRegistry, UsageProvider},
         storage::Storage,
     };
@@ -680,7 +685,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_refresh_preserves_last_successful_snapshot() {
+    fn failed_refresh_preserves_last_successful_snapshot_without_forcing_stale() {
         let snapshot = ProviderSnapshot {
             provider_id: "codex".into(),
             plan: None,
@@ -701,9 +706,37 @@ mod tests {
             Err(ProviderError::new(ProviderErrorKind::Network, "offline")),
         );
         assert_eq!(state.snapshot, Some(snapshot));
-        assert!(state.stale);
+        assert!(!state.stale);
         assert_eq!(state.error.as_deref(), Some("offline"));
         assert_eq!(state.error_kind, Some(ProviderErrorKind::Network));
+    }
+
+    #[test]
+    fn cached_snapshot_staleness_is_based_on_snapshot_age() {
+        let directory = tempdir().unwrap();
+        let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
+        let provider = Arc::new(SlowProvider {
+            id: "cached",
+            calls: Arc::new(AtomicUsize::new(0)),
+            active: Arc::new(AtomicUsize::new(0)),
+            maximum: Arc::new(AtomicUsize::new(0)),
+            delay: Duration::ZERO,
+        }) as Arc<dyn UsageProvider>;
+        let registry = Arc::new(ProviderRegistry::new(vec![provider]).unwrap());
+
+        storage.save_snapshot(&test_snapshot("cached")).unwrap();
+        let fresh_service = ProviderService::new(registry.clone(), storage.clone());
+        let fresh = fresh_service.state();
+        let fresh = fresh.providers.get("cached").unwrap();
+        assert_eq!(fresh.source, SnapshotSource::Cache);
+        assert!(!fresh.stale);
+
+        let mut old_snapshot = test_snapshot("cached");
+        old_snapshot.refreshed_at = Utc::now() - STALE_AFTER - chrono::Duration::seconds(1);
+        storage.save_snapshot(&old_snapshot).unwrap();
+        let old_service = ProviderService::new(registry, storage);
+        let old = old_service.state();
+        assert!(old.providers.get("cached").unwrap().stale);
     }
 
     #[test]
@@ -882,7 +915,7 @@ mod tests {
             Some("Provider refresh timed out.")
         );
         assert_eq!(timed_out.error_kind, Some(ProviderErrorKind::Network));
-        assert!(timed_out.stale);
+        assert!(!timed_out.stale);
         assert_eq!(
             timed_out
                 .snapshot

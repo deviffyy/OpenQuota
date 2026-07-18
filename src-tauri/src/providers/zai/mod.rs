@@ -40,7 +40,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 "zai.session",
                 "Session",
                 "session",
-                true,
+                false,
                 true,
                 MetricSection::AlwaysVisible,
                 true,
@@ -461,6 +461,7 @@ mod tests {
             MetricSection::AlwaysVisible
         );
         assert!(metric("zai.session").default_pinned);
+        assert!(!metric("zai.session").source.session_window());
         assert_eq!(
             metric("zai.weekly").default_section,
             MetricSection::AlwaysVisible

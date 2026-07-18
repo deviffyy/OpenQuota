@@ -247,7 +247,6 @@ impl ProviderViewState {
         Self {
             snapshot: Some(snapshot),
             source: SnapshotSource::Cache,
-            stale: true,
             ..Self::default()
         }
     }

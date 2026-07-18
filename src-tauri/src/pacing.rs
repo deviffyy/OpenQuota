@@ -229,18 +229,6 @@ impl NotificationEvaluator {
             return Vec::new();
         };
         let mut alerts = Vec::new();
-        let provider_metric_ids = provider_definition
-            .metrics
-            .iter()
-            .filter(|metric| {
-                matches!(
-                    metric.source,
-                    MetricSource::Quota { .. } | MetricSource::QuotaOrValue { .. }
-                )
-            })
-            .map(|metric| metric.id.as_str())
-            .collect::<HashSet<_>>();
-        let mut present_metric_ids = HashSet::new();
         for window in &snapshot.quotas {
             let Some(metric_definition) = provider_definition.metrics.iter().find(|metric| {
                 matches!(
@@ -256,7 +244,6 @@ impl NotificationEvaluator {
                 continue;
             }
             let metric_id = metric_definition.id.clone();
-            present_metric_ids.insert(metric_id.clone());
             let is_session_window = metric_definition.source.session_window();
             let projection = project(window, now, is_session_window);
             let state = states.entry(metric_id.clone()).or_default();
@@ -278,10 +265,6 @@ impl NotificationEvaluator {
             }
             alerts.extend(new_alerts);
         }
-        states.retain(|metric_id, _| {
-            !provider_metric_ids.contains(metric_id.as_str())
-                || present_metric_ids.contains(metric_id)
-        });
         alerts
     }
 }
@@ -742,7 +725,7 @@ mod tests {
     }
 
     #[test]
-    fn evaluator_prunes_quota_state_missing_from_a_successful_snapshot() {
+    fn evaluator_preserves_quota_state_missing_from_a_successful_snapshot() {
         let quota_metric = |id: &str, source_id: &str, label: &str| {
             MetricDefinition::new(
                 id,
@@ -793,8 +776,14 @@ mod tests {
                     },
                 ],
             }],
+            notifications: NotificationPreferences {
+                will_run_out: true,
+                ..NotificationPreferences::default()
+            },
             ..AppSettings::default()
         };
+        let now = Utc::now();
+        let resets_at = now + Duration::hours(4);
         let snapshot = |source_id: &str, label: &str, used_percent: f64| ProviderSnapshot {
             provider_id: "switching".into(),
             plan: None,
@@ -802,7 +791,7 @@ mod tests {
                 id: source_id.into(),
                 label: label.into(),
                 used_percent,
-                resets_at: Some(Utc::now() + Duration::hours(4)),
+                resets_at: Some(resets_at),
                 period_seconds: 18_000,
                 format: crate::models::QuotaFormat::Percent,
                 used_value: None,
@@ -816,7 +805,7 @@ mod tests {
             notices: Vec::new(),
             usage: UsageHistory::default(),
             warnings: Vec::new(),
-            refreshed_at: Utc::now(),
+            refreshed_at: now,
         };
         let evaluator = NotificationEvaluator::default();
 
@@ -824,7 +813,7 @@ mod tests {
             &snapshot("session", "Session", 10.0),
             &settings,
             &registry,
-            Utc::now(),
+            now,
         );
         assert!(evaluator
             .states
@@ -836,20 +825,21 @@ mod tests {
             &snapshot("weekly", "Weekly", 20.0),
             &settings,
             &registry,
-            Utc::now(),
+            now,
         );
         let states = evaluator.states.lock().unwrap();
-        assert!(!states.contains_key("switching.session"));
+        assert!(states.contains_key("switching.session"));
         assert!(states.contains_key("switching.weekly"));
         drop(states);
 
         let alerts = evaluator.evaluate(
-            &snapshot("session", "Session", 95.0),
+            &snapshot("session", "Session", 80.0),
             &settings,
             &registry,
-            Utc::now(),
+            now,
         );
-        assert!(alerts.is_empty());
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].milestone, Milestone::WillRunOut);
     }
 
     #[test]

@@ -155,6 +155,7 @@ fn definition_exposes_the_complete_metric_contract() {
         .metrics
         .iter()
         .all(|metric| !metric.default_pinned));
+    assert!(!definition.metrics[0].source.session_window());
 }
 
 #[test]

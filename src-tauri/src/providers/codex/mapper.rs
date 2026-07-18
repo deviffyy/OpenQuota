@@ -393,7 +393,7 @@ mod tests {
             AppSettings, MetricLayout, MetricSection, MetricValueKind, NotificationPreferences,
             ProviderLayout, ProviderSnapshot, UsageHistory, ValueMetric,
         },
-        pacing::NotificationEvaluator,
+        pacing::{Milestone, NotificationEvaluator},
         providers::{codex::client::UsageResponse, ProviderRegistry},
     };
 
@@ -463,7 +463,7 @@ mod tests {
     }
 
     #[test]
-    fn weekly_only_mapping_cannot_reuse_a_stale_session_notification_baseline() {
+    fn weekly_only_mapping_keeps_session_and_weekly_notification_baselines_separate() {
         let now = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
         let registry =
             ProviderRegistry::from_definitions(vec![crate::providers::codex::definition()])
@@ -537,14 +537,15 @@ mod tests {
                 now,
             )
             .is_empty());
-        assert!(evaluator
-            .evaluate(
-                &snapshot(SESSION_PERIOD_SECONDS, 60.0),
-                &settings,
-                &registry,
-                now,
-            )
-            .is_empty());
+        let alerts = evaluator.evaluate(
+            &snapshot(SESSION_PERIOD_SECONDS, 60.0),
+            &settings,
+            &registry,
+            now,
+        );
+        assert_eq!(alerts.len(), 1);
+        assert_eq!(alerts[0].metric, "Session");
+        assert_eq!(alerts[0].milestone, Milestone::WillRunOut);
     }
 
     #[test]

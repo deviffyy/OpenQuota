@@ -6,7 +6,6 @@
   import { pointerReorder } from './pointerReorder';
   import ProviderIcon from './ProviderIcon.svelte';
   import ProviderLinks from './ProviderLinks.svelte';
-  import ProviderLinksExpander from './ProviderLinksExpander.svelte';
   import ProviderNoticeRow from './ProviderNoticeRow.svelte';
   import Icon from './Icon.svelte';
   import MetricRenderer from './MetricRenderer.svelte';
@@ -17,6 +16,7 @@
     AppSettings,
     MetricLayout,
     ProviderLayout,
+    ProviderSnapshot,
     UpdateProgress,
     UpdateFailure,
     UsageHistory,
@@ -82,6 +82,19 @@
     daily: [],
     unknownModels: [],
   };
+  function emptyProviderSnapshot(providerId: string): ProviderSnapshot {
+    return {
+      providerId,
+      plan: null,
+      quotas: [],
+      valueMetrics: [],
+      statusMetrics: [],
+      notices: [],
+      usage: emptyUsage,
+      warnings: [],
+      refreshedAt: '1970-01-01T00:00:00.000Z',
+    };
+  }
   let providerMenu = $state<{ id: string; x: number; y: number } | null>(null);
   let metricMenu = $state<{ providerId: string; metricId: string; x: number; y: number } | null>(
     null,
@@ -90,17 +103,21 @@
   let demandMorphTimer: ReturnType<typeof setTimeout> | undefined;
   const enabledProviders = $derived(settings.providers.filter((provider) => provider.enabled));
   const dashboardProviders = $derived(
-    enabledProviders.map((provider) => ({
-      provider,
-      state: viewState.providers[provider.id],
-      alwaysMetrics: provider.metrics.filter(
-        (metric) => metric.enabled && metric.section === 'alwaysVisible',
-      ),
-      demandMetrics: provider.metrics.filter(
-        (metric) => metric.enabled && metric.section === 'onDemand',
-      ),
-      links: catalog.provider(provider.id)?.links ?? [],
-    })),
+    enabledProviders.map((provider) => {
+      const state = viewState.providers[provider.id];
+      return {
+        provider,
+        state,
+        snapshot: state?.snapshot ?? emptyProviderSnapshot(provider.id),
+        alwaysMetrics: provider.metrics.filter(
+          (metric) => metric.enabled && metric.section === 'alwaysVisible',
+        ),
+        demandMetrics: provider.metrics.filter(
+          (metric) => metric.enabled && metric.section === 'onDemand',
+        ),
+        links: catalog.provider(provider.id)?.links ?? [],
+      };
+    }),
   );
   const providerUsage = $derived(
     enabledProviders
@@ -375,240 +392,62 @@
   />
 {/if}
 
-{#each dashboardProviders as { provider, state, alwaysMetrics, demandMetrics, links } (provider.id)}
+{#each dashboardProviders as { provider, state, snapshot, alwaysMetrics, demandMetrics, links } (provider.id)}
   <div
     class="provider-reorder-shell"
     class:provider-reorder-shell--content-morph={demandMorphing}
     animate:flip={reorderFlip(reducedMotion || demandMorphing)}
   >
-    {#if state?.snapshot}
-      <section
-        class="provider-section"
-        data-provider-id={provider.id}
-        data-reorder-group="dashboard-providers"
-        data-reorder-id={provider.id}
+    <section
+      class="provider-section"
+      data-provider-id={provider.id}
+      data-reorder-group="dashboard-providers"
+      data-reorder-id={provider.id}
+      role="group"
+      aria-label={`${providerDisplayName(provider.id)} provider`}
+      use:pointerReorder={{
+        id: provider.id,
+        group: 'dashboard-providers',
+        label: providerDisplayName(provider.id),
+        gripOnly: true,
+        touchGripOnly: true,
+        onReorder: (targetId) => reorderProvider(provider.id, targetId),
+        onStart: onReorderStart,
+        onEnd: onReorderEnd,
+      }}
+      oncontextmenu={(event) => openProviderMenu(event, provider.id)}
+    >
+      <header
+        class="provider-header"
+        data-reorder-handle
         role="group"
-        aria-label={`${providerDisplayName(provider.id)} provider`}
-        use:pointerReorder={{
-          id: provider.id,
-          group: 'dashboard-providers',
-          label: providerDisplayName(provider.id),
-          gripOnly: true,
-          touchGripOnly: true,
-          onReorder: (targetId) => reorderProvider(provider.id, targetId),
-          onStart: onReorderStart,
-          onEnd: onReorderEnd,
-        }}
-        oncontextmenu={(event) => openProviderMenu(event, provider.id)}
+        aria-label={`Drag ${providerDisplayName(provider.id)} to reorder`}
       >
-        <header
-          class="provider-header"
+        <span
+          class="drag-grip"
           data-reorder-handle
-          role="group"
-          aria-label={`Drag ${providerDisplayName(provider.id)} to reorder`}
+          data-reorder-touch-handle
+          role="button"
+          tabindex="0"
+          aria-label={`Move ${providerDisplayName(provider.id)}`}
+          aria-describedby="reorder-instructions"
+          aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"><Icon name="grip-dots" size={13} /></span
         >
-          <span
-            class="drag-grip"
-            data-reorder-handle
-            data-reorder-touch-handle
-            role="button"
-            tabindex="0"
-            aria-label={`Move ${providerDisplayName(provider.id)}`}
-            aria-describedby="reorder-instructions"
-            aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"><Icon name="grip-dots" size={13} /></span
-          >
-          <h1>{providerDisplayName(provider.id)}</h1>
-          {#if state.snapshot.plan}<span class="plan">{state.snapshot.plan}</span>{/if}
-          {#if state.stale}<span
-              class="status-badge"
-              data-tooltip={stalenessTooltip(state.snapshot.refreshedAt)}>Outdated</span
-            >{/if}
-          <span
-            class="provider-status-slot"
-            class:active={state.refreshing ||
-              state.error !== null ||
-              state.snapshot.warnings.length > 0}
-          >
-            {#if state.refreshing}
-              <span class="provider-refreshing" aria-label="Refreshing"
-                ><Icon name="refresh" size={12} strokeWidth={2} /></span
-              >
-            {:else if state.error}
-              <span
-                class="provider-warning"
-                role="alert"
-                data-tooltip={state.error}
-                aria-label={state.error}
-                ><Icon name="warning" size={12} strokeWidth={2} /><span class="sr-only"
-                  >{state.error}</span
-                ></span
-              >
-            {:else if state.snapshot.warnings.length > 0}
-              <span
-                class="provider-warning"
-                role="status"
-                data-tooltip={state.snapshot.warnings.join('\n')}
-                aria-label={state.snapshot.warnings.join(' ')}
-                ><Icon name="warning" size={12} strokeWidth={2} /><span class="sr-only"
-                  >{state.snapshot.warnings.join(' ')}</span
-                ></span
-              >
-            {/if}
-          </span>
-          <span class="provider-mark"><ProviderIcon providerId={provider.id} size={17} /></span>
-        </header>
-        <section class="provider-card" aria-label={`${providerDisplayName(provider.id)} usage`}>
-          {#each state.snapshot.notices as notice (notice.id)}
-            <ProviderNoticeRow {notice} />
-          {/each}
-          {#each alwaysMetrics as metric (metric.id)}
-            <div
-              class="metric-context-target"
-              class:metric-context-target--content-morph={demandMorphing}
-              data-reorder-group={`dashboard-metrics:${provider.id}`}
-              data-reorder-id={metric.id}
-              role="group"
-              aria-label={`${metricDefinition(metric.id)?.label ?? metric.id} options`}
-              use:pointerReorder={{
-                id: metric.id,
-                group: `dashboard-metrics:${provider.id}`,
-                label: metricDefinition(metric.id)?.label ?? metric.id,
-                touchGripOnly: true,
-                onReorder: (targetId) => reorderMetricToTarget(metric.id, provider.id, targetId),
-                onStart: onReorderStart,
-                onEnd: onReorderEnd,
-              }}
-              animate:flip={reorderFlip(reducedMotion || demandMorphing)}
-              oncontextmenu={(event) => openMetricMenu(event, provider.id, metric.id)}
-            >
-              <button
-                class="metric-reorder-handle"
-                data-reorder-handle
-                data-reorder-touch-handle
-                type="button"
-                aria-label={`Move ${metricDefinition(metric.id)?.label ?? metric.id}`}
-                aria-describedby="reorder-instructions"
-                aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
-                ><Icon name="grip-lines" size={13} strokeWidth={2} /></button
-              >
-              <MetricRenderer
-                layout={metric}
-                snapshot={state.snapshot}
-                {settings}
-                {now}
-                {catalog}
-                {onSettingsChange}
-              />
-            </div>
-          {/each}
-          {#if demandMetrics.length > 0 || links.length > 0}
-            <button
-              class="demand-divider"
-              data-reorder-group={`dashboard-metrics:${provider.id}`}
-              data-reorder-id="section:onDemand"
-              type="button"
-              aria-expanded={provider.expanded}
-              aria-label={provider.expanded ? 'Show less' : 'Show more'}
-              onclick={() => toggleDemandMetrics(provider)}
-            >
-              <Icon
-                name={provider.expanded ? 'chevron-up' : 'chevron-down'}
-                size={10}
-                strokeWidth={2.2}
-              />
-            </button>
-            {#if provider.expanded}
-              <div class="demand-metrics" transition:slide={springMotion(reducedMotion)}>
-                {#each demandMetrics as metric (metric.id)}
-                  <div
-                    class="metric-context-target"
-                    class:metric-context-target--content-morph={demandMorphing}
-                    data-reorder-group={`dashboard-metrics:${provider.id}`}
-                    data-reorder-id={metric.id}
-                    role="group"
-                    aria-label={`${metricDefinition(metric.id)?.label ?? metric.id} options`}
-                    use:pointerReorder={{
-                      id: metric.id,
-                      group: `dashboard-metrics:${provider.id}`,
-                      label: metricDefinition(metric.id)?.label ?? metric.id,
-                      touchGripOnly: true,
-                      onReorder: (targetId) =>
-                        reorderMetricToTarget(metric.id, provider.id, targetId),
-                      onStart: onReorderStart,
-                      onEnd: onReorderEnd,
-                    }}
-                    animate:flip={reorderFlip(reducedMotion || demandMorphing)}
-                    oncontextmenu={(event) => openMetricMenu(event, provider.id, metric.id)}
-                  >
-                    <button
-                      class="metric-reorder-handle"
-                      data-reorder-handle
-                      data-reorder-touch-handle
-                      type="button"
-                      aria-label={`Move ${metricDefinition(metric.id)?.label ?? metric.id}`}
-                      aria-describedby="reorder-instructions"
-                      aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
-                      ><Icon name="grip-lines" size={13} strokeWidth={2} /></button
-                    >
-                    <MetricRenderer
-                      layout={metric}
-                      snapshot={state.snapshot}
-                      {settings}
-                      {now}
-                      {catalog}
-                      {onSettingsChange}
-                    />
-                  </div>
-                {/each}
-                {#if links.length > 0}
-                  <ProviderLinks
-                    {links}
-                    onOpen={(linkIndex) => onOpenProviderLink(provider.id, linkIndex)}
-                  />
-                {/if}
-              </div>
-            {/if}
-          {/if}
-        </section>
-      </section>
-    {:else if state?.error}
-      <section
-        class="provider-section"
-        data-provider-id={provider.id}
-        data-reorder-group="dashboard-providers"
-        data-reorder-id={provider.id}
-        role="group"
-        aria-label={`${providerDisplayName(provider.id)} provider`}
-        use:pointerReorder={{
-          id: provider.id,
-          group: 'dashboard-providers',
-          label: providerDisplayName(provider.id),
-          gripOnly: true,
-          touchGripOnly: true,
-          onReorder: (targetId) => reorderProvider(provider.id, targetId),
-          onStart: onReorderStart,
-          onEnd: onReorderEnd,
-        }}
-        oncontextmenu={(event) => openProviderMenu(event, provider.id)}
-      >
-        <header
-          class="provider-header"
-          data-reorder-handle
-          role="group"
-          aria-label={`Drag ${providerDisplayName(provider.id)} to reorder`}
+        <h1>{providerDisplayName(provider.id)}</h1>
+        {#if snapshot.plan}<span class="plan">{snapshot.plan}</span>{/if}
+        {#if state?.snapshot && state.stale}<span
+            class="status-badge"
+            data-tooltip={stalenessTooltip(snapshot.refreshedAt)}>Outdated</span
+          >{/if}
+        <span
+          class="provider-status-slot"
+          class:active={Boolean(state?.refreshing || state?.error || snapshot.warnings.length > 0)}
         >
-          <span
-            class="drag-grip"
-            data-reorder-handle
-            data-reorder-touch-handle
-            role="button"
-            tabindex="0"
-            aria-label={`Move ${providerDisplayName(provider.id)}`}
-            aria-describedby="reorder-instructions"
-            aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"><Icon name="grip-dots" size={13} /></span
-          >
-          <h1>{providerDisplayName(provider.id)}</h1>
-          <span class="provider-status-slot active">
+          {#if state?.refreshing}
+            <span class="provider-refreshing" aria-label="Refreshing"
+              ><Icon name="refresh" size={12} strokeWidth={2} /></span
+            >
+          {:else if state?.error}
             <span
               class="provider-warning"
               role="alert"
@@ -618,125 +457,138 @@
                 >{state.error}</span
               ></span
             >
-          </span>
-          <span class="provider-mark"><ProviderIcon providerId={provider.id} size={17} /></span>
-        </header>
-        <section class="provider-card">
-          <p class="empty-row">No usage data</p>
-          <ProviderLinksExpander
-            providerId={provider.id}
-            {links}
-            expanded={provider.expanded}
-            {reducedMotion}
-            onToggle={() => toggleDemandMetrics(provider)}
-            onOpen={(linkIndex) => onOpenProviderLink(provider.id, linkIndex)}
-          />
-        </section>
-      </section>
-    {:else if state?.refreshing}
-      <section
-        class="provider-section provider-section--pending"
-        data-provider-id={provider.id}
-        data-reorder-group="dashboard-providers"
-        data-reorder-id={provider.id}
-        role="group"
-        aria-label={`${providerDisplayName(provider.id)} provider`}
-        use:pointerReorder={{
-          id: provider.id,
-          group: 'dashboard-providers',
-          label: providerDisplayName(provider.id),
-          gripOnly: true,
-          touchGripOnly: true,
-          onReorder: (targetId) => reorderProvider(provider.id, targetId),
-          onStart: onReorderStart,
-          onEnd: onReorderEnd,
-        }}
-      >
-        <header class="provider-header" data-reorder-handle>
-          <span
-            class="drag-grip"
-            data-reorder-handle
-            data-reorder-touch-handle
-            role="button"
-            tabindex="0"
-            aria-label={`Move ${providerDisplayName(provider.id)}`}
-            aria-describedby="reorder-instructions"
-            aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"><Icon name="grip-dots" size={13} /></span
-          >
-          <h1>{providerDisplayName(provider.id)}</h1>
-          <span class="provider-status-slot active">
-            <span class="provider-refreshing" aria-label="Refreshing"
-              ><Icon name="refresh" size={12} strokeWidth={2} /></span
+          {:else if snapshot.warnings.length > 0}
+            <span
+              class="provider-warning"
+              role="status"
+              data-tooltip={snapshot.warnings.join('\n')}
+              aria-label={snapshot.warnings.join(' ')}
+              ><Icon name="warning" size={12} strokeWidth={2} /><span class="sr-only"
+                >{snapshot.warnings.join(' ')}</span
+              ></span
             >
-          </span>
-          <span class="provider-mark"><ProviderIcon providerId={provider.id} size={17} /></span>
-        </header>
-        <section
-          class="provider-card"
-          aria-label={`${providerDisplayName(provider.id)} usage`}
-          aria-busy="true"
-        >
-          <p class="empty-row">Reading {providerDisplayName(provider.id)} usage…</p>
-          <ProviderLinksExpander
-            providerId={provider.id}
-            {links}
-            expanded={provider.expanded}
-            {reducedMotion}
-            onToggle={() => toggleDemandMetrics(provider)}
-            onOpen={(linkIndex) => onOpenProviderLink(provider.id, linkIndex)}
-          />
-        </section>
-      </section>
-    {:else if !state?.error}
+          {/if}
+        </span>
+        <span class="provider-mark"><ProviderIcon providerId={provider.id} size={17} /></span>
+      </header>
       <section
-        class="provider-section provider-section--pending"
-        data-provider-id={provider.id}
-        data-reorder-group="dashboard-providers"
-        data-reorder-id={provider.id}
-        role="group"
-        aria-label={`${providerDisplayName(provider.id)} provider`}
-        use:pointerReorder={{
-          id: provider.id,
-          group: 'dashboard-providers',
-          label: providerDisplayName(provider.id),
-          gripOnly: true,
-          touchGripOnly: true,
-          onReorder: (targetId) => reorderProvider(provider.id, targetId),
-          onStart: onReorderStart,
-          onEnd: onReorderEnd,
-        }}
+        class="provider-card"
+        aria-label={`${providerDisplayName(provider.id)} usage`}
+        aria-busy={state?.refreshing ? 'true' : undefined}
       >
-        <header class="provider-header" data-reorder-handle>
-          <span
-            class="drag-grip"
-            data-reorder-handle
-            data-reorder-touch-handle
-            role="button"
-            tabindex="0"
-            aria-label={`Move ${providerDisplayName(provider.id)}`}
-            aria-describedby="reorder-instructions"
-            aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"><Icon name="grip-dots" size={13} /></span
+        {#each snapshot.notices as notice (notice.id)}
+          <ProviderNoticeRow {notice} />
+        {/each}
+        {#each alwaysMetrics as metric (metric.id)}
+          <div
+            class="metric-context-target"
+            class:metric-context-target--content-morph={demandMorphing}
+            data-reorder-group={`dashboard-metrics:${provider.id}`}
+            data-reorder-id={metric.id}
+            role="group"
+            aria-label={`${metricDefinition(metric.id)?.label ?? metric.id} options`}
+            use:pointerReorder={{
+              id: metric.id,
+              group: `dashboard-metrics:${provider.id}`,
+              label: metricDefinition(metric.id)?.label ?? metric.id,
+              touchGripOnly: true,
+              onReorder: (targetId) => reorderMetricToTarget(metric.id, provider.id, targetId),
+              onStart: onReorderStart,
+              onEnd: onReorderEnd,
+            }}
+            animate:flip={reorderFlip(reducedMotion || demandMorphing)}
+            oncontextmenu={(event) => openMetricMenu(event, provider.id, metric.id)}
           >
-          <h1>{providerDisplayName(provider.id)}</h1>
-          <span class="provider-status-slot"></span>
-          <span class="provider-mark"><ProviderIcon providerId={provider.id} size={17} /></span>
-        </header>
-        <section
-          class="provider-card provider-card--pending"
-          aria-label={`${providerDisplayName(provider.id)} usage`}
-        >
-          <p class="provider-pending-copy">No {providerDisplayName(provider.id)} data yet.</p>
-          <ProviderLinksExpander
-            providerId={provider.id}
-            {links}
-            expanded={provider.expanded}
-            {reducedMotion}
-            onToggle={() => toggleDemandMetrics(provider)}
-            onOpen={(linkIndex) => onOpenProviderLink(provider.id, linkIndex)}
-          />
-        </section>
+            <button
+              class="metric-reorder-handle"
+              data-reorder-handle
+              data-reorder-touch-handle
+              type="button"
+              aria-label={`Move ${metricDefinition(metric.id)?.label ?? metric.id}`}
+              aria-describedby="reorder-instructions"
+              aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+              ><Icon name="grip-lines" size={13} strokeWidth={2} /></button
+            >
+            <MetricRenderer
+              layout={metric}
+              {snapshot}
+              {settings}
+              {now}
+              {catalog}
+              {onSettingsChange}
+            />
+          </div>
+        {/each}
+        {#if demandMetrics.length > 0 || links.length > 0}
+          <button
+            class="demand-divider"
+            data-reorder-group={`dashboard-metrics:${provider.id}`}
+            data-reorder-id="section:onDemand"
+            type="button"
+            aria-expanded={provider.expanded}
+            aria-label={provider.expanded ? 'Show less' : 'Show more'}
+            onclick={() => toggleDemandMetrics(provider)}
+          >
+            <Icon
+              name={provider.expanded ? 'chevron-up' : 'chevron-down'}
+              size={10}
+              strokeWidth={2.2}
+            />
+          </button>
+          {#if provider.expanded}
+            <div class="demand-metrics" transition:slide={springMotion(reducedMotion)}>
+              {#each demandMetrics as metric (metric.id)}
+                <div
+                  class="metric-context-target"
+                  class:metric-context-target--content-morph={demandMorphing}
+                  data-reorder-group={`dashboard-metrics:${provider.id}`}
+                  data-reorder-id={metric.id}
+                  role="group"
+                  aria-label={`${metricDefinition(metric.id)?.label ?? metric.id} options`}
+                  use:pointerReorder={{
+                    id: metric.id,
+                    group: `dashboard-metrics:${provider.id}`,
+                    label: metricDefinition(metric.id)?.label ?? metric.id,
+                    touchGripOnly: true,
+                    onReorder: (targetId) =>
+                      reorderMetricToTarget(metric.id, provider.id, targetId),
+                    onStart: onReorderStart,
+                    onEnd: onReorderEnd,
+                  }}
+                  animate:flip={reorderFlip(reducedMotion || demandMorphing)}
+                  oncontextmenu={(event) => openMetricMenu(event, provider.id, metric.id)}
+                >
+                  <button
+                    class="metric-reorder-handle"
+                    data-reorder-handle
+                    data-reorder-touch-handle
+                    type="button"
+                    aria-label={`Move ${metricDefinition(metric.id)?.label ?? metric.id}`}
+                    aria-describedby="reorder-instructions"
+                    aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+                    ><Icon name="grip-lines" size={13} strokeWidth={2} /></button
+                  >
+                  <MetricRenderer
+                    layout={metric}
+                    {snapshot}
+                    {settings}
+                    {now}
+                    {catalog}
+                    {onSettingsChange}
+                  />
+                </div>
+              {/each}
+              {#if links.length > 0}
+                <ProviderLinks
+                  {links}
+                  onOpen={(linkIndex) => onOpenProviderLink(provider.id, linkIndex)}
+                />
+              {/if}
+            </div>
+          {/if}
+        {/if}
       </section>
-    {/if}
+    </section>
   </div>
 {/each}
 

@@ -808,9 +808,13 @@ describe('OpenQuota dashboard', () => {
 
     expect(within(provider).getByRole('heading', { name: 'Claude' })).toBeInTheDocument();
     expect(within(provider).getByLabelText('Refreshing')).toBeInTheDocument();
-    expect(within(card).getByText('Reading Claude usage…')).toBeInTheDocument();
     expect(card).toHaveClass('provider-card');
-    expect(within(card).getByText('Reading Claude usage…')).toHaveClass('empty-row');
+    expect(card).toHaveAttribute('aria-busy', 'true');
+    const session = within(card).getByRole('group', { name: 'Session options' });
+    const weekly = within(card).getByRole('group', { name: 'Weekly options' });
+    expect(within(session).getByText('No data')).toBeInTheDocument();
+    expect(within(weekly).getByText('No data')).toBeInTheDocument();
+    expect(within(card).queryByText('Reading Claude usage…')).toBeNull();
     const toggle = within(card).getByRole('button', { name: 'Show more' });
     expect(within(card).queryByRole('button', { name: 'Status, opens in browser' })).toBeNull();
 
@@ -818,6 +822,58 @@ describe('OpenQuota dashboard', () => {
 
     expect(
       within(card).getByRole('button', { name: 'Status, opens in browser' }),
+    ).toBeInTheDocument();
+  });
+
+  it('shows configured metric rows before a provider has produced any state', async () => {
+    mockInvoke((command: string) => {
+      if (command === 'get_usage_state') return Promise.resolve({ providers: {} });
+      if (command === 'get_app_settings') return Promise.resolve(settingsState);
+      return Promise.resolve();
+    });
+
+    render(App);
+    const provider = await screen.findByRole('group', { name: 'Codex provider' });
+    const card = within(provider).getByRole('region', { name: 'Codex usage' });
+
+    expect(within(provider).queryByLabelText('Refreshing')).toBeNull();
+    expect(card).not.toHaveAttribute('aria-busy');
+    expect(
+      within(within(card).getByRole('group', { name: 'Session options' })).getByText('No data'),
+    ).toBeInTheDocument();
+    expect(
+      within(within(card).getByRole('group', { name: 'Weekly options' })).getByText('No data'),
+    ).toBeInTheDocument();
+  });
+
+  it('keeps a snapshot-less provider error visible alongside its no-data metric rows', async () => {
+    const failedCodex: ProviderViewState = {
+      source: 'none',
+      refreshing: false,
+      stale: false,
+      error: 'Sign in to Codex to load usage.',
+      errorKind: 'authentication',
+      lastAttemptAt: new Date().toISOString(),
+      snapshot: null,
+    };
+    mockInvoke((command: string) => {
+      if (command === 'get_usage_state')
+        return Promise.resolve({ providers: { codex: failedCodex } });
+      if (command === 'get_app_settings') return Promise.resolve(settingsState);
+      return Promise.resolve();
+    });
+
+    render(App);
+    const provider = await screen.findByRole('group', { name: 'Codex provider' });
+    const card = within(provider).getByRole('region', { name: 'Codex usage' });
+
+    expect(within(provider).getByRole('alert')).toHaveAttribute(
+      'aria-label',
+      'Sign in to Codex to load usage.',
+    );
+    expect(provider.querySelector('.provider-status-slot')).toHaveClass('active');
+    expect(
+      within(within(card).getByRole('group', { name: 'Session options' })).getByText('No data'),
     ).toBeInTheDocument();
   });
 

@@ -38,7 +38,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 "opencode.session",
                 "Session",
                 "session",
-                true,
+                false,
                 true,
                 MetricSection::AlwaysVisible,
                 false,

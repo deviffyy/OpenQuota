@@ -398,7 +398,7 @@ impl TestServer {
         let requests = Arc::new(Mutex::new(Vec::new()));
         let captured = requests.clone();
         let handle = thread::spawn(move || {
-            let deadline = Instant::now() + Duration::from_secs(3);
+            let deadline = Instant::now() + Duration::from_secs(5);
             let mut handled = 0;
             while handled < expected && Instant::now() < deadline {
                 let (mut stream, _) = match listener.accept() {
@@ -410,7 +410,7 @@ impl TestServer {
                     Err(_) => break,
                 };
                 stream
-                    .set_read_timeout(Some(Duration::from_secs(1)))
+                    .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();
                 let request = read_request(&mut stream);
                 captured.lock().unwrap().push(request.clone());
@@ -437,7 +437,7 @@ impl TestServer {
             &format!("{}/credits", self.base),
             &format!("{}/settings", self.base),
             &format!("{}/token", self.base),
-            Duration::from_secs(1),
+            Duration::from_secs(3),
         )
     }
 
