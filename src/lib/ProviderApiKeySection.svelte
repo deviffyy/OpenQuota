@@ -300,8 +300,14 @@
 
   .api-key-actions {
     display: flex;
+    justify-self: start;
     align-items: center;
     gap: 7px;
+  }
+
+  .api-key-actions button {
+    min-height: 26px;
+    padding: 5px 10px;
   }
 
   .api-key-readonly {
@@ -309,6 +315,8 @@
   }
 
   .api-key-actions .primary {
+    min-width: 56px;
+    padding-inline: 12px;
     color: white;
     background: var(--meter-fill);
     font-weight: 600;
