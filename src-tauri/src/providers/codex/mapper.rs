@@ -31,30 +31,18 @@ pub fn map_usage(
     }
 
     let rate_limit = response.body.get("rate_limit");
-    let primary = rate_limit.and_then(|value| value.get("primary_window"));
-    let secondary = rate_limit.and_then(|value| value.get("secondary_window"));
-    let mut quotas = Vec::new();
-
-    if let Some(window) = map_window(
-        "session",
-        "Session",
-        primary,
+    let mut quotas = map_classified_windows(
+        rate_limit,
+        WindowMetricLabels {
+            session_id: "session",
+            session_label: "Session",
+            weekly_id: "weekly",
+            weekly_label: "Weekly",
+        },
         header_number(response, "x-codex-primary-used-percent"),
-        SESSION_PERIOD_SECONDS,
-        now,
-    ) {
-        quotas.push(window);
-    }
-    if let Some(window) = map_window(
-        "weekly",
-        "Weekly",
-        secondary,
         header_number(response, "x-codex-secondary-used-percent"),
-        WEEKLY_PERIOD_SECONDS,
         now,
-    ) {
-        quotas.push(window);
-    }
+    );
     quotas.extend(map_spark_windows(&response.body, now));
 
     let mut value_metrics = Vec::new();
@@ -81,22 +69,18 @@ fn map_spark_windows(body: &Value, now: DateTime<Utc>) -> Vec<QuotaWindow> {
         return Vec::new();
     };
     let rate_limit = entry.get("rate_limit");
-    let primary = rate_limit.and_then(|value| value.get("primary_window"));
-    let secondary = rate_limit.and_then(|value| value.get("secondary_window"));
-    [
-        map_window("spark", "Spark", primary, None, SESSION_PERIOD_SECONDS, now),
-        map_window(
-            "sparkWeekly",
-            "Spark Weekly",
-            secondary,
-            None,
-            WEEKLY_PERIOD_SECONDS,
-            now,
-        ),
-    ]
-    .into_iter()
-    .flatten()
-    .collect()
+    map_classified_windows(
+        rate_limit,
+        WindowMetricLabels {
+            session_id: "spark",
+            session_label: "Spark",
+            weekly_id: "sparkWeekly",
+            weekly_label: "Spark Weekly",
+        },
+        None,
+        None,
+        now,
+    )
 }
 
 fn is_spark_entry(entry: &Value) -> bool {
@@ -108,18 +92,129 @@ fn is_spark_entry(entry: &Value) -> bool {
     })
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum WindowKind {
+    Session,
+    Weekly,
+}
+
+struct WindowMetricLabels<'a> {
+    session_id: &'a str,
+    session_label: &'a str,
+    weekly_id: &'a str,
+    weekly_label: &'a str,
+}
+
+#[derive(Clone, Copy)]
+struct WindowCandidate<'a> {
+    window: Option<&'a Value>,
+    used_percent: Option<f64>,
+    fallback_kind: WindowKind,
+}
+
+fn map_classified_windows(
+    rate_limit: Option<&Value>,
+    labels: WindowMetricLabels<'_>,
+    primary_header: Option<f64>,
+    secondary_header: Option<f64>,
+    now: DateTime<Utc>,
+) -> Vec<QuotaWindow> {
+    let candidates = [
+        window_candidate(
+            rate_limit.and_then(|value| value.get("primary_window")),
+            primary_header,
+            WindowKind::Session,
+        ),
+        window_candidate(
+            rate_limit.and_then(|value| value.get("secondary_window")),
+            secondary_header,
+            WindowKind::Weekly,
+        ),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+
+    [
+        map_classified_window(
+            WindowKind::Session,
+            labels.session_id,
+            labels.session_label,
+            &candidates,
+            now,
+        ),
+        map_classified_window(
+            WindowKind::Weekly,
+            labels.weekly_id,
+            labels.weekly_label,
+            &candidates,
+            now,
+        ),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+fn window_candidate<'a>(
+    value: Option<&'a Value>,
+    header_fallback: Option<f64>,
+    fallback_kind: WindowKind,
+) -> Option<WindowCandidate<'a>> {
+    let window = value.filter(|value| value.is_object());
+    if window.is_none() && header_fallback.is_none() {
+        return None;
+    }
+    Some(WindowCandidate {
+        window,
+        used_percent: window
+            .and_then(|window| number(window.get("used_percent")))
+            .or(header_fallback),
+        fallback_kind,
+    })
+}
+
+fn map_classified_window(
+    kind: WindowKind,
+    id: &str,
+    label: &str,
+    candidates: &[WindowCandidate<'_>],
+    now: DateTime<Utc>,
+) -> Option<QuotaWindow> {
+    // The service normally uses primary for five-hour limits and secondary for weekly
+    // limits, but a temporarily sole weekly limit can appear in the primary slot.
+    let candidate = candidates
+        .iter()
+        .find(|candidate| exact_kind(candidate.window) == Some(kind))
+        .or_else(|| {
+            candidates.iter().find(|candidate| {
+                exact_kind(candidate.window).is_none() && candidate.fallback_kind == kind
+            })
+        })?;
+    let default_period = match kind {
+        WindowKind::Session => SESSION_PERIOD_SECONDS,
+        WindowKind::Weekly => WEEKLY_PERIOD_SECONDS,
+    };
+    map_window(id, label, *candidate, default_period, now)
+}
+
+fn exact_kind(window: Option<&Value>) -> Option<WindowKind> {
+    match window.and_then(|window| number(window.get("limit_window_seconds"))) {
+        Some(seconds) if seconds == SESSION_PERIOD_SECONDS as f64 => Some(WindowKind::Session),
+        Some(seconds) if seconds == WEEKLY_PERIOD_SECONDS as f64 => Some(WindowKind::Weekly),
+        _ => None,
+    }
+}
+
 fn map_window(
     id: &str,
     label: &str,
-    value: Option<&Value>,
-    header_fallback: Option<f64>,
+    candidate: WindowCandidate<'_>,
     default_period: u64,
     now: DateTime<Utc>,
 ) -> Option<QuotaWindow> {
-    let used_percent = value
-        .and_then(|window| number(window.get("used_percent")))
-        .or(header_fallback)?;
-    let resets_at = value.and_then(|window| {
+    let used_percent = candidate.used_percent?;
+    let resets_at = candidate.window.and_then(|window| {
         number(window.get("reset_at"))
             .and_then(timestamp)
             .or_else(|| {
@@ -127,7 +222,8 @@ fn map_window(
                     .map(|seconds| now + Duration::milliseconds((seconds * 1000.0) as i64))
             })
     });
-    let period_seconds = value
+    let period_seconds = candidate
+        .window
         .and_then(|window| number(window.get("limit_window_seconds")))
         .map(|value| value.max(0.0) as u64)
         .unwrap_or(default_period);
@@ -285,7 +381,7 @@ mod tests {
     use reqwest::StatusCode;
     use serde_json::{json, Value};
 
-    use super::{map_usage, SESSION_PERIOD_SECONDS};
+    use super::{map_usage, SESSION_PERIOD_SECONDS, WEEKLY_PERIOD_SECONDS};
     use crate::{
         models::{MetricValueKind, ValueMetric},
         providers::codex::client::UsageResponse,
@@ -332,6 +428,57 @@ mod tests {
     }
 
     #[test]
+    fn maps_weekly_only_primary_window_by_duration() {
+        let now = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
+        let mapped = map_usage(
+            &response(json!({
+                "rate_limit": {
+                    "primary_window": {
+                        "used_percent": 5,
+                        "limit_window_seconds": 604800,
+                        "reset_after_seconds": 60
+                    },
+                    "secondary_window": null
+                }
+            })),
+            None,
+            now,
+        )
+        .unwrap();
+
+        assert_eq!(mapped.quotas.len(), 1);
+        assert_eq!(mapped.quotas[0].id, "weekly");
+        assert_eq!(mapped.quotas[0].used_percent, 5.0);
+        assert_eq!(mapped.quotas[0].period_seconds, WEEKLY_PERIOD_SECONDS);
+    }
+
+    #[test]
+    fn unfamiliar_window_durations_keep_positional_fallbacks() {
+        let mapped = map_usage(
+            &response(json!({
+                "rate_limit": {
+                    "primary_window": {
+                        "used_percent": 11,
+                        "limit_window_seconds": 86400
+                    },
+                    "secondary_window": {
+                        "used_percent": 22,
+                        "limit_window_seconds": 2592000
+                    }
+                }
+            })),
+            None,
+            Utc::now(),
+        )
+        .unwrap();
+
+        assert_eq!(mapped.quotas[0].id, "session");
+        assert_eq!(mapped.quotas[0].used_percent, 11.0);
+        assert_eq!(mapped.quotas[1].id, "weekly");
+        assert_eq!(mapped.quotas[1].used_percent, 22.0);
+    }
+
+    #[test]
     fn maps_spark_windows_and_matches_metered_feature() {
         let now = Utc.timestamp_opt(1_800_000_000, 0).unwrap();
         let mapped = map_usage(
@@ -352,6 +499,33 @@ mod tests {
         assert_eq!(mapped.quotas[0].id, "spark");
         assert_eq!(mapped.quotas[0].used_percent, 25.0);
         assert_eq!(mapped.quotas[1].id, "sparkWeekly");
+    }
+
+    #[test]
+    fn maps_weekly_only_spark_primary_window_by_duration() {
+        let mapped = map_usage(
+            &response(json!({
+                "additional_rate_limits": [{
+                    "limit_name": "GPT-Codex-Spark",
+                    "rate_limit": {
+                        "primary_window": {
+                            "used_percent": 7,
+                            "limit_window_seconds": 604800,
+                            "reset_after_seconds": 60
+                        },
+                        "secondary_window": null
+                    }
+                }]
+            })),
+            None,
+            Utc::now(),
+        )
+        .unwrap();
+
+        assert_eq!(mapped.quotas.len(), 1);
+        assert_eq!(mapped.quotas[0].id, "sparkWeekly");
+        assert_eq!(mapped.quotas[0].used_percent, 7.0);
+        assert_eq!(mapped.quotas[0].period_seconds, WEEKLY_PERIOD_SECONDS);
     }
 
     #[test]
