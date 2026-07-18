@@ -111,6 +111,7 @@ use self::{
     local_usage::scan_local_usage,
     mapper::map_usage,
 };
+use crate::providers::log_usage::scan_or_cached_usage;
 
 #[derive(Debug, Error)]
 pub enum ClaudeError {
@@ -198,7 +199,13 @@ impl ClaudeProvider {
         pricing: &ModelPricing,
     ) -> Result<ProviderSnapshot, ClaudeError> {
         let mut warnings = Vec::new();
-        let usage = scan_local_usage(&self.storage, now, pricing)?;
+        let usage = scan_or_cached_usage(
+            &self.storage,
+            "claude",
+            "Claude",
+            || scan_local_usage(&self.storage, now, pricing),
+            &mut warnings,
+        );
 
         if credential.inference_only {
             return Ok(ProviderSnapshot {

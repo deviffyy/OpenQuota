@@ -7,7 +7,10 @@ use std::{
 use chrono::{DateTime, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use crate::storage::{Storage, StorageError};
+use crate::{
+    models::UsageHistory,
+    storage::{Storage, StorageError},
+};
 
 /// Cross-platform metadata key for one local log file. Nanosecond precision avoids stale cache hits
 /// when sync tools or fast writers replace a same-sized file more than once inside one millisecond.
@@ -118,6 +121,37 @@ where
     Ok(Some(events))
 }
 
+/// Keeps provider quotas usable when supplementary local history cannot be refreshed. A prior
+/// persisted history is reused when available; otherwise the provider still returns its live data
+/// with an explicit warning instead of failing the entire refresh.
+pub fn scan_or_cached_usage<E>(
+    storage: &Storage,
+    provider_id: &str,
+    provider_name: &str,
+    scan: impl FnOnce() -> Result<UsageHistory, E>,
+    warnings: &mut Vec<String>,
+) -> UsageHistory {
+    match scan() {
+        Ok(usage) => usage,
+        Err(_) => {
+            let tag = format!("plugin:{provider_id}");
+            crate::app_warn!(
+                &tag,
+                "local usage history could not be refreshed; keeping live provider data"
+            );
+            warnings.push(format!(
+                "Local {provider_name} usage history could not be refreshed; cached history is shown when available."
+            ));
+            storage
+                .load_snapshot(provider_id)
+                .ok()
+                .flatten()
+                .map(|snapshot| snapshot.usage)
+                .unwrap_or_default()
+        }
+    }
+}
+
 fn system_time_nanos(value: SystemTime) -> i64 {
     match value.duration_since(UNIX_EPOCH) {
         Ok(duration) => (duration.as_secs() as i64)
@@ -191,8 +225,11 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use tempfile::tempdir;
 
-    use super::{load_or_parse_log, parse_log_timestamp, LogFileFingerprint};
-    use crate::storage::Storage;
+    use super::{load_or_parse_log, parse_log_timestamp, scan_or_cached_usage, LogFileFingerprint};
+    use crate::{
+        models::{DailyUsage, ProviderSnapshot, UsageHistory},
+        storage::Storage,
+    };
 
     #[test]
     fn timestamp_variants_resolve_to_the_same_absolute_instant() {
@@ -282,5 +319,45 @@ mod tests {
             .unwrap(),
             Some(vec!["recovered".to_owned()])
         );
+    }
+
+    #[test]
+    fn failed_scan_keeps_cached_history_without_hiding_live_provider_data() {
+        let directory = tempdir().unwrap();
+        let storage = Storage::open(&directory.path().join("openquota.db")).unwrap();
+        let cached_usage = UsageHistory {
+            daily: vec![DailyUsage {
+                date: "2026-07-18".into(),
+                tokens: 42,
+                estimated_cost_usd: Some(0.5),
+                estimate_complete: true,
+            }],
+            ..UsageHistory::default()
+        };
+        storage
+            .save_snapshot(&ProviderSnapshot {
+                provider_id: "codex".into(),
+                plan: None,
+                quotas: Vec::new(),
+                value_metrics: Vec::new(),
+                notices: Vec::new(),
+                usage: cached_usage.clone(),
+                warnings: Vec::new(),
+                refreshed_at: Utc::now(),
+            })
+            .unwrap();
+        let mut warnings = Vec::new();
+
+        let usage = scan_or_cached_usage(
+            &storage,
+            "codex",
+            "Codex",
+            || Err::<UsageHistory, ()>(()),
+            &mut warnings,
+        );
+
+        assert_eq!(usage, cached_usage);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("Codex"));
     }
 }

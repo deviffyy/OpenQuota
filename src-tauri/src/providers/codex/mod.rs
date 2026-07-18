@@ -22,6 +22,7 @@ use crate::{
 use self::{
     auth::CodexAuthState, client::CodexClient, local_usage::scan_local_usage, mapper::map_usage,
 };
+use crate::providers::log_usage::scan_or_cached_usage;
 
 pub(crate) fn definition() -> ProviderDefinition {
     ProviderDefinition {
@@ -235,7 +236,13 @@ impl CodexProvider {
         };
         let mapped = map_usage(&response, reset_credits.as_ref(), now)?;
         let pricing = self.pricing.current();
-        let usage = scan_local_usage(&self.storage, now, &pricing)?;
+        let usage = scan_or_cached_usage(
+            &self.storage,
+            "codex",
+            "Codex",
+            || scan_local_usage(&self.storage, now, &pricing),
+            &mut warnings,
+        );
         Ok(ProviderSnapshot {
             provider_id: "codex".into(),
             plan: mapped.plan,
