@@ -20,7 +20,7 @@ pub fn discover() -> Option<LanguageServer> {
 
 #[cfg(target_os = "windows")]
 fn discover_windows() -> Option<LanguageServer> {
-    let script = r#"$items=Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'language_server|agy' -and $_.CommandLine -match 'antigravity' } | ForEach-Object { [pscustomobject]@{ command=$_.CommandLine; ports=@(Get-NetTCPConnection -OwningProcess $_.ProcessId -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort -Unique) } }; @($items) | ConvertTo-Json -Compress -Depth 4"#;
+    let script = r#"$items=Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'language_server|agy' -and $_.CommandLine -match 'antigravity' } | ForEach-Object { [pscustomobject]@{ command=$_.CommandLine; ports=@(Get-NetTCPConnection -OwningProcess $_.ProcessId -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort -Unique) } }; ConvertTo-Json -InputObject @($items) -Compress -Depth 4"#;
     let output = background_command("powershell")
         .args([
             "-NoLogo",
@@ -34,10 +34,23 @@ fn discover_windows() -> Option<LanguageServer> {
     if !output.status.success() {
         return None;
     }
-    let values: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).ok()?;
+    let values = parse_windows_processes(&output.stdout)?;
+    language_server_from_processes(values)
+}
+
+fn parse_windows_processes(bytes: &[u8]) -> Option<Vec<serde_json::Value>> {
+    match serde_json::from_slice(bytes).ok()? {
+        serde_json::Value::Array(values) => Some(values),
+        value @ serde_json::Value::Object(_) => Some(vec![value]),
+        serde_json::Value::Null => Some(Vec::new()),
+        _ => None,
+    }
+}
+
+fn language_server_from_processes(values: Vec<serde_json::Value>) -> Option<LanguageServer> {
     values.into_iter().find_map(|value| {
         let command = value.get("command")?.as_str()?;
-        let csrf = extract_flag(command, "--csrf_token")?;
+        let csrf = extract_flag(command, "--csrf_token").unwrap_or_default();
         let extension_port =
             extract_flag(command, "--extension_server_port").and_then(|value| value.parse().ok());
         let mut ports = value
@@ -128,7 +141,9 @@ fn parse_lsof_ports(output: &str) -> Vec<u16> {
 
 #[cfg(test)]
 mod tests {
-    use super::extract_flag;
+    use super::{
+        extract_flag, language_server_from_processes, parse_windows_processes, LanguageServer,
+    };
 
     #[test]
     fn extracts_both_flag_forms() {
@@ -144,5 +159,45 @@ mod tests {
             .as_deref(),
             Some("1234")
         );
+    }
+
+    #[test]
+    fn windows_process_json_accepts_single_objects_and_arrays() {
+        let single = br#"{
+            "command": "C:\\Antigravity\\agy.exe --extension_server_port=4567",
+            "ports": [1234]
+        }"#;
+        let values = parse_windows_processes(single).unwrap();
+        assert_eq!(values.len(), 1);
+        assert_language_server(
+            language_server_from_processes(values).unwrap(),
+            "",
+            &[1234],
+            Some(4567),
+        );
+
+        let multiple = br#"[
+            {"command":"unrelated","ports":[]},
+            {"command":"language_server --csrf_token token","ports":[8765]}
+        ]"#;
+        let values = parse_windows_processes(multiple).unwrap();
+        assert_eq!(values.len(), 2);
+        assert_language_server(
+            language_server_from_processes(values).unwrap(),
+            "token",
+            &[8765],
+            None,
+        );
+    }
+
+    fn assert_language_server(
+        server: LanguageServer,
+        csrf: &str,
+        ports: &[u16],
+        extension_port: Option<u16>,
+    ) {
+        assert_eq!(server.csrf, csrf);
+        assert_eq!(server.ports, ports);
+        assert_eq!(server.extension_port, extension_port);
     }
 }
