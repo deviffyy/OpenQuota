@@ -35,7 +35,9 @@ pub fn scan_local_usage(
     now: DateTime<Utc>,
     pricing: &ModelPricing,
 ) -> Result<UsageHistory, CodexError> {
-    let homes = codex_homes();
+    let home = home_directory();
+    let configured_home = std::env::var_os("CODEX_HOME").map(PathBuf::from);
+    let homes = codex_homes(configured_home.as_deref(), &home);
     let fast_tier = homes.iter().any(|home| uses_fast_service_tier(home));
     let since_date = now
         .with_timezone(&Local)
@@ -73,20 +75,11 @@ pub fn scan_local_usage(
     Ok(aggregate(events, now, fast_tier, pricing))
 }
 
-fn codex_homes() -> Vec<PathBuf> {
-    if let Some(raw) = std::env::var_os("CODEX_HOME") {
-        let homes = raw
-            .to_string_lossy()
-            .split(',')
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(expand_home)
-            .collect::<Vec<_>>();
-        if !homes.is_empty() {
-            return homes;
-        }
+fn codex_homes(configured_home: Option<&Path>, home: &Path) -> Vec<PathBuf> {
+    if let Some(configured_home) = configured_home.filter(|path| !path.as_os_str().is_empty()) {
+        return vec![configured_home.to_path_buf()];
     }
-    vec![home_directory().join(".codex")]
+    vec![home.join(".codex")]
 }
 
 fn home_directory() -> PathBuf {
@@ -94,19 +87,6 @@ fn home_directory() -> PathBuf {
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .unwrap_or_default()
-}
-
-fn expand_home(value: &str) -> PathBuf {
-    if value == "~" {
-        return home_directory();
-    }
-    if let Some(rest) = value
-        .strip_prefix("~/")
-        .or_else(|| value.strip_prefix("~\\"))
-    {
-        return home_directory().join(rest);
-    }
-    PathBuf::from(value)
 }
 
 fn discover_session_files(homes: &[PathBuf]) -> Vec<PathBuf> {
@@ -458,7 +438,9 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use tempfile::tempdir;
 
-    use super::{aggregate, discover_session_files, estimate_cost, parse_jsonl, TokenEvent};
+    use super::{
+        aggregate, codex_homes, discover_session_files, estimate_cost, parse_jsonl, TokenEvent,
+    };
     use crate::pricing::{
         test_bundled_pricing, ModelPricing, ModelRates, PricingCatalog, PricingSupplement,
     };
@@ -522,6 +504,22 @@ mod tests {
         assert_eq!(
             events[0].timestamp.to_rfc3339(),
             "2026-07-15T12:00:00.123+00:00"
+        );
+    }
+
+    #[test]
+    fn codex_home_override_is_one_exact_path_even_when_it_contains_a_comma() {
+        let directory = tempdir().unwrap();
+        let default_home = directory.path().join("home");
+        let configured = directory.path().join("codex,work");
+
+        assert_eq!(
+            codex_homes(Some(&configured), &default_home),
+            vec![configured]
+        );
+        assert_eq!(
+            codex_homes(None, &default_home),
+            vec![default_home.join(".codex")]
         );
     }
 

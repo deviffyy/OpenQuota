@@ -126,18 +126,7 @@ fn claude_roots(config: Option<&str>, xdg: Option<&str>, home: &Path) -> Vec<Pat
     };
 
     if let Some(config) = config.map(str::trim).filter(|value| !value.is_empty()) {
-        for value in config
-            .split(',')
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        {
-            let mut root = expand_home(value, home);
-            if root.file_name().and_then(|name| name.to_str()) == Some("projects") && root.is_dir()
-            {
-                root.pop();
-            }
-            add_if_valid(root);
-        }
+        add_if_valid(PathBuf::from(config));
     } else {
         let xdg = xdg
             .map(str::trim)
@@ -146,10 +135,10 @@ fn claude_roots(config: Option<&str>, xdg: Option<&str>, home: &Path) -> Vec<Pat
             .unwrap_or_else(|| home.join(".config"));
         add_if_valid(xdg.join("claude"));
         add_if_valid(home.join(".claude"));
-    }
 
-    for root in cowork_claude_roots(home) {
-        add_if_valid(root);
+        for root in cowork_claude_roots(home) {
+            add_if_valid(root);
+        }
     }
     roots
 }
@@ -551,16 +540,19 @@ mod tests {
     }
 
     #[test]
-    fn discovers_each_config_root_and_accepts_a_projects_alias() {
+    fn config_override_is_one_root_even_when_its_path_contains_a_comma() {
         let directory = tempdir().unwrap();
         let home = directory.path().join("home");
-        let first = directory.path().join("first");
-        let second = directory.path().join("second");
-        fs::create_dir_all(first.join("projects")).unwrap();
-        fs::create_dir_all(second.join("projects")).unwrap();
-        let config = format!("{}, {}", first.display(), second.join("projects").display());
-        let roots = claude_roots(Some(&config), None, &home);
-        assert_eq!(roots, vec![first, second]);
+        let configured = directory.path().join("claude,work");
+        let cowork = home.join(
+            "Library/Application Support/Claude/local-agent-mode-sessions/group/sub/local_1/.claude",
+        );
+        fs::create_dir_all(configured.join("projects")).unwrap();
+        fs::create_dir_all(cowork.join("projects")).unwrap();
+
+        let roots = claude_roots(Some(configured.to_str().unwrap()), None, &home);
+
+        assert_eq!(roots, vec![configured]);
     }
 
     #[test]
