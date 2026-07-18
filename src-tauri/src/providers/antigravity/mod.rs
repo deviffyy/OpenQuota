@@ -318,13 +318,20 @@ fn snapshot(plan: Option<String>, quotas: Vec<crate::models::QuotaWindow>) -> Pr
     }
 }
 
+fn has_refresh_source(
+    has_credentials: bool,
+    local_server_available: impl FnOnce() -> bool,
+) -> bool {
+    has_credentials || local_server_available()
+}
+
 impl crate::providers::UsageProvider for AntigravityProvider {
     fn definition(&self) -> ProviderDefinition {
         definition()
     }
 
     fn has_local_credentials(&self) -> bool {
-        auth::has_local_credentials()
+        has_refresh_source(auth::has_local_credentials(), || discover().is_some())
     }
 
     fn refresh(&self) -> Result<ProviderSnapshot, crate::providers::ProviderError> {
@@ -344,9 +351,9 @@ impl crate::providers::UsageProvider for AntigravityProvider {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Mutex;
+    use std::{cell::Cell, sync::Mutex};
 
-    use super::{matching_cached_access_token, CachedAccessToken};
+    use super::{has_refresh_source, matching_cached_access_token, CachedAccessToken};
 
     #[test]
     fn cached_access_token_is_bound_to_its_refresh_credential() {
@@ -360,5 +367,22 @@ mod tests {
         );
         assert!(matching_cached_access_token(&cache, Some([2; 32])).is_none());
         assert!(cache.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn running_language_server_is_a_refresh_source_without_credentials() {
+        assert!(has_refresh_source(false, || true));
+        assert!(!has_refresh_source(false, || false));
+    }
+
+    #[test]
+    fn credentials_skip_language_server_discovery() {
+        let discovery_called = Cell::new(false);
+
+        assert!(has_refresh_source(true, || {
+            discovery_called.set(true);
+            false
+        }));
+        assert!(!discovery_called.get());
     }
 }
