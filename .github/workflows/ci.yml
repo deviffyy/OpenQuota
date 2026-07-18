@@ -132,140 +132,18 @@ jobs:
         if: runner.os == 'Linux'
         run: pnpm build:linux
 
-      - name: Smoke test Linux X11 fallback window
-        if: runner.os == 'Linux'
-        run: |
-          xvfb-run -a dbus-run-session -- bash -euo pipefail -c '
-            export HOME="${RUNNER_TEMP}/openquota-x11-home"
-            export XDG_CONFIG_HOME="${HOME}/xdg"
-            export XDG_CURRENT_DESKTOP="ubuntu:GNOME"
-            export XDG_SESSION_TYPE="x11"
-            export OPENQUOTA_LINUX_TRAY_HOST="unavailable"
-            mkdir -p "${HOME}"
-            openbox >/tmp/openquota-openbox.log 2>&1 &
-            wm_pid=$!
-            src-tauri/target/release/openquota >/tmp/openquota-x11.log 2>&1 &
-            app_pid=$!
-            trap "kill ${app_pid} ${wm_pid} 2>/dev/null || true" EXIT
-            found=0
-            for _ in $(seq 1 30); do
-              if xdotool search --name "^OpenQuota$" >/dev/null 2>&1; then
-                found=1
-                break
-              fi
-              if ! kill -0 "${app_pid}" 2>/dev/null; then
-                cat /tmp/openquota-x11.log
-                exit 1
-              fi
-              sleep 1
-            done
-            if [ "${found}" -ne 1 ]; then
-              cat /tmp/openquota-x11.log
-            fi
-            test "${found}" -eq 1
-          '
-
-      - name: Smoke test Linux Wayland startup
-        if: runner.os == 'Linux'
-        run: |
-          dbus-run-session -- bash -euo pipefail -c '
-            export HOME="${RUNNER_TEMP}/openquota-wayland-home"
-            export XDG_CONFIG_HOME="${HOME}/xdg"
-            export XDG_CURRENT_DESKTOP="KDE"
-            export XDG_RUNTIME_DIR="${RUNNER_TEMP}/openquota-wayland-runtime"
-            export XDG_SESSION_TYPE="wayland"
-            export OPENQUOTA_LINUX_TRAY_HOST="unavailable"
-            export GDK_BACKEND="wayland"
-            export WAYLAND_DISPLAY="openquota-wayland"
-            mkdir -p "${HOME}" "${XDG_RUNTIME_DIR}"
-            chmod 700 "${XDG_RUNTIME_DIR}"
-            weston --backend=headless-backend.so --socket="${WAYLAND_DISPLAY}" --idle-time=0 \
-              --log="${RUNNER_TEMP}/openquota-weston.log" &
-            weston_pid=$!
-            trap "kill ${app_pid:-} ${weston_pid} 2>/dev/null || true" EXIT
-            for _ in $(seq 1 20); do
-              test -S "${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}" && break
-              kill -0 "${weston_pid}"
-              sleep 1
-            done
-            test -S "${XDG_RUNTIME_DIR}/${WAYLAND_DISPLAY}"
-            src-tauri/target/release/openquota &
-            app_pid=$!
-            sleep 8
-            kill -0 "${app_pid}"
-          '
-
       - name: Build macOS DMG
         if: runner.os == 'macOS'
         run: pnpm tauri build --bundles dmg
         env:
           APPLE_SIGNING_IDENTITY: '-'
 
-      - name: Smoke test macOS tray startup
-        if: runner.os == 'macOS'
-        run: |
-          set -euo pipefail
-          export HOME="${RUNNER_TEMP}/openquota-macos-home"
-          mkdir -p "${HOME}"
-          dmg="$(find src-tauri/target/release/bundle/dmg -name '*.dmg' -print -quit)"
-          mount_dir="${RUNNER_TEMP}/openquota-macos-dmg"
-          log="${RUNNER_TEMP}/openquota-macos.log"
-          mkdir -p "${mount_dir}"
-          hdiutil attach "${dmg}" -mountpoint "${mount_dir}" -nobrowse -readonly
-          binary="${mount_dir}/OpenQuota.app/Contents/MacOS/openquota"
-          test -x "${binary}"
-          "${binary}" >"${log}" 2>&1 &
-          app_pid=$!
-          trap 'kill "${app_pid}" 2>/dev/null || true; hdiutil detach "${mount_dir}" -force >/dev/null 2>&1 || true' EXIT
-          sleep 8
-          if ! kill -0 "${app_pid}" 2>/dev/null; then
-            cat "${log}"
-            exit 1
-          fi
-
       - name: Build Windows installer
         if: runner.os == 'Windows'
         run: pnpm build:installer
 
-      - name: Smoke test Windows tray startup
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $env:APPDATA = Join-Path $env:RUNNER_TEMP 'openquota-windows-roaming'
-          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'openquota-windows-local'
-          New-Item -ItemType Directory -Force -Path $env:APPDATA, $env:LOCALAPPDATA | Out-Null
-          $stdout = Join-Path $env:RUNNER_TEMP 'openquota-windows.stdout.log'
-          $stderr = Join-Path $env:RUNNER_TEMP 'openquota-windows.stderr.log'
-          $process = Start-Process `
-            -FilePath 'src-tauri/target/release/openquota.exe' `
-            -PassThru `
-            -WindowStyle Hidden `
-            -RedirectStandardOutput $stdout `
-            -RedirectStandardError $stderr
-          try {
-            Start-Sleep -Seconds 8
-            if ($process.HasExited) {
-              Get-Content $stdout, $stderr -ErrorAction SilentlyContinue
-              throw "OpenQuota exited during the Windows tray startup smoke test."
-            }
-          } finally {
-            if (!$process.HasExited) {
-              Stop-Process -Id $process.Id -Force
-            }
-          }
-
-      - name: Verify Windows GUI subsystem
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $binary = Resolve-Path 'src-tauri/target/release/openquota.exe'
-          $bytes = [System.IO.File]::ReadAllBytes($binary)
-          $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
-          $optionalHeader = $peOffset + 24
-          $subsystem = [BitConverter]::ToUInt16($bytes, $optionalHeader + 68)
-          if ($subsystem -ne 2) {
-            throw "Expected Windows GUI subsystem (2), found $subsystem."
-          }
+      - name: Smoke test packaged application
+        uses: ./.github/actions/platform-smoke
 
       - name: Upload Windows installer
         if: runner.os == 'Windows'

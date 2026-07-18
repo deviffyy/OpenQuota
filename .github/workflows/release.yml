@@ -16,6 +16,7 @@ on:
         type: boolean
 
 permissions:
+  checks: read
   contents: write
 
 concurrency:
@@ -126,7 +127,7 @@ jobs:
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
 
   publish-artifacts:
-    name: Build ${{ matrix.name }}
+    name: Build and smoke ${{ matrix.name }}
     needs: [validate, prepare-release]
     if: ${{ always() && !inputs.verify_only && needs.validate.result == 'success' && needs.prepare-release.result == 'success' }}
     runs-on: ${{ matrix.platform }}
@@ -138,22 +139,32 @@ jobs:
             platform: windows-latest
             args: --bundles nsis --config src-tauri/tauri.release.conf.json
             rust-targets: ''
+            smoke-binary: src-tauri/target/release/openquota
+            smoke-bundle: ''
           - name: Windows ARM64
             platform: windows-11-arm
             args: --target aarch64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.release.conf.json
             rust-targets: aarch64-pc-windows-msvc
+            smoke-binary: src-tauri/target/aarch64-pc-windows-msvc/release/openquota
+            smoke-bundle: ''
           - name: Linux x64
             platform: ubuntu-22.04
             args: --bundles deb,appimage --config src-tauri/tauri.release.conf.json
             rust-targets: ''
+            smoke-binary: src-tauri/target/release/openquota
+            smoke-bundle: ''
           - name: Linux ARM64
             platform: ubuntu-22.04-arm
             args: --target aarch64-unknown-linux-gnu --bundles deb,appimage --config src-tauri/tauri.release.conf.json
             rust-targets: aarch64-unknown-linux-gnu
+            smoke-binary: src-tauri/target/aarch64-unknown-linux-gnu/release/openquota
+            smoke-bundle: ''
           - name: macOS Universal
             platform: macos-latest
             args: --target universal-apple-darwin --bundles app,dmg --config src-tauri/tauri.release.conf.json
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            smoke-binary: ''
+            smoke-bundle: src-tauri/target/universal-apple-darwin/release/bundle/dmg
 
     steps:
       - uses: actions/checkout@v7
@@ -165,11 +176,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
+            dbus-x11 \
             libayatana-appindicator3-dev \
             libwebkit2gtk-4.1-dev \
+            openbox \
             librsvg2-dev \
             xdg-utils \
-            patchelf
+            patchelf \
+            weston \
+            xdotool \
+            xvfb
 
       - uses: actions/setup-node@v6
         with:
@@ -207,6 +223,12 @@ jobs:
           retryAttempts: 2
           args: ${{ matrix.args }}
 
+      - name: Smoke test release artifact
+        uses: ./.github/actions/platform-smoke
+        with:
+          binary-path: ${{ matrix.smoke-binary }}
+          bundle-directory: ${{ matrix.smoke-bundle }}
+
   publish-release:
     name: Verify and publish release
     needs: [validate, prepare-release, publish-artifacts]
@@ -217,11 +239,48 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
 
+      - name: Verify release smoke checks
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p release-check
+          commit="$(git rev-parse HEAD)"
+          required=(
+            'Build and smoke Windows x64'
+            'Build and smoke Windows ARM64'
+            'Build and smoke Linux x64'
+            'Build and smoke Linux ARM64'
+            'Build and smoke macOS Universal'
+          )
+          verified=false
+          for attempt in 1 2 3 4 5; do
+            gh api \
+              -H 'Accept: application/vnd.github+json' \
+              "repos/$GITHUB_REPOSITORY/commits/$commit/check-runs?filter=all&per_page=100" \
+              > release-check/check-runs.json
+            missing=0
+            for name in "${required[@]}"; do
+              if ! jq -e --arg name "$name" \
+                '.check_runs | any(.name == $name and .conclusion == "success")' \
+                release-check/check-runs.json >/dev/null; then
+                echo "Required release smoke check is not successful: $name"
+                missing=1
+              fi
+            done
+            if test "$missing" -eq 0; then
+              verified=true
+              break
+            fi
+            echo "Release smoke checks are not ready yet (attempt $attempt/5)."
+            sleep 3
+          done
+          test "$verified" = true
+
       - name: Download and verify release metadata
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir release-check
+          mkdir -p release-check
           release_id="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq '.databaseId')"
           test -n "$release_id" || {
             echo "Draft release not found for $RELEASE_TAG" >&2
