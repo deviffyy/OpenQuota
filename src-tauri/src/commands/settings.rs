@@ -123,7 +123,13 @@ pub async fn reset_customization(
 ) -> Result<SettingsViewState, String> {
     crate::app_info!("config", "reset all customization requested");
     let mut next = settings.get();
-    next.providers = settings.default_settings(&HashSet::new()).providers;
+    let detected_before_reset = next
+        .providers
+        .iter()
+        .filter(|provider| provider.detected)
+        .map(|provider| provider.id.clone())
+        .collect::<HashSet<_>>();
+    next.providers = settings.default_settings(&detected_before_reset).providers;
     next.detection_notice_dismissed = false;
     let next = settings.update(next)?;
     tray_presentation::update(&app, &service.state(), &next, settings.registry());

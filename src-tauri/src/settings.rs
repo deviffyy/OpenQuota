@@ -11,7 +11,7 @@ use crate::{
         AppSettings, MetricDefinition, MetricLayout, MetricSection, ProviderCatalog,
         ProviderDefinition, ProviderLayout, SettingsViewState,
     },
-    providers::ProviderRegistry,
+    providers::{CredentialProbeResults, CredentialProbeStatus, ProviderRegistry},
     storage::{Storage, StorageError},
 };
 
@@ -23,6 +23,7 @@ pub struct CredentialDetectionPlan {
     auto_enable_provider_ids: HashSet<String>,
     replace_fallback: bool,
     enablement_revision: u64,
+    credential_revision: u64,
 }
 
 impl CredentialDetectionPlan {
@@ -41,6 +42,7 @@ pub struct SettingsService {
     registry: Arc<ProviderRegistry>,
     settings: RwLock<AppSettings>,
     enablement_revision: AtomicU64,
+    credential_revision: AtomicU64,
 }
 
 impl SettingsService {
@@ -60,6 +62,7 @@ impl SettingsService {
             registry,
             settings: RwLock::new(settings),
             enablement_revision: AtomicU64::new(0),
+            credential_revision: AtomicU64::new(0),
         })
     }
 
@@ -110,12 +113,14 @@ impl SettingsService {
             registry,
             settings: RwLock::new(settings),
             enablement_revision: AtomicU64::new(0),
+            credential_revision: AtomicU64::new(0),
         };
         let plan = CredentialDetectionPlan {
             provider_ids,
             auto_enable_provider_ids,
             replace_fallback: fresh_install,
             enablement_revision: 0,
+            credential_revision: 0,
         };
         Ok((service, plan))
     }
@@ -163,6 +168,7 @@ impl SettingsService {
             auto_enable_provider_ids: HashSet::new(),
             replace_fallback: true,
             enablement_revision: self.enablement_revision.load(Ordering::SeqCst),
+            credential_revision: self.credential_revision.load(Ordering::SeqCst),
         }
     }
 
@@ -170,28 +176,56 @@ impl SettingsService {
     pub fn apply_credential_detection(
         &self,
         plan: &CredentialDetectionPlan,
-        detected: &HashSet<String>,
+        probe_results: &CredentialProbeResults,
     ) -> Result<CredentialDetectionOutcome, String> {
         let mut current = self
             .settings
             .write()
             .map_err(|_| "OpenQuota settings are temporarily unavailable.".to_owned())?;
         let enabled_before = enabled_provider_set(&current);
+        let detected_before = detected_provider_set(&current);
+        let credential_revision_matches =
+            self.credential_revision.load(Ordering::SeqCst) == plan.credential_revision;
         let mut next = current.clone();
-        normalize(&self.registry, &mut next, detected);
-
-        if plan.replace_fallback {
-            if self.enablement_revision.load(Ordering::SeqCst) == plan.enablement_revision
-                && !detected.is_empty()
-            {
-                for provider in &mut next.providers {
-                    provider.enabled = detected.contains(&provider.id);
+        let mut detected = detected_before.clone();
+        if credential_revision_matches {
+            for (provider_id, status) in probe_results {
+                match status {
+                    CredentialProbeStatus::Detected => {
+                        detected.insert(provider_id.clone());
+                    }
+                    CredentialProbeStatus::Absent => {
+                        detected.remove(provider_id);
+                    }
+                    CredentialProbeStatus::Unknown => {}
                 }
             }
-        } else {
+        }
+        normalize(&self.registry, &mut next, &detected);
+
+        if plan.replace_fallback {
+            if credential_revision_matches
+                && self.enablement_revision.load(Ordering::SeqCst) == plan.enablement_revision
+            {
+                let any_detected = !detected.is_empty();
+                for provider in &mut next.providers {
+                    match probe_results.get(&provider.id) {
+                        Some(CredentialProbeStatus::Detected) => provider.enabled = true,
+                        Some(CredentialProbeStatus::Absent) => {
+                            provider.enabled = !any_detected
+                                && self
+                                    .registry
+                                    .definition(&provider.id)
+                                    .is_some_and(|definition| definition.fallback_enabled);
+                        }
+                        Some(CredentialProbeStatus::Unknown) | None => {}
+                    }
+                }
+            }
+        } else if credential_revision_matches {
             for provider in &mut next.providers {
                 if plan.auto_enable_provider_ids.contains(&provider.id)
-                    && detected.contains(&provider.id)
+                    && probe_results.get(&provider.id) == Some(&CredentialProbeStatus::Detected)
                 {
                     provider.enabled = true;
                 }
@@ -211,6 +245,9 @@ impl SettingsService {
         current.clone_from(&next);
         if enablement_changed {
             self.enablement_revision.fetch_add(1, Ordering::SeqCst);
+        }
+        if detected_provider_set(&next) != detected_before {
+            self.credential_revision.fetch_add(1, Ordering::SeqCst);
         }
         Ok(CredentialDetectionOutcome {
             settings: next,
@@ -269,6 +306,7 @@ impl SettingsService {
         if enabled_provider_set(&current) != enabled_before {
             self.enablement_revision.fetch_add(1, Ordering::SeqCst);
         }
+        self.credential_revision.fetch_add(1, Ordering::SeqCst);
         Ok(current.clone())
     }
 
@@ -306,6 +344,15 @@ fn enabled_provider_set(settings: &AppSettings) -> HashSet<String> {
         .providers
         .iter()
         .filter(|provider| provider.enabled)
+        .map(|provider| provider.id.clone())
+        .collect()
+}
+
+fn detected_provider_set(settings: &AppSettings) -> HashSet<String> {
+    settings
+        .providers
+        .iter()
+        .filter(|provider| provider.detected)
         .map(|provider| provider.id.clone())
         .collect()
 }
@@ -482,15 +529,18 @@ fn normalize_metrics(metrics: &mut Vec<MetricLayout>, definitions: &[MetricDefin
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::HashSet, sync::Arc};
+    use std::{
+        collections::HashSet,
+        sync::{atomic::Ordering, Arc},
+    };
 
     use tempfile::tempdir;
 
     use crate::{
         models::{MetricSection, ProviderDefinition, ProviderSnapshot},
         providers::{
-            antigravity, claude, codex, cursor, openrouter, ProviderError, ProviderRegistry,
-            UsageProvider,
+            antigravity, claude, codex, cursor, openrouter, CredentialProbeResults,
+            CredentialProbeStatus, ProviderError, ProviderRegistry, UsageProvider,
         },
         storage::Storage,
     };
@@ -536,6 +586,20 @@ mod tests {
             .collect()
     }
 
+    fn probe_results(detected: &[&str]) -> CredentialProbeResults {
+        ["claude", "codex", "cursor", "antigravity", "openrouter"]
+            .into_iter()
+            .map(|provider_id| {
+                let status = if detected.contains(&provider_id) {
+                    CredentialProbeStatus::Detected
+                } else {
+                    CredentialProbeStatus::Absent
+                };
+                (provider_id.to_owned(), status)
+            })
+            .collect()
+    }
+
     #[test]
     fn empty_detection_uses_the_established_fallback_set() {
         let registry = catalog();
@@ -552,7 +616,7 @@ mod tests {
         assert_eq!(enabled_ids(&service.get()), ["claude", "codex", "cursor"]);
 
         let outcome = service
-            .apply_credential_detection(&plan, &HashSet::from(["antigravity".to_owned()]))
+            .apply_credential_detection(&plan, &probe_results(&["antigravity"]))
             .unwrap();
 
         assert_eq!(enabled_ids(&outcome.settings), ["antigravity"]);
@@ -575,7 +639,7 @@ mod tests {
         let (service, plan) = SettingsService::new_deferred(storage, catalog()).unwrap();
 
         let outcome = service
-            .apply_credential_detection(&plan, &HashSet::new())
+            .apply_credential_detection(&plan, &probe_results(&[]))
             .unwrap();
 
         assert_eq!(
@@ -583,6 +647,109 @@ mod tests {
             ["claude", "codex", "cursor"]
         );
         assert!(outcome.newly_enabled_provider_ids.is_empty());
+    }
+
+    #[test]
+    fn unknown_first_run_probes_preserve_the_fallback_enablement() {
+        let directory = tempdir().unwrap();
+        let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
+        let (service, plan) = SettingsService::new_deferred(storage, catalog()).unwrap();
+        let unknown = ["claude", "codex", "cursor", "antigravity", "openrouter"]
+            .into_iter()
+            .map(|provider_id| (provider_id.to_owned(), CredentialProbeStatus::Unknown))
+            .collect();
+
+        let outcome = service.apply_credential_detection(&plan, &unknown).unwrap();
+
+        assert_eq!(
+            enabled_ids(&outcome.settings),
+            ["claude", "codex", "cursor"]
+        );
+        assert!(outcome
+            .settings
+            .providers
+            .iter()
+            .all(|provider| !provider.detected));
+    }
+
+    #[test]
+    fn unknown_reset_probe_preserves_existing_detection_and_enablement() {
+        let directory = tempdir().unwrap();
+        let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
+        let service =
+            SettingsService::new_for_test(storage, catalog(), &HashSet::from(["codex".to_owned()]))
+                .unwrap();
+        let plan = service.reset_detection_plan();
+        let mut results = probe_results(&["antigravity"]);
+        results.insert("codex".to_owned(), CredentialProbeStatus::Unknown);
+
+        let outcome = service.apply_credential_detection(&plan, &results).unwrap();
+        let codex = outcome
+            .settings
+            .providers
+            .iter()
+            .find(|provider| provider.id == "codex")
+            .unwrap();
+        let antigravity = outcome
+            .settings
+            .providers
+            .iter()
+            .find(|provider| provider.id == "antigravity")
+            .unwrap();
+
+        assert!(codex.detected);
+        assert!(codex.enabled);
+        assert!(antigravity.detected);
+        assert!(antigravity.enabled);
+    }
+
+    #[test]
+    fn definitive_reset_absence_restores_the_fallback_set() {
+        let directory = tempdir().unwrap();
+        let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
+        let service = SettingsService::new_for_test(
+            storage,
+            catalog(),
+            &HashSet::from(["antigravity".to_owned()]),
+        )
+        .unwrap();
+        let plan = service.reset_detection_plan();
+
+        let outcome = service
+            .apply_credential_detection(&plan, &probe_results(&[]))
+            .unwrap();
+
+        assert_eq!(
+            enabled_ids(&outcome.settings),
+            ["claude", "codex", "cursor"]
+        );
+        assert!(outcome
+            .settings
+            .providers
+            .iter()
+            .all(|provider| !provider.detected));
+    }
+
+    #[test]
+    fn unknown_existing_detection_does_not_enable_the_fallback_set() {
+        let directory = tempdir().unwrap();
+        let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
+        let service =
+            SettingsService::new_for_test(storage, catalog(), &HashSet::from(["codex".to_owned()]))
+                .unwrap();
+        let plan = service.reset_detection_plan();
+        let mut results = probe_results(&[]);
+        results.insert("codex".to_owned(), CredentialProbeStatus::Unknown);
+
+        let outcome = service.apply_credential_detection(&plan, &results).unwrap();
+
+        assert_eq!(enabled_ids(&outcome.settings), ["codex"]);
+        assert!(outcome
+            .settings
+            .providers
+            .iter()
+            .find(|provider| provider.id == "codex")
+            .is_some_and(|provider| provider.detected));
     }
 
     #[test]
@@ -600,7 +767,7 @@ mod tests {
         service.update(changed).unwrap();
 
         let outcome = service
-            .apply_credential_detection(&plan, &HashSet::from(["antigravity".to_owned()]))
+            .apply_credential_detection(&plan, &probe_results(&["antigravity"]))
             .unwrap();
 
         assert_eq!(enabled_ids(&outcome.settings), ["codex", "cursor"]);
@@ -629,7 +796,7 @@ mod tests {
 
         let (first, plan) =
             SettingsService::new_deferred(storage.clone(), registry.clone()).unwrap();
-        let detected = HashSet::from(["codex".to_owned(), "antigravity".to_owned()]);
+        let detected = probe_results(&["codex", "antigravity"]);
         let outcome = first.apply_credential_detection(&plan, &detected).unwrap();
         assert!(
             outcome
@@ -687,7 +854,7 @@ mod tests {
         service.update(changed).unwrap();
 
         let outcome = service
-            .apply_credential_detection(&plan, &HashSet::from(["antigravity".to_owned()]))
+            .apply_credential_detection(&plan, &probe_results(&["antigravity"]))
             .unwrap();
 
         assert!(
@@ -992,5 +1159,65 @@ mod tests {
             .unwrap();
         assert!(!openrouter.detected);
         assert!(openrouter.enabled);
+    }
+
+    #[test]
+    fn stale_absent_probe_cannot_undo_an_api_key_save_for_a_detected_provider() {
+        let directory = tempdir().unwrap();
+        let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
+        let service = SettingsService::new_for_test(
+            storage,
+            catalog(),
+            &HashSet::from(["openrouter".to_owned()]),
+        )
+        .unwrap();
+        let plan = service.reset_detection_plan();
+
+        service
+            .apply_provider_credential_state("openrouter", true, true)
+            .unwrap();
+        let outcome = service
+            .apply_credential_detection(&plan, &probe_results(&[]))
+            .unwrap();
+        let openrouter = outcome
+            .settings
+            .providers
+            .iter()
+            .find(|provider| provider.id == "openrouter")
+            .unwrap();
+
+        assert!(openrouter.detected);
+        assert!(openrouter.enabled);
+        assert_eq!(service.credential_revision.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn stale_detected_probe_cannot_undo_an_api_key_delete() {
+        let directory = tempdir().unwrap();
+        let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
+        let service = SettingsService::new_for_test(
+            storage,
+            catalog(),
+            &HashSet::from(["openrouter".to_owned()]),
+        )
+        .unwrap();
+        let plan = service.reset_detection_plan();
+
+        service
+            .apply_provider_credential_state("openrouter", false, false)
+            .unwrap();
+        let outcome = service
+            .apply_credential_detection(&plan, &probe_results(&["openrouter"]))
+            .unwrap();
+        let openrouter = outcome
+            .settings
+            .providers
+            .iter()
+            .find(|provider| provider.id == "openrouter")
+            .unwrap();
+
+        assert!(!openrouter.detected);
+        assert!(openrouter.enabled);
+        assert_eq!(service.credential_revision.load(Ordering::SeqCst), 1);
     }
 }

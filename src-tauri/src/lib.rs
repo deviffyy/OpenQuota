@@ -75,7 +75,10 @@ fn spawn_startup_credential_detection(
         app_info!(
             "config",
             "startup credential detection completed ({} detected, {} newly enabled)",
-            detected.len(),
+            detected
+                .values()
+                .filter(|status| { **status == providers::CredentialProbeStatus::Detected })
+                .count(),
             outcome.newly_enabled_provider_ids.len()
         );
 
