@@ -60,17 +60,14 @@ jobs:
           test "$(git rev-parse HEAD)" = "$tag_commit"
           echo "release_commit=$tag_commit" >> "$GITHUB_OUTPUT"
 
-      - name: Validate mandatory release-signing configuration
+      - name: Validate updater signing configuration
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: bash .github/scripts/validate-platform-signing.sh
+        run: |
+          test -n "$TAURI_SIGNING_PRIVATE_KEY" || {
+            echo 'Missing required secret: TAURI_SIGNING_PRIVATE_KEY' >&2
+            exit 1
+          }
 
       - name: Install Linux dependencies
         run: |
@@ -176,12 +173,12 @@ jobs:
         include:
           - name: Windows x64
             platform: windows-latest
-            args: --bundles nsis --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.windows-signing.conf.json
+            args: --bundles nsis --config src-tauri/tauri.release.conf.json
             rust-targets: ''
             smoke-artifact-root: src-tauri/target/release/bundle
           - name: Windows ARM64
             platform: windows-11-arm
-            args: --target aarch64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.windows-signing.conf.json
+            args: --target aarch64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.release.conf.json
             rust-targets: aarch64-pc-windows-msvc
             smoke-artifact-root: src-tauri/target/aarch64-pc-windows-msvc/release/bundle
           - name: Linux x64
@@ -241,36 +238,13 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Configure Windows Authenticode signing
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-        run: >-
-          & "$env:GITHUB_WORKSPACE/.github/scripts/configure-windows-signing.ps1"
-          -ConfigPath "$env:GITHUB_WORKSPACE/src-tauri/tauri.windows-signing.conf.json"
-
-      - name: Configure Apple Developer ID signing and notarization
-        if: runner.os == 'macOS'
-        shell: bash
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: bash .github/scripts/configure-macos-signing.sh
-
-      - name: Build, sign, and upload platform artifacts
+      - name: Build and upload platform artifacts
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
         with:
           releaseId: ${{ needs.prepare-release.outputs.release_id }}
           releaseDraft: true
@@ -284,25 +258,6 @@ jobs:
         uses: ./.github/actions/platform-smoke
         with:
           artifact-root: ${{ matrix.smoke-artifact-root }}
-
-      - name: Remove temporary Windows code-signing certificate
-        if: always() && runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          foreach ($thumbprint in ($env:OPENQUOTA_WINDOWS_IMPORTED_CERTIFICATES -split ',')) {
-            if (![string]::IsNullOrWhiteSpace($thumbprint)) {
-              $certificatePath = "Cert:\CurrentUser\My\$thumbprint"
-              Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
-            }
-          }
-
-      - name: Remove temporary Apple signing keychain
-        if: always() && runner.os == 'macOS'
-        shell: bash
-        run: |
-          if test -n "${OPENQUOTA_APPLE_KEYCHAIN:-}"; then
-            security delete-keychain "$OPENQUOTA_APPLE_KEYCHAIN" || true
-          fi
 
   publish-release:
     name: Verify and publish release

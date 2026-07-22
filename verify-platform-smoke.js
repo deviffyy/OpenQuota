@@ -10,9 +10,6 @@ const macos = read('.github/actions/platform-smoke/scripts/macos.sh');
 const linuxX11 = read('.github/actions/platform-smoke/scripts/linux-x11.sh');
 const linuxWayland = read('.github/actions/platform-smoke/scripts/linux-wayland.sh');
 const linuxPackages = read('.github/actions/platform-smoke/scripts/linux-packages.sh');
-const releaseSigning = read('.github/scripts/validate-platform-signing.sh');
-const windowsSigning = read('.github/scripts/configure-windows-signing.ps1');
-const macosSigning = read('.github/scripts/configure-macos-signing.sh');
 const releaseTagVerification = read('.github/scripts/verify-release-tag.sh');
 
 const ciContracts = [
@@ -42,9 +39,7 @@ const releaseContracts = [
   'Build and smoke Linux x64',
   'Build and smoke Linux ARM64',
   'Build and smoke macOS Universal',
-  'Configure Windows Authenticode signing',
-  'Configure Apple Developer ID signing and notarization',
-  'Validate mandatory release-signing configuration',
+  'Validate updater signing configuration',
   'Validate trusted release tag',
   'ref: ${{ github.sha }}',
   '+refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}',
@@ -54,14 +49,9 @@ const releaseContracts = [
   'echo "release_commit=$tag_commit" >> "$GITHUB_OUTPUT"',
   'ref: ${{ needs.validate.outputs.release_commit }}',
   'verify-release-tag.sh',
-  'validate-platform-signing.sh',
-  'configure-windows-signing.ps1',
-  'configure-macos-signing.sh',
   'artifact-root: ${{ matrix.smoke-artifact-root }}',
   "needs.validate.result == 'success' && (inputs.verify_only",
-  "APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}",
-  "APPLE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_PASSWORD || '' }}",
-  "APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}",
+  "APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}",
 ];
 const actionContracts = [
   'Install, start, and uninstall the Windows NSIS package',
@@ -88,31 +78,6 @@ for (const [source, contracts] of [
 
 for (const [source, content, contracts] of [
   [
-    'release signing',
-    releaseSigning,
-    [
-      'TAURI_SIGNING_PRIVATE_KEY',
-      'WINDOWS_CERTIFICATE',
-      'WINDOWS_CERTIFICATE_PASSWORD',
-      'APPLE_CERTIFICATE',
-      'APPLE_CERTIFICATE_PASSWORD',
-      'APPLE_ID',
-      'APPLE_PASSWORD',
-      'APPLE_TEAM_ID',
-      'exit 1',
-    ],
-  ],
-  [
-    'Windows signing',
-    windowsSigning,
-    ['Import-PfxCertificate', 'certificateThumbprint', 'OPENQUOTA_REQUIRE_AUTHENTICODE=true'],
-  ],
-  [
-    'macOS signing',
-    macosSigning,
-    ['Developer ID Application', 'APPLE_SIGNING_IDENTITY=', 'OPENQUOTA_REQUIRE_NOTARIZATION=true'],
-  ],
-  [
     'release tag verification',
     releaseTagVerification,
     ['git fetch --force --no-tags origin', 'Release tag moved after validation', 'exit 1'],
@@ -136,23 +101,11 @@ for (const [source, content, contracts] of [
       '@(\'/S\', "/D=$installRoot")',
       'Start-Sleep -Seconds 8',
       'Expected Windows GUI subsystem (2)',
-      'Get-AuthenticodeSignature',
       "-ArgumentList '/S'",
       'remained installed after the NSIS uninstall smoke test',
     ],
   ],
-  [
-    'macOS',
-    macos,
-    [
-      'hdiutil attach',
-      'OpenQuota.app/Contents/MacOS/openquota',
-      'OPENQUOTA_REQUIRE_NOTARIZATION',
-      'codesign --verify',
-      'xcrun stapler validate',
-      'sleep 8',
-    ],
-  ],
+  ['macOS', macos, ['hdiutil attach', 'OpenQuota.app/Contents/MacOS/openquota', 'sleep 8']],
   [
     'Linux packages',
     linuxPackages,
@@ -184,10 +137,21 @@ for (const obsoleteContract of ['smoke-binary:', 'binary-path:', 'bundle-directo
   }
 }
 
-for (const unsafeReleaseContract of ['REQUIRE_PLATFORM_SIGNING']) {
-  if (release.includes(unsafeReleaseContract)) {
+for (const deferredPlatformSigningContract of [
+  'WINDOWS_CERTIFICATE',
+  'APPLE_CERTIFICATE',
+  'APPLE_ID',
+  'OPENQUOTA_REQUIRE_AUTHENTICODE',
+  'OPENQUOTA_REQUIRE_NOTARIZATION',
+  'tauri.windows-signing.conf.json',
+]) {
+  if (
+    release.includes(deferredPlatformSigningContract) ||
+    windows.includes(deferredPlatformSigningContract) ||
+    macos.includes(deferredPlatformSigningContract)
+  ) {
     throw new Error(
-      `Release signing can be bypassed or exposed outside macOS: ${unsafeReleaseContract}`,
+      `Deferred platform signing is still configured: ${deferredPlatformSigningContract}`,
     );
   }
 }
@@ -200,27 +164,12 @@ if (pinnedCheckoutCount !== 3) {
   throw new Error(`Expected 3 SHA-pinned downstream checkouts, found ${pinnedCheckoutCount}.`);
 }
 
-const tauriBuildStart = release.indexOf('      - name: Build, sign, and upload platform artifacts');
-const tauriBuildEnd = release.indexOf('\n        with:', tauriBuildStart);
-const tauriBuildEnvironment = release.slice(tauriBuildStart, tauriBuildEnd);
-for (const unscopedSecret of [
-  'APPLE_ID: ${{ secrets.APPLE_ID }}',
-  'APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}',
-  'APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}',
-]) {
-  if (tauriBuildEnvironment.includes(unscopedSecret)) {
-    throw new Error(`Tauri matrix exposes an Apple secret outside macOS: ${unscopedSecret}`);
-  }
-}
-
 const trustedTagGate = release.indexOf('      - name: Validate trusted release tag');
-const releaseSecretsGate = release.indexOf(
-  '      - name: Validate mandatory release-signing configuration',
-);
-if (trustedTagGate === -1 || releaseSecretsGate === -1 || trustedTagGate >= releaseSecretsGate) {
-  throw new Error('Release signing secrets are exposed before the trusted-tag gate.');
+const updaterSigningGate = release.indexOf('      - name: Validate updater signing configuration');
+if (trustedTagGate === -1 || updaterSigningGate === -1 || trustedTagGate >= updaterSigningGate) {
+  throw new Error('Updater signing secret is exposed before the trusted-tag gate.');
 }
 
 console.log(
-  'CI and release builds exercise packaged Windows, macOS and Linux artifacts with platform-signing gates.',
+  'CI and release builds exercise packaged Windows, macOS and Linux artifacts with pinned release tags.',
 );

@@ -69,18 +69,6 @@ try {
   }
   $uninstaller = $uninstallers[0].FullName
 
-  if ($env:OPENQUOTA_REQUIRE_AUTHENTICODE -eq 'true') {
-    foreach ($signedFile in @($installer, $binary)) {
-      $signature = Get-AuthenticodeSignature -LiteralPath $signedFile
-      if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) {
-        throw "Invalid Authenticode signature on $signedFile`: $($signature.StatusMessage)"
-      }
-      if ($signature.SignerCertificate.Thumbprint -ne $env:OPENQUOTA_WINDOWS_CERTIFICATE_THUMBPRINT) {
-        throw "Unexpected Authenticode signer on $signedFile."
-      }
-    }
-  }
-
   $process = Start-Process -FilePath $binary -PassThru -WindowStyle Hidden `
     -RedirectStandardOutput $stdout -RedirectStandardError $stderr
   Start-Sleep -Seconds 8
