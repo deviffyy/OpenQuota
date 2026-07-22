@@ -125,6 +125,39 @@ describe('ValueMetric', () => {
     expect(await screen.findByText('Reset applied.')).toBeInTheDocument();
   });
 
+  it('keeps reset confirmation open when focus moves into the detail panel', async () => {
+    vi.useFakeTimers();
+    try {
+      render(ValueMetric, {
+        label: 'Rate Limit Resets',
+        metric: {
+          id: 'rateLimitResets',
+          label: 'Rate Limit Resets',
+          values: [{ number: 1, kind: 'count', label: 'available', estimated: false }],
+          expiriesAt: ['2026-02-20T19:00:00Z'],
+        },
+        now: Date.parse('2026-02-20T16:00:00Z'),
+        resetDisplay: 'countdown',
+        timeFormat: 'twentyFourHour',
+      });
+
+      const trigger = screen.getByRole('button', { name: 'Rate Limit Resets: 1 available' });
+      trigger.focus();
+      await fireEvent.click(trigger);
+
+      const use = screen.getByRole('button', { name: /Use reset expiring/ });
+      use.focus();
+      await fireEvent.click(use);
+      await vi.advanceTimersByTimeAsync(181);
+
+      expect(screen.getByText('Use this reset?')).toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: 'Rate Limit Resets details' })).toBeVisible();
+      expect(mocks.invoke).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('behaves as an anchored popover and closes with Escape', async () => {
     render(ValueMetric, {
       label: 'Rate Limit Resets',

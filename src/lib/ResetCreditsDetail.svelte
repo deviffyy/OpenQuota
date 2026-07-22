@@ -108,6 +108,7 @@
   tabindex="-1"
   aria-label={`${title} details`}
   onmouseenter={onEnter}
+  onfocusin={onEnter}
   onmouseleave={() => {
     if (!confirmingExpiry && !pendingExpiry) onLeave();
   }}
