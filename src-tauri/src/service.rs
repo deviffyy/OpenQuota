@@ -610,6 +610,8 @@ mod tests {
         storage::Storage,
     };
 
+    const TEST_WAIT_TIMEOUT: Duration = Duration::from_secs(10);
+
     struct SlowProvider {
         id: &'static str,
         calls: Arc<AtomicUsize>,
@@ -681,10 +683,10 @@ mod tests {
         }
 
         fn refresh(&self) -> Result<ProviderSnapshot, ProviderError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
             let active = self.active.fetch_add(1, Ordering::SeqCst) + 1;
             self.maximum.fetch_max(active, Ordering::SeqCst);
             let credential = self.credential.lock().unwrap().clone();
+            self.calls.fetch_add(1, Ordering::SeqCst);
             thread::sleep(self.delay);
             self.active.fetch_sub(1, Ordering::SeqCst);
             let mut snapshot = test_snapshot(self.id);
@@ -738,10 +740,26 @@ mod tests {
         force: bool,
     ) -> ProviderViewState {
         tauri::async_runtime::block_on(async {
-            tokio::time::timeout(Duration::from_secs(2), service.refresh(provider_id, force))
+            tokio::time::timeout(TEST_WAIT_TIMEOUT, service.refresh(provider_id, force))
                 .await
                 .expect("refresh should not deadlock")
         })
+    }
+
+    fn wait_until(message: &str, predicate: impl Fn() -> bool) {
+        let started = Instant::now();
+        while !predicate() {
+            assert!(started.elapsed() < TEST_WAIT_TIMEOUT, "{message}");
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    fn refresh_runner_is_idle(service: &ProviderService, provider_id: &str) -> bool {
+        service
+            .refresh_flights
+            .get(provider_id)
+            .and_then(|flight| flight.state.lock().ok())
+            .is_some_and(|state| !state.runner_active)
     }
 
     #[test]
@@ -987,18 +1005,11 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         assert_eq!(maximum.load(Ordering::SeqCst), 1);
 
-        thread::sleep(Duration::from_millis(180));
+        wait_until("timed-out refresh worker should drain", || {
+            active.load(Ordering::SeqCst) == 0 && refresh_runner_is_idle(&service, "slow")
+        });
         assert_eq!(active.load(Ordering::SeqCst), 0);
-        assert!(
-            !service
-                .refresh_flights
-                .get("slow")
-                .unwrap()
-                .state
-                .lock()
-                .unwrap()
-                .runner_active
-        );
+        assert!(refresh_runner_is_idle(&service, "slow"));
         assert_eq!(
             service
                 .state()
@@ -1043,10 +1054,9 @@ mod tests {
             tauri::async_runtime::spawn(
                 async move { first_service.refresh("cancelled", true).await },
             );
-        let started = Instant::now();
-        while active.load(Ordering::SeqCst) == 0 && started.elapsed() < Duration::from_secs(1) {
-            thread::sleep(Duration::from_millis(1));
-        }
+        wait_until("cancelled refresh worker should start", || {
+            active.load(Ordering::SeqCst) != 0
+        });
         assert_eq!(active.load(Ordering::SeqCst), 1);
 
         first.abort();
@@ -1083,12 +1093,12 @@ mod tests {
         let service = Arc::new(ProviderService::new(registry, storage));
 
         tauri::async_runtime::block_on(async {
-            tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::time::timeout(TEST_WAIT_TIMEOUT, async {
                 let first_service = service.clone();
                 let first = tauri::async_runtime::spawn(async move {
                     first_service.refresh("lifecycle", true).await
                 });
-                tokio::time::timeout(Duration::from_secs(1), async {
+                tokio::time::timeout(TEST_WAIT_TIMEOUT, async {
                     while active.load(Ordering::SeqCst) == 0 {
                         tokio::task::yield_now().await;
                     }
@@ -1135,12 +1145,12 @@ mod tests {
         let service = Arc::new(ProviderService::new(registry, storage));
 
         tauri::async_runtime::block_on(async {
-            tokio::time::timeout(Duration::from_secs(2), async {
+            tokio::time::timeout(TEST_WAIT_TIMEOUT, async {
                 let old_service = service.clone();
                 let old_refresh = tauri::async_runtime::spawn(async move {
                     old_service.refresh("credential", true).await
                 });
-                tokio::time::timeout(Duration::from_secs(1), async {
+                tokio::time::timeout(TEST_WAIT_TIMEOUT, async {
                     while calls.load(Ordering::SeqCst) < 1 {
                         tokio::task::yield_now().await;
                     }
@@ -1159,7 +1169,7 @@ mod tests {
                 let saved_refresh = tauri::async_runtime::spawn(async move {
                     saved_service.refresh("credential", true).await
                 });
-                tokio::time::timeout(Duration::from_secs(1), async {
+                tokio::time::timeout(TEST_WAIT_TIMEOUT, async {
                     while calls.load(Ordering::SeqCst) < 3 {
                         tokio::task::yield_now().await;
                     }
@@ -1244,10 +1254,9 @@ mod tests {
         );
         drop(observations);
 
-        let draining = Instant::now();
-        while active.load(Ordering::SeqCst) != 0 && draining.elapsed() < Duration::from_secs(1) {
-            thread::sleep(Duration::from_millis(1));
-        }
+        wait_until("timed-out progress worker should drain", || {
+            active.load(Ordering::SeqCst) == 0 && refresh_runner_is_idle(&service, "slow")
+        });
         assert_eq!(active.load(Ordering::SeqCst), 0);
     }
 
