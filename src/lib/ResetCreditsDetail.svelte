@@ -21,6 +21,7 @@
   let confirmingExpiry = $state<string | null>(null);
   let pendingExpiry = $state<string | null>(null);
   let result = $state<{ expiry: string; outcome: ResetClaimOutcome } | null>(null);
+  let dialogElement: HTMLDivElement | undefined;
   const requestIds = new SvelteMap<string, string>();
 
   const entries = $derived(
@@ -64,7 +65,10 @@
 
   function handleKeydown(event: KeyboardEvent) {
     if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
     if (confirmingExpiry) {
+      dialogElement?.focus();
       confirmingExpiry = null;
       return;
     }
@@ -99,9 +103,10 @@
   }
 </script>
 
-<svelte:window onkeydown={handleKeydown} />
+<svelte:window onkeydowncapture={handleKeydown} />
 
 <div
+  bind:this={dialogElement}
   class="reset-credits-detail"
   style={`top:${top}px`}
   role="dialog"

@@ -179,11 +179,15 @@ describe('ValueMetric', () => {
     ).not.toBeInTheDocument();
 
     await fireEvent.click(screen.getByRole('button', { name: /Use reset expiring/ }));
-    await fireEvent.keyDown(window, { key: 'Escape' });
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    cancel.focus();
+    await fireEvent.keyDown(cancel, { key: 'Escape' });
     expect(screen.queryByText('Use this reset?')).not.toBeInTheDocument();
-    expect(screen.getByRole('dialog', { name: 'Rate Limit Resets details' })).toBeVisible();
+    const dialog = screen.getByRole('dialog', { name: 'Rate Limit Resets details' });
+    expect(dialog).toBeVisible();
+    expect(dialog).toHaveFocus();
 
-    await fireEvent.keyDown(window, { key: 'Escape' });
+    await fireEvent.keyDown(dialog, { key: 'Escape' });
     expect(
       screen.queryByRole('dialog', { name: 'Rate Limit Resets details' }),
     ).not.toBeInTheDocument();

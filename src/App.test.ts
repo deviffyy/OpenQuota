@@ -623,6 +623,29 @@ describe('OpenQuota dashboard', () => {
     expect(mocks.invoke).toHaveBeenCalledWith('dismiss_main_window');
   });
 
+  it('lets reset details consume Escape before the popup shortcut', async () => {
+    render(App);
+    await screen.findByText('Plus');
+    await fireEvent.click(screen.getByRole('button', { name: 'Show more' }));
+    await fireEvent.click(screen.getByRole('button', { name: 'Rate Limit Resets: 2 available' }));
+    await fireEvent.click(screen.getAllByRole('button', { name: /Use reset expiring/ })[0]);
+
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    cancel.focus();
+    await fireEvent.keyDown(cancel, { key: 'Escape' });
+
+    expect(screen.queryByText('Use this reset?')).not.toBeInTheDocument();
+    const dialog = screen.getByRole('dialog', { name: 'Rate Limit Resets details' });
+    expect(dialog).toHaveFocus();
+    expect(mocks.invoke).not.toHaveBeenCalledWith('dismiss_main_window');
+
+    await fireEvent.keyDown(dialog, { key: 'Escape' });
+    expect(
+      screen.queryByRole('dialog', { name: 'Rate Limit Resets details' }),
+    ).not.toBeInTheDocument();
+    expect(mocks.invoke).not.toHaveBeenCalledWith('dismiss_main_window');
+  });
+
   it('refreshes only the provider selected in a context menu', async () => {
     let finishRefresh: ((state: UsageViewState) => void) | undefined;
     const refreshResult = new Promise<UsageViewState>((resolve) => (finishRefresh = resolve));
@@ -916,6 +939,50 @@ describe('OpenQuota dashboard', () => {
     expect(menu).toHaveAttribute('open');
     await fireEvent.click(screen.getByRole('button', { name: 'Check for Updates…' }));
     expect(menu).not.toHaveAttribute('open');
+  });
+
+  it('resets native Options and Share details when the popup is hidden', async () => {
+    let emitPopupHidden: (() => void) | undefined;
+    mocks.listen.mockImplementation(
+      (eventName: string, handler: (event: { payload: unknown }) => void) => {
+        if (eventName === 'popup-hidden') {
+          emitPopupHidden = () => handler({ payload: undefined });
+        }
+        return Promise.resolve(vi.fn());
+      },
+    );
+
+    render(App);
+    await screen.findByText('Plus');
+    const optionsSummary = screen.getByLabelText('Open options');
+    const optionsMenu = optionsSummary.closest('details')!;
+    await fireEvent.click(optionsSummary);
+    const shareSummary = screen.getByText('Share Screenshot').closest('summary')!;
+    const shareMenu = shareSummary.closest('details')!;
+    await fireEvent.click(shareSummary);
+    expect(optionsMenu).toHaveAttribute('open');
+    expect(shareMenu).toHaveAttribute('open');
+    await waitFor(() =>
+      expect(within(shareMenu).getByRole('button', { name: 'Codex' })).toBeInTheDocument(),
+    );
+
+    await waitFor(() => expect(emitPopupHidden).toBeTypeOf('function'));
+    emitPopupHidden!();
+
+    await waitFor(() => {
+      expect(optionsMenu).not.toHaveAttribute('open');
+      expect(shareMenu).not.toHaveAttribute('open');
+      expect(within(shareMenu).queryByRole('button')).not.toBeInTheDocument();
+    });
+
+    await fireEvent.click(optionsSummary);
+    expect(optionsMenu).toHaveAttribute('open');
+    expect(shareMenu).not.toHaveAttribute('open');
+    await fireEvent.click(shareSummary);
+    expect(shareMenu).toHaveAttribute('open');
+    await waitFor(() =>
+      expect(within(shareMenu).getByRole('button', { name: 'Codex' })).toBeInTheDocument(),
+    );
   });
 
   it('honors Reduce Motion and refits the panel when On Demand changes content height', async () => {

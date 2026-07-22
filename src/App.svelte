@@ -65,6 +65,7 @@
   let showAbout = $state(false);
   let shareMenuOpen = $state(false);
   let optionsMenuElement = $state<HTMLDetailsElement>();
+  let shareMenuElement = $state<HTMLDetailsElement>();
   let shareTimer: ReturnType<typeof setTimeout> | undefined;
   const providerStates = $derived(Object.values(viewState.providers));
   const anyRefreshing = $derived(providerStates.some((state) => state.refreshing));
@@ -119,11 +120,11 @@
     void dismissMainWindow();
   }
   function resetTransientUi() {
+    closeOptionsMenu();
     showAbout = false;
     resetConfirmationOpen = false;
     resettingCustomization = false;
     confirmationMessage = null;
-    shareMenuOpen = false;
     const content = document.querySelector<HTMLElement>('.content');
     if (content && typeof content.scrollTo === 'function') content.scrollTo({ top: 0 });
     else if (content) content.scrollTop = 0;
@@ -355,10 +356,11 @@
     if (event.key !== 'Escape' || !menu.open) return;
     event.preventDefault();
     event.stopPropagation();
-    menu.open = false;
-    menu.querySelector<HTMLElement>('summary')?.focus();
+    closeOptionsMenu(true);
   }
   function closeOptionsMenu(restoreFocus = false) {
+    if (shareMenuElement?.open) shareMenuElement.open = false;
+    shareMenuOpen = false;
     if (!optionsMenuElement?.open) return;
     optionsMenuElement.open = false;
     if (restoreFocus) optionsMenuElement.querySelector<HTMLElement>('summary')?.focus();
@@ -685,6 +687,7 @@
               >
               <hr />
               <details
+                bind:this={shareMenuElement}
                 class="share-menu"
                 ontoggle={(event) => (shareMenuOpen = event.currentTarget.open)}
               >
