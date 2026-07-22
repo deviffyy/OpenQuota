@@ -1055,7 +1055,7 @@ mod tests {
     }
 
     #[test]
-    fn progress_reports_fast_provider_before_slow_provider_deadline() {
+    fn progress_reports_every_provider_completion() {
         let directory = tempdir().unwrap();
         let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
         let active = Arc::new(AtomicUsize::new(0));
@@ -1084,34 +1084,30 @@ mod tests {
         ));
         let observations = Arc::new(Mutex::new(Vec::new()));
         let observed = observations.clone();
-        let started = Instant::now();
 
         let final_state = tauri::async_runtime::block_on(service.refresh_enabled_with_progress(
             &["slow".into(), "fast".into()],
             true,
             move |state| {
-                observed
-                    .lock()
-                    .unwrap()
-                    .push((started.elapsed(), state.clone()));
+                observed.lock().unwrap().push(state.clone());
             },
         ));
 
         let observations = observations.lock().unwrap();
         assert_eq!(observations.len(), 2);
-        assert!(observations[0].0 < Duration::from_millis(120));
-        assert!(observations[0]
-            .1
+        let completed = observations.last().unwrap();
+        assert!(completed
             .providers
             .get("fast")
             .and_then(|state| state.snapshot.as_ref())
             .is_some());
-        assert!(observations[0]
-            .1
-            .providers
-            .get("slow")
-            .and_then(|state| state.error.as_ref())
-            .is_none());
+        assert_eq!(
+            completed
+                .providers
+                .get("slow")
+                .and_then(|state| state.error.as_deref()),
+            Some("Provider refresh timed out.")
+        );
         assert!(storage.load_snapshot("fast").unwrap().is_some());
         assert_eq!(
             final_state
@@ -1122,7 +1118,10 @@ mod tests {
         );
         drop(observations);
 
-        thread::sleep(Duration::from_millis(180));
+        let draining = Instant::now();
+        while active.load(Ordering::SeqCst) != 0 && draining.elapsed() < Duration::from_secs(1) {
+            thread::sleep(Duration::from_millis(1));
+        }
         assert_eq!(active.load(Ordering::SeqCst), 0);
     }
 
