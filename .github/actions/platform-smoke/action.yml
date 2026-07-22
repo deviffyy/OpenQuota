@@ -2,42 +2,36 @@ name: OpenQuota platform smoke
 description: Starts a packaged OpenQuota build with the native platform smoke harness.
 
 inputs:
-  binary-path:
-    description: Release binary path without a required Windows .exe suffix.
+  artifact-root:
+    description: Tauri bundle directory containing the platform's packaged artifacts.
     required: false
-    default: src-tauri/target/release/openquota
-  bundle-directory:
-    description: Directory containing the macOS DMG.
-    required: false
-    default: src-tauri/target/release/bundle/dmg
+    default: src-tauri/target/release/bundle
 
 runs:
   using: composite
   steps:
-    - name: Smoke test Windows tray startup and GUI subsystem
+    - name: Install, start, and uninstall the Windows NSIS package
       if: runner.os == 'Windows'
       shell: pwsh
       env:
-        OPENQUOTA_SMOKE_BINARY: ${{ inputs.binary-path }}
-      run: '& "$env:GITHUB_ACTION_PATH/scripts/windows.ps1" -BinaryPath "$env:OPENQUOTA_SMOKE_BINARY"'
+        OPENQUOTA_SMOKE_ARTIFACT_ROOT: ${{ inputs.artifact-root }}
+      run: >-
+        & "$env:GITHUB_ACTION_PATH/scripts/windows.ps1"
+        -InstallerDirectory "$env:OPENQUOTA_SMOKE_ARTIFACT_ROOT/nsis"
 
     - name: Smoke test macOS tray startup
       if: runner.os == 'macOS'
       shell: bash
       env:
-        OPENQUOTA_SMOKE_BUNDLE: ${{ inputs.bundle-directory }}
-      run: bash "$GITHUB_ACTION_PATH/scripts/macos.sh" "$OPENQUOTA_SMOKE_BUNDLE"
+        OPENQUOTA_SMOKE_ARTIFACT_ROOT: ${{ inputs.artifact-root }}
+      run: bash "$GITHUB_ACTION_PATH/scripts/macos.sh" "$OPENQUOTA_SMOKE_ARTIFACT_ROOT/dmg"
 
-    - name: Smoke test Linux X11 fallback window
+    - name: Exercise Linux AppImage and Debian packages
       if: runner.os == 'Linux'
       shell: bash
       env:
-        OPENQUOTA_SMOKE_BINARY: ${{ inputs.binary-path }}
-      run: bash "$GITHUB_ACTION_PATH/scripts/linux-x11.sh" "$OPENQUOTA_SMOKE_BINARY"
-
-    - name: Smoke test Linux Wayland startup
-      if: runner.os == 'Linux'
-      shell: bash
-      env:
-        OPENQUOTA_SMOKE_BINARY: ${{ inputs.binary-path }}
-      run: bash "$GITHUB_ACTION_PATH/scripts/linux-wayland.sh" "$OPENQUOTA_SMOKE_BINARY"
+        OPENQUOTA_SMOKE_ARTIFACT_ROOT: ${{ inputs.artifact-root }}
+      run: >-
+        bash "$GITHUB_ACTION_PATH/scripts/linux-packages.sh"
+        "$OPENQUOTA_SMOKE_ARTIFACT_ROOT/appimage"
+        "$OPENQUOTA_SMOKE_ARTIFACT_ROOT/deb"

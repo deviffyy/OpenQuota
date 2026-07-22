@@ -29,12 +29,48 @@ env:
 jobs:
   validate:
     name: Validate release
-    if: ${{ !inputs.verify_only }}
     runs-on: ubuntu-22.04
+    outputs:
+      release_commit: ${{ steps.trusted_tag.outputs.release_commit }}
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Validate trusted release tag
+        id: trusted_tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Invalid release tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          git fetch --force --no-tags origin \
+            "+refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}" \
+            '+refs/heads/main:refs/remotes/origin/main'
+          git show-ref --verify --quiet "refs/tags/${RELEASE_TAG}"
+          tag_commit="$(git rev-parse "refs/tags/${RELEASE_TAG}^{commit}")"
+          git merge-base --is-ancestor "$tag_commit" refs/remotes/origin/main || {
+            echo "Release tag is not on origin/main: $RELEASE_TAG" >&2
+            exit 1
+          }
+          git checkout --detach "$tag_commit"
+          test "$(git rev-parse HEAD)" = "$tag_commit"
+          echo "release_commit=$tag_commit" >> "$GITHUB_OUTPUT"
+
+      - name: Validate mandatory release-signing configuration
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bash .github/scripts/validate-platform-signing.sh
 
       - name: Install Linux dependencies
         run: |
@@ -63,15 +99,8 @@ jobs:
         with:
           workspaces: src-tauri -> target
 
-      - name: Validate tag and signing configuration
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: |
-          test -n "$TAURI_SIGNING_PRIVATE_KEY" || {
-            echo 'Missing required secret: TAURI_SIGNING_PRIVATE_KEY' >&2
-            exit 1
-          }
-          node verify-versions.js "$RELEASE_TAG"
+      - name: Validate release tag
+        run: node verify-versions.js "$RELEASE_TAG"
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
@@ -102,6 +131,16 @@ jobs:
     outputs:
       release_id: ${{ steps.release.outputs.release_id }}
     steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.release_commit }}
+
+      - name: Verify immutable release tag
+        run: >-
+          bash .github/scripts/verify-release-tag.sh
+          "$RELEASE_TAG"
+          "${{ needs.validate.outputs.release_commit }}"
+
       - name: Create or reuse draft release
         id: release
         env:
@@ -137,39 +176,34 @@ jobs:
         include:
           - name: Windows x64
             platform: windows-latest
-            args: --bundles nsis --config src-tauri/tauri.release.conf.json
+            args: --bundles nsis --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.windows-signing.conf.json
             rust-targets: ''
-            smoke-binary: src-tauri/target/release/openquota
-            smoke-bundle: ''
+            smoke-artifact-root: src-tauri/target/release/bundle
           - name: Windows ARM64
             platform: windows-11-arm
-            args: --target aarch64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.release.conf.json
+            args: --target aarch64-pc-windows-msvc --bundles nsis --config src-tauri/tauri.release.conf.json --config src-tauri/tauri.windows-signing.conf.json
             rust-targets: aarch64-pc-windows-msvc
-            smoke-binary: src-tauri/target/aarch64-pc-windows-msvc/release/openquota
-            smoke-bundle: ''
+            smoke-artifact-root: src-tauri/target/aarch64-pc-windows-msvc/release/bundle
           - name: Linux x64
             platform: ubuntu-22.04
             args: --bundles deb,appimage --config src-tauri/tauri.release.conf.json
             rust-targets: ''
-            smoke-binary: src-tauri/target/release/openquota
-            smoke-bundle: ''
+            smoke-artifact-root: src-tauri/target/release/bundle
           - name: Linux ARM64
             platform: ubuntu-22.04-arm
             args: --target aarch64-unknown-linux-gnu --bundles deb,appimage --config src-tauri/tauri.release.conf.json
             rust-targets: aarch64-unknown-linux-gnu
-            smoke-binary: src-tauri/target/aarch64-unknown-linux-gnu/release/openquota
-            smoke-bundle: ''
+            smoke-artifact-root: src-tauri/target/aarch64-unknown-linux-gnu/release/bundle
           - name: macOS Universal
             platform: macos-latest
             args: --target universal-apple-darwin --bundles app,dmg --config src-tauri/tauri.release.conf.json
             rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
-            smoke-binary: ''
-            smoke-bundle: src-tauri/target/universal-apple-darwin/release/bundle/dmg
+            smoke-artifact-root: src-tauri/target/universal-apple-darwin/release/bundle
 
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.validate.outputs.release_commit }}
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -207,13 +241,36 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Configure Windows Authenticode signing
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: >-
+          & "$env:GITHUB_WORKSPACE/.github/scripts/configure-windows-signing.ps1"
+          -ConfigPath "$env:GITHUB_WORKSPACE/src-tauri/tauri.windows-signing.conf.json"
+
+      - name: Configure Apple Developer ID signing and notarization
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bash .github/scripts/configure-macos-signing.sh
+
       - name: Build, sign, and upload platform artifacts
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && '-' || '' }}
+          APPLE_ID: ${{ runner.os == 'macOS' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ runner.os == 'macOS' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
         with:
           releaseId: ${{ needs.prepare-release.outputs.release_id }}
           releaseDraft: true
@@ -226,18 +283,36 @@ jobs:
       - name: Smoke test release artifact
         uses: ./.github/actions/platform-smoke
         with:
-          binary-path: ${{ matrix.smoke-binary }}
-          bundle-directory: ${{ matrix.smoke-bundle }}
+          artifact-root: ${{ matrix.smoke-artifact-root }}
+
+      - name: Remove temporary Windows code-signing certificate
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          foreach ($thumbprint in ($env:OPENQUOTA_WINDOWS_IMPORTED_CERTIFICATES -split ',')) {
+            if (![string]::IsNullOrWhiteSpace($thumbprint)) {
+              $certificatePath = "Cert:\CurrentUser\My\$thumbprint"
+              Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
+            }
+          }
+
+      - name: Remove temporary Apple signing keychain
+        if: always() && runner.os == 'macOS'
+        shell: bash
+        run: |
+          if test -n "${OPENQUOTA_APPLE_KEYCHAIN:-}"; then
+            security delete-keychain "$OPENQUOTA_APPLE_KEYCHAIN" || true
+          fi
 
   publish-release:
     name: Verify and publish release
     needs: [validate, prepare-release, publish-artifacts]
-    if: ${{ always() && (inputs.verify_only || (needs.validate.result == 'success' && needs.prepare-release.result == 'success' && needs.publish-artifacts.result == 'success')) }}
+    if: ${{ always() && needs.validate.result == 'success' && (inputs.verify_only || (needs.prepare-release.result == 'success' && needs.publish-artifacts.result == 'success')) }}
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.validate.outputs.release_commit }}
 
       - name: Verify release smoke checks
         env:
@@ -347,6 +422,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          bash .github/scripts/verify-release-tag.sh \
+            "$RELEASE_TAG" \
+            "${{ needs.validate.outputs.release_commit }}"
           release_id="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq '.databaseId')"
           test -n "$release_id"
           gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" \

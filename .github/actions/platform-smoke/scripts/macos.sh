@@ -25,8 +25,14 @@ trap cleanup EXIT
 export HOME="${home}"
 hdiutil attach "${dmg}" -mountpoint "${mount_dir}" -nobrowse -readonly >/dev/null
 mounted=true
+app="${mount_dir}/OpenQuota.app"
 binary="${mount_dir}/OpenQuota.app/Contents/MacOS/openquota"
 test -x "${binary}"
+if test "${OPENQUOTA_REQUIRE_NOTARIZATION:-false}" = true; then
+  codesign --verify --deep --strict --verbose=2 "${app}"
+  spctl --assess --type execute --verbose=2 "${app}"
+  xcrun stapler validate "${app}"
+fi
 "${binary}" >"${log}" 2>&1 &
 app_pid=$!
 sleep 8
