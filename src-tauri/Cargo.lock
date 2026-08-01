@@ -2804,6 +2804,8 @@ dependencies = [
  "tiny-skia",
  "tokio",
  "walkdir",
+ "webview2-com",
+ "windows",
  "windows-sys 0.61.2",
  "zbus",
  "zeroize",
