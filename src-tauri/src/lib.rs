@@ -20,6 +20,7 @@ mod storage;
 mod tray_icon;
 mod tray_presentation;
 mod updates;
+mod webview_memory;
 mod window;
 #[cfg(any(target_os = "linux", test))]
 mod xdg_autostart;
@@ -298,6 +299,9 @@ pub fn run() {
             if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
                 if window::apply_panel_surface(&window, settings.get().theme).is_err() {
                     app_warn!("window", "initial panel surface theme could not be applied");
+                }
+                if !desktop_integration.standalone_window {
+                    webview_memory::set_inactive(&window, true);
                 }
             }
 

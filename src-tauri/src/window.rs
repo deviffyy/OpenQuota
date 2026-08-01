@@ -231,6 +231,7 @@ pub fn activate_existing_instance(app: &AppHandle) {
         return;
     }
 
+    crate::webview_memory::set_inactive(&window, false);
     let _ = window.unminimize();
     let _ = window.show();
     let _ = window.set_focus();
@@ -238,6 +239,7 @@ pub fn activate_existing_instance(app: &AppHandle) {
 
 pub fn show_popup(window: &WebviewWindow) {
     finish_native_panel_resize(window);
+    crate::webview_memory::set_inactive(window, false);
     let standalone = window
         .app_handle()
         .state::<DesktopIntegration>()
@@ -257,10 +259,19 @@ pub fn show_popup(window: &WebviewWindow) {
     let _ = window.set_focus();
 }
 
+fn hide_popup_window(window: &Window) {
+    if window.hide().is_err() {
+        return;
+    }
+    if let Some(webview) = window.app_handle().get_webview_window(MAIN_WINDOW) {
+        crate::webview_memory::set_inactive(&webview, true);
+    }
+    let _ = window.app_handle().emit("popup-hidden", ());
+}
+
 pub fn hide_popup(window: &WebviewWindow) {
     finish_native_panel_resize(window);
-    let _ = window.hide();
-    let _ = window.app_handle().emit("popup-hidden", ());
+    hide_popup_window(&window.as_ref().window());
 }
 
 pub fn toggle_popup(app: &AppHandle) {
@@ -615,8 +626,7 @@ fn schedule_outside_click_dismiss(window: Window) {
                     session.finish(current_logical_height(&window));
                 }
                 let _ = window.set_resizable(false);
-                let _ = window.hide();
-                let _ = app_for_dismiss.emit("popup-hidden", ());
+                hide_popup_window(&window);
             }
         });
     });
@@ -675,8 +685,7 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
                 .app_handle()
                 .state::<PopupDismissGuard>()
                 .cancel_pending();
-            let _ = window.hide();
-            let _ = window.app_handle().emit("popup-hidden", ());
+            hide_popup_window(window);
         }
         _ => {}
     }
