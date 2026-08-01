@@ -33,6 +33,8 @@
   import ConfirmationSheet from './lib/ConfirmationSheet.svelte';
   import Dashboard from './lib/Dashboard.svelte';
   import Icon from './lib/Icon.svelte';
+  import { setUiLanguage } from './lib/i18n';
+  import { t } from './lib/i18n';
   import { createListenerRegistry } from './lib/listenerRegistry';
   import { emptyProviderCatalog, ProviderCatalogIndex } from './lib/metrics';
   import { springMotion } from './lib/motion';
@@ -105,6 +107,8 @@
     if (settingsState.settings.theme === 'system') delete root.dataset.theme;
     else root.dataset.theme = settingsState.settings.theme;
     root.dataset.density = settingsState.settings.density;
+    setUiLanguage(settingsState.settings.language);
+    root.lang = settingsState.settings.language;
   });
 
   $effect(() => {
@@ -350,7 +354,7 @@
   }
   function topBarTitle() {
     if (screen.startsWith('provider:')) return providerDisplayName(screen.slice(9));
-    return screen === 'settings' ? 'Settings' : 'Customize';
+    return screen === 'settings' ? t('settings') : t('customize');
   }
   function closeAboutFromBackdrop(event: MouseEvent) {
     if (event.target === event.currentTarget) showAbout = false;
@@ -611,7 +615,8 @@
 <svelte:head><meta name="color-scheme" content="light dark" /></svelte:head>
 <svelte:window onpointerdown={handleWindowPointerDown} />
 
-<main
+  {#key settingsState?.settings.language ?? 'system'}
+  <main
   class="popover"
   aria-label="OpenQuota usage dashboard"
   oncontextmenu={(event) => event.preventDefault()}
@@ -623,7 +628,7 @@
     <div
       class="panel-resize-dragger panel-resize-dragger--top"
       role="separator"
-      aria-label="Resize panel height"
+      aria-label={t('panelHeight')}
       aria-orientation="horizontal"
       onpointerdown={handlePanelResizePointerDown}
     ></div>
@@ -631,7 +636,7 @@
   {#if settingsState}
     {#if screen !== 'dashboard'}
       <header class="screen-header app-top-bar">
-        <button type="button" onclick={back} aria-label="Back" data-tooltip="Back">
+        <button type="button" onclick={back} aria-label={t('back')} data-tooltip={t('back')}>
           <Icon name="back" size={16} strokeWidth={2.2} />
         </button>
         <h1>{topBarTitle()}</h1>
@@ -640,8 +645,8 @@
             class="text-button"
             type="button"
             onclick={requestCustomizationReset}
-            aria-label="Reset all customization"
-            data-tooltip="Reset All Customization"
+            aria-label={t('resetCustomization')}
+            data-tooltip={t('resetCustomization')}
             ><Icon name="reset" size={15} strokeWidth={2} /></button
           >
         {:else if screen.startsWith('provider:')}
@@ -760,7 +765,7 @@
         {#if screen === 'dashboard'}
           <details class="options-menu" bind:this={optionsMenuElement}>
             <summary aria-label="Open options" onkeydown={handleOptionsKey}
-              ><span>Options</span><Icon name="chevron-down" size={11} strokeWidth={2.2} /></summary
+              ><span>{t('options')}</span><Icon name="chevron-down" size={11} strokeWidth={2.2} /></summary
             >
             <div
               class="options-menu__panel"
@@ -779,14 +784,14 @@
                 type="button"
                 aria-label="Customize"
                 onclick={() => navigate('customize')}
-                ><Icon name="sliders" /><span>Customize</span><kbd>↩</kbd></button
+                ><Icon name="sliders" /><span>{t('customize')}</span><kbd>↩</kbd></button
               >
               <button
                 class="menu-item"
                 type="button"
                 aria-label="Settings"
                 onclick={() => navigate('settings')}
-                ><Icon name="gear" /><span>Settings</span><kbd>{shortcuts.settings}</kbd></button
+                ><Icon name="gear" /><span>{t('settings')}</span><kbd>{shortcuts.settings}</kbd></button
               >
               <hr />
               <details
@@ -796,7 +801,7 @@
               >
                 <summary
                   ><span class="share-menu__direction"><Icon name="chevron-left" size={12} /></span
-                  ><span>Share Screenshot</span></summary
+                  ><span>{t('shareScreenshot')}</span></summary
                 >
                 <div>
                   {#if shareMenuOpen}
@@ -809,18 +814,18 @@
                 </div>
               </details>
               <button class="menu-item" type="button" onclick={() => void checkForUpdates(true)}
-                ><Icon name="refresh" /><span>Check for Updates…</span></button
+                ><Icon name="refresh" /><span>{t('checkUpdates')}</span></button
               >
               <hr />
               <button class="menu-item" type="button" onclick={() => (showAbout = true)}
-                ><Icon name="about" /><span>About OpenQuota</span></button
+                ><Icon name="about" /><span>{t('about')}</span></button
               >
               <button
                 class="menu-item menu-item--danger"
                 type="button"
                 aria-label="Quit OpenQuota"
                 onclick={quitApp}
-                ><Icon name="power" /><span>Quit OpenQuota</span><kbd>{shortcuts.quit}</kbd></button
+                ><Icon name="power" /><span>{t('quit')}</span><kbd>{shortcuts.quit}</kbd></button
               >
             </div>
           </details>
@@ -836,7 +841,7 @@
 
     {#if resetConfirmationOpen}
       <ConfirmationSheet
-        title="Reset All Customization?"
+        title={t('resetCustomizationQuestion')}
         message="This turns installed providers back on and restores every provider's metric visibility and order."
         confirmLabel="Reset All"
         pending={resettingCustomization}
@@ -864,7 +869,7 @@
           <OpenQuotaMark size={44} />
           <h1>OpenQuota</h1>
           <p>Version {appVersion}</p>
-          <small>Private, local usage monitoring for your AI coding tools.</small>
+          <small>{t('openQuotaDescription')}</small>
         </div>
       </div>
     {/if}
@@ -873,7 +878,7 @@
       {#if settingsError}
         <div class="notice notice--blocking" role="alert">{settingsError}</div>
       {:else}
-        <p class="empty-row">Loading OpenQuota…</p>
+        <p class="empty-row">{t('loading')}</p>
       {/if}
     </div>
   {/if}
@@ -886,7 +891,8 @@
       onpointerdown={handlePanelResizePointerDown}
     ></div>
   {/if}
-</main>
+  </main>
+  {/key}
 
 <style>
   :global {

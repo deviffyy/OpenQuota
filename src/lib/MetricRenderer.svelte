@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n';
   import { usageSourceNote, type ProviderCatalogIndex } from './metrics';
   import QuotaMetric from './QuotaMetric.svelte';
   import StatusMetric from './StatusMetric.svelte';
@@ -86,7 +87,7 @@
         aria-valuenow="0"
       ></div>
     </div>
-    <div class="metric__reading"><span>No data</span><span>Reset unavailable</span></div>
+    <div class="metric__reading"><span>{t('noData')}</span><span>{t('resetUnavailable')}</span></div>
   </section>
 {:else if definition?.source.kind === 'trend'}
   <UsageTrend daily={snapshot.usage.daily} sourceNote={resolvedUsageSourceNote} />

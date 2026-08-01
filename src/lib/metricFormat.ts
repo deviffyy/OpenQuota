@@ -1,32 +1,19 @@
 import type { AppSettings } from './types';
+import { getUiLanguage, localeFor } from './i18n';
 
 export type MetricNumberKind = 'percent' | 'dollars' | 'count';
 export type MetricNumberStyle = 'tray' | 'row' | 'full';
 
-const compactFormatter = new Intl.NumberFormat('en-US', {
-  notation: 'compact',
-  maximumFractionDigits: 1,
-});
-const rowNumberFormatter = new Intl.NumberFormat('en-US', {
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 1,
-});
-const fullNumberFormatter = new Intl.NumberFormat('en-US', {
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 1,
-});
-const currencyFormatter = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-const wholeDollarFormatter = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 0,
-});
+function formatters() {
+  const locale = localeFor(getUiLanguage());
+  return {
+    compact: new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 }),
+    row: new Intl.NumberFormat(locale, { minimumFractionDigits: 0, maximumFractionDigits: 1 }),
+    full: new Intl.NumberFormat(locale, { minimumFractionDigits: 0, maximumFractionDigits: 1 }),
+    currency: new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }),
+    wholeDollar: new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }),
+  };
+}
 
 export function formatMetricNumber(
   value: number,
@@ -34,15 +21,16 @@ export function formatMetricNumber(
   style: MetricNumberStyle,
 ) {
   if (!Number.isFinite(value)) return '—';
+  const formatter = formatters();
   if (kind === 'percent') return `${Math.round(Math.min(100, Math.max(0, value)))}%`;
   if (kind === 'dollars') {
     if (Math.abs(value) >= 1000 && style !== 'full') {
-      return `$${compactFormatter.format(value)}`;
+      return `$${formatter.compact.format(value)}`;
     }
-    return style === 'tray' ? wholeDollarFormatter.format(value) : currencyFormatter.format(value);
+    return style === 'tray' ? formatter.wholeDollar.format(value) : formatter.currency.format(value);
   }
-  if (style !== 'full' && Math.abs(value) >= 1000) return compactFormatter.format(value);
-  return (style === 'full' ? fullNumberFormatter : rowNumberFormatter).format(value);
+  if (style !== 'full' && Math.abs(value) >= 1000) return formatter.compact.format(value);
+  return (style === 'full' ? formatter.full : formatter.row).format(value);
 }
 
 export function formatMetricValue(
@@ -66,6 +54,7 @@ export function formatSpendValue(
 }
 
 export function totalSpendRingCenter(value: number, metric: AppSettings['totalSpendMetric']) {
+  const formatter = formatters();
   if (metric === 'cost') {
     return { primary: formatMetricNumber(value, 'dollars', 'tray'), unit: 'dollars' };
   }
@@ -74,13 +63,13 @@ export function totalSpendRingCenter(value: number, metric: AppSettings['totalSp
   }
   const magnitude = Math.abs(value);
   if (magnitude >= 1_000_000_000) {
-    return { primary: rowNumberFormatter.format(value / 1_000_000_000), unit: 'billion' };
+    return { primary: formatter.row.format(value / 1_000_000_000), unit: 'billion' };
   }
   if (magnitude >= 1_000_000) {
-    return { primary: rowNumberFormatter.format(value / 1_000_000), unit: 'million' };
+    return { primary: formatter.row.format(value / 1_000_000), unit: 'million' };
   }
   if (magnitude >= 1_000) {
-    return { primary: rowNumberFormatter.format(value / 1_000), unit: 'thousand' };
+    return { primary: formatter.row.format(value / 1_000), unit: 'thousand' };
   }
-  return { primary: rowNumberFormatter.format(value), unit: 'tokens' };
+  return { primary: formatter.row.format(value), unit: 'tokens' };
 }

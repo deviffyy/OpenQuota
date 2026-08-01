@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n';
   import Icon from './Icon.svelte';
   import {
     formatLimit,
@@ -35,6 +36,9 @@
   const used = $derived(Math.min(100, Math.max(0, quota.usedPercent)));
   const remaining = $derived(Math.max(0, 100 - used));
   const countUnit = $derived(quota.unit?.trim() || 'requests');
+  const localizedLabel = $derived(
+    quota.label === 'Session' ? t('session') : quota.label === 'Weekly' ? t('weekly') : quota.label,
+  );
   const estimateNote = $derived(
     quota.sourceNote?.trim() || 'Estimated from local usage data and may differ from billed usage.',
   );
@@ -134,15 +138,15 @@
   );
 </script>
 
-<section class="metric" aria-label={`${quota.label} quota`}>
+<section class="metric" aria-label={`${localizedLabel} quota`}>
   <div class="metric__heading">
     <h2>
-      {quota.label}
+      {localizedLabel}
       {#if quota.estimated}
         <span
           class="metric-estimate"
           data-tooltip={estimateNote}
-          aria-label="Estimated quota"
+          aria-label={t('estimatedQuota')}
           role="img"><Icon name="about" size={11} strokeWidth={1.9} /></span
         >
       {/if}
@@ -182,7 +186,7 @@
     <div
       class="meter meter--{severity}"
       role="progressbar"
-      aria-label={`${quota.label} used`}
+      aria-label={`${localizedLabel} used`}
       aria-valuemin="0"
       aria-valuemax="100"
       aria-valuenow={used}
@@ -207,7 +211,7 @@
       {reading}
     </button>
     {#if freshSession}
-      <span data-tooltip="Sessions start after you send your first message.">Not started</span>
+      <span data-tooltip={t('sessionsStart')}>{t('notStarted')}</span>
     {:else}
       <button type="button" data-tooltip={resetTooltip ?? undefined} onclick={onToggleReset}>
         {formatReset(quota.resetsAt, now, resetDisplay, timeFormat)}

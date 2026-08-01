@@ -1,4 +1,5 @@
 import type { QuotaWindow } from './types';
+import { getFormatLocale } from './i18n';
 
 export type PaceSeverity = 'level' | 'healthy' | 'close' | 'runningOut' | 'spent';
 
@@ -113,14 +114,14 @@ function formatDeadline(
   const currentDay = Date.UTC(current.getFullYear(), current.getMonth(), current.getDate());
   const targetDay = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
   const dayDifference = Math.round((targetDay - currentDay) / 86_400_000);
-  const time = date.toLocaleTimeString([], {
+  const time = date.toLocaleTimeString(getFormatLocale(), {
     hour: 'numeric',
     minute: '2-digit',
     hour12: timeFormat === 'system' ? undefined : timeFormat === 'twelveHour',
   });
   if (dayDifference <= 0) return `${prefix} today at ${time}`;
   if (dayDifference === 1) return `${prefix} tomorrow at ${time}`;
-  const monthDay = new Intl.DateTimeFormat(undefined, {
+  const monthDay = new Intl.DateTimeFormat(getFormatLocale(), {
     month: 'short',
     day: 'numeric',
   }).format(date);

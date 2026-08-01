@@ -3,6 +3,8 @@
   import { SvelteDate } from 'svelte/reactivity';
   import { formatMetricNumber } from './metricFormat';
   import type { DailyUsage } from './types';
+  import { getUiLanguage } from './i18n';
+  import { t } from './i18n';
 
   interface Props {
     daily: DailyUsage[];
@@ -46,7 +48,7 @@
     const date = new Date(`${value}T12:00:00`);
     return Number.isNaN(date.getTime())
       ? value
-      : new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(date);
+      : new Intl.DateTimeFormat(getUiLanguage(), { month: 'short', day: 'numeric' }).format(date);
   }
 
   function revealDetail() {
@@ -64,8 +66,8 @@
   });
 </script>
 
-<section class="trend-row" aria-label="Usage Trend">
-  <strong>Usage Trend</strong>
+<section class="trend-row" aria-label={t('usageTrend')}>
+  <strong>{t('usageTrend')}</strong>
   {#if total > 0}
     <div
       class="trend-chart-wrap"
@@ -90,7 +92,7 @@
       {#if detailVisible}
         <aside class="trend-detail" onmouseenter={revealDetail} onmouseleave={concealDetail}>
           <header>
-            <strong>Usage Trend</strong><span
+            <strong>{t('usageTrend')}</strong><span
               >{hoveredDate
                 ? `${dayLabel(highlightedPoint.date)} · ${compact(highlightedPoint.tokens)} tokens`
                 : `peak ${compact(peak.tokens)} tokens`}</span
@@ -120,7 +122,7 @@
       {/if}
     </div>
   {:else}
-    <p class="trend-empty">No data</p>
+    <p class="trend-empty">{t('noData')}</p>
   {/if}
 </section>
 

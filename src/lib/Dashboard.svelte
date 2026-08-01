@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n';
   import { onDestroy } from 'svelte';
   import { flip } from 'svelte/animate';
   import { scale, slide } from 'svelte/transition';
@@ -297,13 +298,13 @@
 />
 
 {#if updateStatus?.available && updateStatus.version !== settings.dismissedUpdateVersion}
-  <section class="hint-card update-banner" aria-label="Update Available">
+  <section class="hint-card update-banner" aria-label={t('updateAvailable')}>
     <span class="hint-card__icon"><Icon name="refresh" size={16} strokeWidth={2} /></span>
     <div>
-      <strong>Update Available</strong>
+      <strong>{t('updateAvailable')}</strong>
       <span>OpenQuota {updateStatus.version} is ready to download.</span>
       {#if updateStatus.body}<details class="update-notes">
-          <summary>What’s new</summary>
+          <summary>{t('whatsNew')}</summary>
           <p>{updateStatus.body}</p>
         </details>{/if}
       {#if installingUpdate && updateProgress}
@@ -351,14 +352,14 @@
       >
       {#if updateStatus.installable && !installingUpdate}
         <button type="button" class="update-release-action" onclick={onOpenUpdatePage}
-          >View Release</button
+          >{t('viewRelease')}</button
         >
       {/if}
     </div>
     <button
       class="hint-card__dismiss"
       type="button"
-      aria-label="Dismiss"
+      aria-label={t('dismiss')}
       onclick={() =>
         onSettingsChange({
           ...settings,
@@ -371,12 +372,12 @@
 {#if !settings.detectionNoticeDismissed}
   <section class="detection-card" out:scale={{ start: 0.95, ...springMotion(reducedMotion) }}>
     <div>
-      <strong>Welcome to OpenQuota</strong><span
-        >We set you up with the AI tools found on your computer. Add or hide providers any time.</span
+      <strong>{t('welcome')}</strong><span
+        >{t('welcomeDescription')}</span
       >
     </div>
-    <button type="button" onclick={onCustomize}>Open Customize</button>
-    <button class="dismiss" type="button" aria-label="Dismiss" onclick={dismissDetection}
+    <button type="button" onclick={onCustomize}>{t('openCustomize')}</button>
+    <button class="dismiss" type="button" aria-label={t('dismiss')} onclick={dismissDetection}
       ><Icon name="close" size={10} strokeWidth={2.2} /></button
     >
   </section>
@@ -437,14 +438,14 @@
         {#if snapshot.plan}<span class="plan">{snapshot.plan}</span>{/if}
         {#if state?.snapshot && state.stale}<span
             class="status-badge"
-            data-tooltip={stalenessTooltip(snapshot.refreshedAt)}>Outdated</span
+            data-tooltip={stalenessTooltip(snapshot.refreshedAt)}>{t('outdated')}</span
           >{/if}
         <span
           class="provider-status-slot"
           class:active={Boolean(state?.refreshing || state?.error || snapshot.warnings.length > 0)}
         >
           {#if state?.refreshing}
-            <span class="provider-refreshing" aria-label="Refreshing"
+            <span class="provider-refreshing" aria-label={t('refreshing')}
               ><Icon name="refresh" size={12} strokeWidth={2} /></span
             >
           {:else if state?.error}
@@ -614,11 +615,11 @@
         ><Icon name="refresh" size={15} />Refresh {providerDisplayName(menuProvider.id)}</button
       >
       <button type="button" role="menuitem" onclick={() => onOpenProviderCustomize(menuProvider.id)}
-        ><Icon name="sliders" size={15} />Customize…</button
+        ><Icon name="sliders" size={15} />{t('customize')}…</button
       >
       <hr />
       <button type="button" role="menuitem" onclick={() => onShare(menuProvider.id)}
-        ><Icon name="share" size={15} />Share Screenshot</button
+        ><Icon name="share" size={15} />{t('shareScreenshot')}</button
       >
     </div>
   {/if}
@@ -642,7 +643,7 @@
         type="button"
         role="menuitem"
         onclick={() => patchMetric(metricProvider.id, menuMetric.id, { enabled: false })}
-        ><Icon name="power" size={15} />Hide</button
+        ><Icon name="power" size={15} />{t('hide')}</button
       >
       {#if metricDefinition(menuMetric.id)?.pinnable}
         <button
@@ -667,7 +668,7 @@
         type="button"
         role="menuitem"
         onclick={() => onOpenProviderCustomize(metricProvider.id)}
-        ><Icon name="sliders" size={15} />Customize…</button
+        ><Icon name="sliders" size={15} />{t('customize')}…</button
       >
     </div>
   {/if}
@@ -675,7 +676,7 @@
 
 {#if enabledProviders.length === 0}
   <section class="empty-dashboard">
-    <span>Turn on Customize to choose what to show.</span>
+    <span>{t('customizeHint')}</span>
   </section>
 {/if}
 

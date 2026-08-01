@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import Icon from './Icon.svelte';
+  import { t } from './i18n';
   import { formatSpendValue, totalSpendRingCenter } from './metricFormat';
   import SelectMenu from './SelectMenu.svelte';
   import type { ProviderCatalogIndex } from './metrics';
@@ -50,9 +51,9 @@
     return exact;
   }
   function metricTitle() {
-    if (settings.totalSpendMetric === 'tokens') return 'Tokens';
+    if (settings.totalSpendMetric === 'tokens') return t('tokens');
     if (settings.totalSpendMetric === 'costPerMillion') return 'Cost/MTok';
-    return 'Cost';
+    return t('cost');
   }
   function patch(patch: Partial<AppSettings>) {
     onChange({ ...settings, ...patch });
@@ -74,20 +75,20 @@
   <div class="total-card__header">
     <div class="total-card__title">
       <SelectMenu
-        label="Total Spend Metric"
+        label={t('showTotalSpend')}
         value={settings.totalSpendMetric}
         variant="title"
         options={[
-          { value: 'cost', label: 'Cost' },
+          { value: 'cost', label: t('cost') },
           { value: 'costPerMillion', label: 'Cost/MTok' },
-          { value: 'tokens', label: 'Tokens' },
+          { value: 'tokens', label: t('tokens') },
         ]}
         onChange={(value) => patch({ totalSpendMetric: value as AppSettings['totalSpendMetric'] })}
       />
       <span
         class="icon-button icon-button--plain total-card__info"
-        data-tooltip={`Only includes ${providerNames.join(' and ')}.`}
-        aria-label={`Only includes ${providerNames.join(' and ')}`}
+        data-tooltip={`${t('onlyIncludes')} ${providerNames.join(' and ')}.`}
+        aria-label={`${t('onlyIncludes')} ${providerNames.join(' and ')}`}
         role="img"><Icon name="about" size={13} strokeWidth={1.9} /></span
       >
     </div>
@@ -95,7 +96,7 @@
       class="icon-button icon-button--plain total-card__share"
       type="button"
       aria-label={`Share ${metricTitle()} Screenshot`}
-      data-tooltip="Share Screenshot"
+      data-tooltip={t('shareScreenshot')}
       onclick={share}
       ><Icon name={shareCopied ? 'check' : 'share'} size={14} strokeWidth={1.8} /></button
     >
@@ -107,7 +108,7 @@
         style={`transform: translateX(${periodIndex * 100}%)`}
         aria-hidden="true"
       ></span>
-      {#each [['today', 'Today'], ['yesterday', 'Yesterday'], ['last30Days', '30 Days']] as option (option[0])}
+      {#each [['today', t('today')], ['yesterday', t('yesterday')], ['last30Days', t('last30Days')]] as option (option[0])}
         <button
           class:active={settings.totalSpendPeriod === option[0]}
           type="button"

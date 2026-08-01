@@ -340,6 +340,7 @@ export const settingsState: SettingsViewState = {
   platformSummary: null,
   settings: {
     schemaVersion: 5,
+    language: 'en',
     knownProviderIds: ['claude', 'codex', 'antigravity'],
     showTotalSpend: true,
     theme: 'system',

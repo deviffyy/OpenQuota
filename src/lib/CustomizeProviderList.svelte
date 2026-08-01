@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n';
   import { flip } from 'svelte/animate';
   import type { AppSettings, ProviderLayout } from './types';
   import type { ProviderCatalogIndex } from './metrics';
@@ -49,7 +50,7 @@
   }
 </script>
 
-<section class="screen customize-screen" aria-label="Customize">
+<section class="screen customize-screen" aria-label={t('customize')}>
   <div class="customize-list" role="list">
     {#each settings.providers as provider (provider.id)}
       <div
@@ -108,9 +109,9 @@
       </div>
     {/each}
   </div>
-  <button class="screen-cross-link" type="button" aria-label="Settings" onclick={onSettings}>
+  <button class="screen-cross-link" type="button" aria-label={t('settings')} onclick={onSettings}>
     <Icon name="gear" size={17} />
-    <span><b>Settings</b><small>Notifications, appearance and more</small></span>
+    <span><b>{t('settings')}</b><small>{t('notifications')}, {t('appearance')} and more</small></span>
     <Icon name="chevron-right" size={13} strokeWidth={2.2} />
   </button>
 </section>

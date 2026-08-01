@@ -671,6 +671,7 @@ pub struct NotificationPreferences {
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub schema_version: u32,
+    pub language: String,
     pub providers: Vec<ProviderLayout>,
     pub known_provider_ids: Vec<String>,
     pub show_total_spend: bool,
@@ -697,6 +698,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             schema_version: 5,
+            language: "en".to_owned(),
             providers: Vec::new(),
             known_provider_ids: Vec::new(),
             show_total_spend: true,

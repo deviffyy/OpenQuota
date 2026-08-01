@@ -40,7 +40,7 @@ describe('native UI language contract', () => {
   });
 
   it('keeps Customize concise and free of duplicate status and count copy', () => {
-    expect(customizeList).toContain('Notifications, appearance and more');
+    expect(customizeList).toContain("t('notifications')}, {t('appearance')}");
     expect(customizeList).toContain('{provider.metrics.length} metrics');
     expect(customizeList).not.toContain('Detected locally');
     expect(customizeList).not.toContain('screen-intro');
@@ -55,23 +55,23 @@ describe('native UI language contract', () => {
   });
 
   it('uses the shared Settings labels and single-line control rows', () => {
-    for (const label of [
-      'General',
-      'Show Total Spend',
-      'Launch at Login',
-      'Global Shortcut',
-      'Icon Style',
-      'Appearance',
-      'Usage Display',
-      'Notifications',
-      'Advanced',
-      'Updates',
-      'Check for Updates Automatically',
-      'Check for Updates…',
+    for (const key of [
+      'general',
+      'showTotalSpend',
+      'launchAtLogin',
+      'globalShortcut',
+      'iconStyle',
+      'appearance',
+      'usageDisplay',
+      'notifications',
+      'advanced',
+      'updates',
+      'autoUpdates',
+      'checkUpdates',
     ]) {
-      expect(settings).toContain(label);
+      expect(settings).toContain(`t('${key}')`);
     }
-    expect(settings).toContain("{ value: 'system', label: 'Auto' }");
+    expect(settings).toContain("{ value: 'system', label: t('auto') }");
     expect(settings).toContain("{ value: 'twelveHour', label: '12-hour' }");
     expect(settings).toContain("{ value: 'twentyFourHour', label: '24-hour' }");
     expect(settings).not.toContain('<h2>Startup</h2>');
@@ -82,10 +82,10 @@ describe('native UI language contract', () => {
   });
 
   it('keeps dashboard onboarding, empty state, and menus on the shared wording', () => {
-    expect(dashboard).toContain('Welcome to OpenQuota');
-    expect(dashboard).toContain('Open Customize');
-    expect(dashboard).toContain('Turn on Customize to choose what to show.');
-    expect(dashboard).toContain('Customize…');
+    expect(dashboard).toContain("t('welcome')");
+    expect(dashboard).toContain("t('openCustomize')");
+    expect(dashboard).toContain("t('customizeHint')");
+    expect(dashboard).toContain("t('customize')}…");
     expect(dashboard).toContain('Refresh {providerDisplayName(menuProvider.id)}');
     expect(dashboard).not.toContain('Providers Detected');
     expect(dashboard).not.toContain('Starter Provider');

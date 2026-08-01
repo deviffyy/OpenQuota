@@ -198,6 +198,7 @@ export interface NotificationPreferences {
 
 export interface AppSettings {
   schemaVersion: number;
+  language: 'en' | 'zh-CN' | 'zh-TW';
   providers: ProviderLayout[];
   knownProviderIds: string[];
   showTotalSpend: boolean;

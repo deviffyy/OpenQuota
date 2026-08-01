@@ -17,6 +17,7 @@ function settingsView(theme: AppSettings['theme'] = 'system'): SettingsViewState
     platformSummary: null,
     settings: {
       schemaVersion: 5,
+      language: 'en',
       providers: [],
       knownProviderIds: [],
       showTotalSpend: true,
