@@ -1277,12 +1277,15 @@ mod tests {
         let registry = Arc::new(ProviderRegistry::new(vec![provider]).unwrap());
         let service = Arc::new(ProviderService::new(registry, storage));
 
-        tauri::async_runtime::block_on(service.refresh("failing", false));
-        tauri::async_runtime::block_on(service.refresh("failing", false));
+        refresh_with_test_timeout(&service, "failing", false);
+        refresh_with_test_timeout(&service, "failing", false);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
 
-        tauri::async_runtime::block_on(service.refresh("failing", true));
+        refresh_with_test_timeout(&service, "failing", true);
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+        wait_until("forced refresh runner should become idle", || {
+            refresh_runner_is_idle(&service, "failing")
+        });
 
         service.last_failed_refresh.lock().unwrap().insert(
             "failing".into(),
@@ -1290,7 +1293,7 @@ mod tests {
                 .checked_sub(FAILURE_RETRY_BACKOFF)
                 .unwrap(),
         );
-        tauri::async_runtime::block_on(service.refresh("failing", false));
+        refresh_with_test_timeout(&service, "failing", false);
         assert_eq!(calls.load(Ordering::SeqCst), 3);
     }
 

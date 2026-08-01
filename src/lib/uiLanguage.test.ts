@@ -14,10 +14,12 @@ import {
   getLanguagePreference,
   getUiLanguage,
   messages,
+  normalizeLocaleTag,
   normalizeLanguagePreference,
   resolveSystemLanguage,
   setUiLanguage,
   t,
+  translateFromCatalog,
 } from './i18n';
 import app from '../App.svelte?raw';
 
@@ -136,11 +138,24 @@ describe('native UI language contract', () => {
     expect(normalizeLanguagePreference('broken')).toBe('en');
   });
 
-  it('keeps every language resource aligned with the English keys', () => {
-    expect(Object.keys(zhCN).sort()).toEqual(Object.keys(en).sort());
-    expect(Object.keys(zhTW).sort()).toEqual(Object.keys(en).sort());
+  it('uses English as the complete catalog and falls back for partial catalogs', () => {
+    expect(Object.keys(en).length).toBeGreaterThan(0);
+    expect(Object.keys(messages.en).sort()).toEqual(Object.keys(en).sort());
     expect(Object.keys(messages['zh-CN']).sort()).toEqual(Object.keys(en).sort());
     expect(Object.keys(messages['zh-TW']).sort()).toEqual(Object.keys(en).sort());
+    expect(t('settings')).toBe('设置');
+    expect(t('settings')).not.toBeUndefined();
+    expect(translateFromCatalog({}, 'settings')).toBe('Settings');
+  });
+
+  it('normalizes Unix locale tags before resolving language', () => {
+    expect(normalizeLocaleTag('zh_CN.UTF-8')).toBe('zh-cn');
+    expect(normalizeLocaleTag('zh_TW@variant')).toBe('zh-tw');
+    expect(resolveSystemLanguage('zh_HK.UTF-8')).toBe('zh-TW');
+    expect(resolveSystemLanguage('zh_MO.GB18030')).toBe('zh-TW');
+    expect(resolveSystemLanguage('C')).toBe('en');
+    expect(resolveSystemLanguage('POSIX')).toBe('en');
+    expect(resolveSystemLanguage('')).toBe('en');
   });
 
   it('keeps Traditional Chinese independent from Simplified Chinese resources', () => {

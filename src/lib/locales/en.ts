@@ -339,4 +339,4 @@ export const en = {
   labeledValue: '{value} {label}',
 } as const;
 
-export type Translation = { [Key in keyof typeof en]: string };
+export type Translation = Partial<Record<keyof typeof en, string>>;

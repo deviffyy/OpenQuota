@@ -19,7 +19,7 @@ impl Locale {
     }
 
     pub fn from_language_tag(language: &str) -> Self {
-        let normalized = language.to_ascii_lowercase().replace('_', "-");
+        let normalized = normalize_locale_tag(language);
         if normalized == "zh-tw"
             || normalized == "zh-hk"
             || normalized == "zh-mo"
@@ -34,8 +34,20 @@ impl Locale {
     }
 }
 
+fn normalize_locale_tag(language: &str) -> String {
+    language
+        .trim()
+        .split(['.', '@'])
+        .next()
+        .unwrap_or_default()
+        .replace('_', "-")
+        .to_ascii_lowercase()
+}
+
 pub struct Labels {
+    #[cfg(any(not(target_os = "macos"), test))]
     pub open: &'static str,
+    #[cfg(any(not(target_os = "macos"), test))]
     pub customize: &'static str,
     #[cfg(any(target_os = "macos", test))]
     pub settings: &'static str,
@@ -54,7 +66,9 @@ impl Labels {
     pub fn for_preference(preference: &str) -> Self {
         match Locale::for_preference(preference) {
             Locale::En => Self {
+                #[cfg(any(not(target_os = "macos"), test))]
                 open: "Open OpenQuota",
+                #[cfg(any(not(target_os = "macos"), test))]
                 customize: "Customize…",
                 #[cfg(any(target_os = "macos", test))]
                 settings: "Settings",
@@ -69,7 +83,9 @@ impl Labels {
                 shortcut_unavailable: "The saved global shortcut is currently unavailable.",
             },
             Locale::ZhCn => Self {
+                #[cfg(any(not(target_os = "macos"), test))]
                 open: "打开 OpenQuota",
+                #[cfg(any(not(target_os = "macos"), test))]
                 customize: "自定义…",
                 #[cfg(any(target_os = "macos", test))]
                 settings: "设置",
@@ -84,7 +100,9 @@ impl Labels {
                 shortcut_unavailable: "已保存的全局快捷键当前不可用。",
             },
             Locale::ZhTw => Self {
+                #[cfg(any(not(target_os = "macos"), test))]
                 open: "開啟 OpenQuota",
+                #[cfg(any(not(target_os = "macos"), test))]
                 customize: "自訂…",
                 #[cfg(any(target_os = "macos", test))]
                 settings: "設定",
@@ -192,12 +210,16 @@ mod tests {
 
     #[test]
     fn language_tags_match_frontend_resolution() {
+        assert_eq!(super::normalize_locale_tag("zh_CN.UTF-8"), "zh-cn");
+        assert_eq!(super::normalize_locale_tag("zh_TW@variant"), "zh-tw");
         assert_eq!(Locale::from_language_tag("zh-CN"), Locale::ZhCn);
         assert_eq!(Locale::from_language_tag("zh-SG"), Locale::ZhCn);
         assert_eq!(Locale::from_language_tag("zh-TW"), Locale::ZhTw);
         assert_eq!(Locale::from_language_tag("zh-HK"), Locale::ZhTw);
         assert_eq!(Locale::from_language_tag("zh-Hant"), Locale::ZhTw);
         assert_eq!(Locale::from_language_tag("fr-FR"), Locale::En);
+        assert_eq!(Locale::from_language_tag("C"), Locale::En);
+        assert_eq!(Locale::from_language_tag("POSIX"), Locale::En);
     }
 
     #[test]
