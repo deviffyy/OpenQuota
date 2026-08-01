@@ -280,13 +280,15 @@
   }
   function stalenessTooltip(refreshedAt: string) {
     const elapsedSeconds = Math.max(0, Math.floor((now - Date.parse(refreshedAt)) / 1000));
-    if (!Number.isFinite(elapsedSeconds)) return 'Last update time unavailable';
-    if (elapsedSeconds < 60) return 'Last updated moments ago';
+    if (!Number.isFinite(elapsedSeconds)) return t('lastUpdateUnavailable');
+    if (elapsedSeconds < 60) return t('lastUpdatedMomentsAgo');
     const minutes = Math.floor(elapsedSeconds / 60);
-    if (minutes < 60) return `Last updated ${minutes}m ago`;
+    if (minutes < 60) return t('lastUpdatedMinutesAgo', { count: minutes });
     const hours = Math.floor(minutes / 60);
     const remainingMinutes = minutes % 60;
-    return `Last updated ${hours}h${remainingMinutes ? ` ${remainingMinutes}m` : ''} ago`;
+    return remainingMinutes
+      ? t('lastUpdatedHoursMinutesAgo', { hours, minutes: remainingMinutes })
+      : t('lastUpdatedHoursAgo', { hours });
   }
 </script>
 
@@ -302,7 +304,7 @@
     <span class="hint-card__icon"><Icon name="refresh" size={16} strokeWidth={2} /></span>
     <div>
       <strong>{t('updateAvailable')}</strong>
-      <span>OpenQuota {updateStatus.version} is ready to download.</span>
+      <span>{t('versionReadyToDownload', { version: updateStatus.version ?? '' })}</span>
       {#if updateStatus.body}<details class="update-notes">
           <summary>{t('whatsNew')}</summary>
           <p>{updateStatus.body}</p>
@@ -311,7 +313,7 @@
         <div
           class="update-progress"
           role="progressbar"
-          aria-label="Update download"
+          aria-label={t('updateDownload')}
           aria-valuemin="0"
           aria-valuemax="100"
           aria-valuenow={updateProgress.phase === 'installing'
@@ -324,12 +326,12 @@
         </div>
         <small>
           {updateProgress.phase === 'installing'
-            ? 'Installing update…'
+            ? t('installingUpdate')
             : updateProgress.phase === 'retrying'
-              ? 'Download interrupted. Retrying…'
+              ? t('downloadInterrupted')
               : updateProgress.percent === null
-                ? 'Downloading update…'
-                : `Downloading update… ${updateProgress.percent}%`}
+                ? t('downloadingUpdate')
+                : t('downloadingUpdatePercent', { percent: updateProgress.percent })}
         </small>
       {/if}
       {#if updateError}<div class="update-error" role="alert">
@@ -344,11 +346,11 @@
         disabled={installingUpdate}
         >{updateStatus.installable
           ? installingUpdate
-            ? 'Updating…'
+            ? t('updating')
             : updateError?.retryable
-              ? 'Try Again'
-              : 'Install Update'
-          : 'Download from GitHub'}</button
+              ? t('tryAgain')
+              : t('installUpdate')
+          : t('downloadFromGitHub')}</button
       >
       {#if updateStatus.installable && !installingUpdate}
         <button type="button" class="update-release-action" onclick={onOpenUpdatePage}
@@ -372,9 +374,7 @@
 {#if !settings.detectionNoticeDismissed}
   <section class="detection-card" out:scale={{ start: 0.95, ...springMotion(reducedMotion) }}>
     <div>
-      <strong>{t('welcome')}</strong><span
-        >{t('welcomeDescription')}</span
-      >
+      <strong>{t('welcome')}</strong><span>{t('welcomeDescription')}</span>
     </div>
     <button type="button" onclick={onCustomize}>{t('openCustomize')}</button>
     <button class="dismiss" type="button" aria-label={t('dismiss')} onclick={dismissDetection}
@@ -405,7 +405,7 @@
       data-reorder-group="dashboard-providers"
       data-reorder-id={provider.id}
       role="group"
-      aria-label={`${providerDisplayName(provider.id)} provider`}
+      aria-label={t('providerGroup', { provider: providerDisplayName(provider.id) })}
       use:pointerReorder={{
         id: provider.id,
         group: 'dashboard-providers',
@@ -422,7 +422,7 @@
         class="provider-header"
         data-reorder-handle
         role="group"
-        aria-label={`Drag ${providerDisplayName(provider.id)} to reorder`}
+        aria-label={t('dragProviderToReorder', { provider: providerDisplayName(provider.id) })}
       >
         <span
           class="drag-grip"
@@ -430,7 +430,7 @@
           data-reorder-touch-handle
           role="button"
           tabindex="0"
-          aria-label={`Move ${providerDisplayName(provider.id)}`}
+          aria-label={t('moveProvider', { provider: providerDisplayName(provider.id) })}
           aria-describedby="reorder-instructions"
           aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"><Icon name="grip-dots" size={13} /></span
         >
@@ -474,7 +474,7 @@
       </header>
       <section
         class="provider-card"
-        aria-label={`${providerDisplayName(provider.id)} usage`}
+        aria-label={t('providerUsage', { provider: providerDisplayName(provider.id) })}
         aria-busy={state?.refreshing ? 'true' : undefined}
       >
         {#each snapshot.notices as notice (notice.id)}
@@ -487,7 +487,9 @@
             data-reorder-group={`dashboard-metrics:${provider.id}`}
             data-reorder-id={metric.id}
             role="group"
-            aria-label={`${metricDefinition(metric.id)?.label ?? metric.id} options`}
+            aria-label={t('metricOptions', {
+              metric: metricDefinition(metric.id)?.label ?? metric.id,
+            })}
             use:pointerReorder={{
               id: metric.id,
               group: `dashboard-metrics:${provider.id}`,
@@ -505,7 +507,7 @@
               data-reorder-handle
               data-reorder-touch-handle
               type="button"
-              aria-label={`Move ${metricDefinition(metric.id)?.label ?? metric.id}`}
+              aria-label={t('move', { label: metricDefinition(metric.id)?.label ?? metric.id })}
               aria-describedby="reorder-instructions"
               aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
               ><Icon name="grip-lines" size={13} strokeWidth={2} /></button
@@ -527,7 +529,7 @@
             data-reorder-id="section:onDemand"
             type="button"
             aria-expanded={provider.expanded}
-            aria-label={provider.expanded ? 'Show less' : 'Show more'}
+            aria-label={provider.expanded ? t('showLess') : t('showMore')}
             onclick={() => toggleDemandMetrics(provider)}
           >
             <Icon
@@ -545,7 +547,9 @@
                   data-reorder-group={`dashboard-metrics:${provider.id}`}
                   data-reorder-id={metric.id}
                   role="group"
-                  aria-label={`${metricDefinition(metric.id)?.label ?? metric.id} options`}
+                  aria-label={t('metricOptions', {
+                    metric: metricDefinition(metric.id)?.label ?? metric.id,
+                  })}
                   use:pointerReorder={{
                     id: metric.id,
                     group: `dashboard-metrics:${provider.id}`,
@@ -564,7 +568,9 @@
                     data-reorder-handle
                     data-reorder-touch-handle
                     type="button"
-                    aria-label={`Move ${metricDefinition(metric.id)?.label ?? metric.id}`}
+                    aria-label={t('move', {
+                      label: metricDefinition(metric.id)?.label ?? metric.id,
+                    })}
                     aria-describedby="reorder-instructions"
                     aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
                     ><Icon name="grip-lines" size={13} strokeWidth={2} /></button
@@ -608,14 +614,18 @@
         type="button"
         role="menuitem"
         onclick={() => hideProvider(menuProvider.id)}
-        ><Icon name="power" size={15} />Hide {providerDisplayName(menuProvider.id)}</button
+        ><Icon name="power" size={15} />{t('hideProvider', {
+          provider: providerDisplayName(menuProvider.id),
+        })}</button
       >
       <hr />
       <button type="button" role="menuitem" onclick={() => onRefresh(menuProvider.id)}
-        ><Icon name="refresh" size={15} />Refresh {providerDisplayName(menuProvider.id)}</button
+        ><Icon name="refresh" size={15} />{t('refreshProvider', {
+          provider: providerDisplayName(menuProvider.id),
+        })}</button
       >
       <button type="button" role="menuitem" onclick={() => onOpenProviderCustomize(menuProvider.id)}
-        ><Icon name="sliders" size={15} />{t('customize')}…</button
+        ><Icon name="sliders" size={15} />{t('customizeMenu')}</button
       >
       <hr />
       <button type="button" role="menuitem" onclick={() => onShare(menuProvider.id)}
@@ -656,19 +666,21 @@
               pinned: !menuMetric.pinned,
             })}
           ><Icon name={menuMetric.pinned ? 'star-filled' : 'star'} size={15} />{menuMetric.pinned
-            ? 'Unstar'
-            : 'Star for menu bar'}</button
+            ? t('unstar')
+            : t('starForMenuBar')}</button
         >
       {/if}
       <hr />
       <button type="button" role="menuitem" onclick={() => onRefresh(metricProvider.id)}
-        ><Icon name="refresh" size={15} />Refresh {providerDisplayName(metricProvider.id)}</button
+        ><Icon name="refresh" size={15} />{t('refreshProvider', {
+          provider: providerDisplayName(metricProvider.id),
+        })}</button
       >
       <button
         type="button"
         role="menuitem"
         onclick={() => onOpenProviderCustomize(metricProvider.id)}
-        ><Icon name="sliders" size={15} />{t('customize')}…</button
+        ><Icon name="sliders" size={15} />{t('customizeMenu')}</button
       >
     </div>
   {/if}

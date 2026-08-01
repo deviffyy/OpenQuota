@@ -1,5 +1,5 @@
 import type { QuotaWindow } from './types';
-import { getFormatLocale } from './i18n';
+import { getFormatLocale, t } from './i18n';
 
 export type PaceSeverity = 'level' | 'healthy' | 'close' | 'runningOut' | 'spent';
 
@@ -63,13 +63,14 @@ export function isFreshSessionWindow(window: QuotaWindow, now: number, isSession
 
 export function paceTooltip(value: PaceProjection) {
   if (value.severity === 'level') return null;
-  if (value.severity === 'spent') return 'Limit reached';
+  if (value.severity === 'spent') return t('limitReached');
   const projected = value.projectedUsedPercent;
   if (projected === null) return null;
-  if (value.severity === 'healthy') return `~${Math.round(100 - projected)}% left at reset`;
-  if (value.severity === 'close') return `~${Math.round(projected)}% used at reset`;
-  if (projected <= 100) return '~100% used at reset';
-  return `~${Math.max(1, Math.round(projected - 100))}% over limit at reset`;
+  if (value.severity === 'healthy')
+    return t('paceLeftAtReset', { percent: Math.round(100 - projected) });
+  if (value.severity === 'close') return t('paceUsedAtReset', { percent: Math.round(projected) });
+  if (projected <= 100) return t('paceUsedAtReset', { percent: 100 });
+  return t('paceOverLimitAtReset', { percent: Math.max(1, Math.round(projected - 100)) });
 }
 
 type TimeFormat = 'system' | 'twelveHour' | 'twentyFourHour';
@@ -80,10 +81,10 @@ export function formatReset(
   mode: 'countdown' | 'exact',
   timeFormat: TimeFormat = 'system',
 ) {
-  if (!value) return 'Reset unavailable';
+  if (!value) return t('resetUnavailable');
   const reset = new Date(value).getTime();
-  if (!Number.isFinite(reset)) return 'Reset unavailable';
-  return formatDeadline('Resets', reset, now, mode, timeFormat);
+  if (!Number.isFinite(reset)) return t('resetUnavailable');
+  return formatDeadline('reset', reset, now, mode, timeFormat);
 }
 
 export function formatLimit(
@@ -92,12 +93,40 @@ export function formatLimit(
   mode: 'countdown' | 'exact',
   timeFormat: TimeFormat = 'system',
 ) {
-  if (value === null) return 'Limit reached';
-  return formatDeadline('Limit', value, now, mode, timeFormat);
+  if (value === null) return t('limitReached');
+  return formatDeadline('limit', value, now, mode, timeFormat);
+}
+
+export function formatResetDetail(
+  value: string,
+  now: number,
+  mode: 'countdown' | 'exact',
+  timeFormat: TimeFormat = 'system',
+) {
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return t('resetUnavailable');
+  const remaining = timestamp - now;
+  if (mode === 'countdown') {
+    return remaining <= 5 * 60_000 ? t('soon') : formatDuration(remaining);
+  }
+  const date = new Date(timestamp);
+  const time = date.toLocaleTimeString(getFormatLocale(), {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: timeFormat === 'system' ? undefined : timeFormat === 'twelveHour',
+  });
+  const dayDifference = Math.floor(timestamp / 86_400_000) - Math.floor(now / 86_400_000);
+  if (dayDifference <= 0) return t('todayAt', { time });
+  if (dayDifference === 1) return t('tomorrowAt', { time });
+  const day = new Intl.DateTimeFormat(getFormatLocale(), {
+    month: 'short',
+    day: 'numeric',
+  }).format(date);
+  return t('dateAt', { date: day, time });
 }
 
 function formatDeadline(
-  prefix: string,
+  kind: 'reset' | 'limit',
   value: number,
   now: number,
   mode: 'countdown' | 'exact',
@@ -105,27 +134,27 @@ function formatDeadline(
 ) {
   const remaining = value - now;
   if (remaining <= 0 || (mode === 'countdown' && remaining <= 5 * 60_000)) {
-    return `${prefix} soon`;
+    return t(kind === 'reset' ? 'resetsSoon' : 'limitSoon');
   }
-  if (mode === 'countdown') return `${prefix} in ${formatDuration(remaining)}`;
+  if (mode === 'countdown') {
+    return t(kind === 'reset' ? 'resetsIn' : 'limitIn', { duration: formatDuration(remaining) });
+  }
 
   const date = new Date(value);
-  const current = new Date(now);
-  const currentDay = Date.UTC(current.getFullYear(), current.getMonth(), current.getDate());
-  const targetDay = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
-  const dayDifference = Math.round((targetDay - currentDay) / 86_400_000);
+  const dayDifference = Math.floor(value / 86_400_000) - Math.floor(now / 86_400_000);
   const time = date.toLocaleTimeString(getFormatLocale(), {
     hour: 'numeric',
     minute: '2-digit',
     hour12: timeFormat === 'system' ? undefined : timeFormat === 'twelveHour',
   });
-  if (dayDifference <= 0) return `${prefix} today at ${time}`;
-  if (dayDifference === 1) return `${prefix} tomorrow at ${time}`;
+  if (dayDifference <= 0) return t(kind === 'reset' ? 'resetsTodayAt' : 'limitTodayAt', { time });
+  if (dayDifference === 1)
+    return t(kind === 'reset' ? 'resetsTomorrowAt' : 'limitTomorrowAt', { time });
   const monthDay = new Intl.DateTimeFormat(getFormatLocale(), {
     month: 'short',
     day: 'numeric',
   }).format(date);
-  return `${prefix} ${monthDay} at ${time}`;
+  return t(kind === 'reset' ? 'resetsDateAt' : 'limitDateAt', { date: monthDay, time });
 }
 
 function formatDuration(milliseconds: number) {
@@ -133,9 +162,12 @@ function formatDuration(milliseconds: number) {
   const days = Math.floor(minutes / 1_440);
   const hours = Math.floor((minutes % 1_440) / 60);
   const remainder = minutes % 60;
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return remainder > 0 ? `${hours}h ${remainder}m` : `${hours}h`;
-  return `${remainder}m`;
+  if (days > 0) return t('durationDaysHours', { days, hours });
+  if (hours > 0)
+    return remainder > 0
+      ? t('durationHoursMinutes', { hours, minutes: remainder })
+      : t('durationHours', { hours });
+  return t('durationMinutes', { minutes: remainder });
 }
 
 function level(): PaceProjection {

@@ -1,5 +1,6 @@
 import { currentMonitor, getCurrentWindow } from '@tauri-apps/api/window';
 import { fitPanelToContent } from './backend';
+import { t } from './i18n';
 import { springMotion } from './motion';
 import { panelTargetHeight, screenPanelHeight, shouldDeferPanelFit } from './panelSizing';
 
@@ -154,7 +155,7 @@ export function createWindowController(options: WindowControllerOptions) {
     } catch {
       pendingResizeHeight = null;
       resizeAvailable = false;
-      options.onError('OpenQuota window could not adapt to its content.');
+      options.onError(t('windowAdaptFailed'));
     } finally {
       resizeInFlight = false;
     }

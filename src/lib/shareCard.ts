@@ -1,4 +1,5 @@
 import type { ProviderCatalogIndex } from './metrics';
+import { t } from './i18n';
 import {
   formatMetricNumber,
   formatMetricValue,
@@ -28,7 +29,9 @@ const CARD_RADIUS = 12;
 const ROW_HORIZONTAL_PADDING = 14;
 const HEADER_HEIGHT = 22;
 
-export const TOTAL_SPEND_PERIOD_LABELS = ['Today', 'Yesterday', '30 Days'] as const;
+export function totalSpendPeriodLabels() {
+  return [t('today'), t('yesterday'), t('last30Days')] as const;
+}
 export const TOTAL_SPEND_GEOMETRY = {
   width: 320,
   outerPadding: 10,
@@ -116,7 +119,7 @@ export function buildProviderShareRows(
     if (source.kind === 'quota' || source.kind === 'quotaOrValue') {
       const quota = snapshot.quotas.find((item) => item.id === source.sourceId);
       if (quota) {
-        rows.push(quotaShareRow(quota, settings, now, source.sessionWindow));
+        rows.push(quotaShareRow(quota, definition.label, settings, now, source.sessionWindow));
       } else if (source.kind === 'quotaOrValue') {
         const valueMetric = snapshot.valueMetrics.find((item) => item.id === source.sourceId);
         rows.push({
@@ -128,7 +131,7 @@ export function buildProviderShareRows(
                   formatMetricValue(value.number, value.kind, 'row', value.label ?? undefined),
                 )
                 .join(' · ')
-            : 'No data',
+            : t('noData'),
           condensed: previousTextSection === metric.section,
         });
         previousTextSection = metric.section;
@@ -137,8 +140,8 @@ export function buildProviderShareRows(
         rows.push({
           kind: 'quota',
           label: definition.label,
-          reading: 'No data',
-          trailing: 'Reset unavailable',
+          reading: t('noData'),
+          trailing: t('resetUnavailable'),
           fillPercent: 0,
           severity: 'normal',
           paceLabel: null,
@@ -158,7 +161,7 @@ export function buildProviderShareRows(
       rows.push({
         kind: 'text',
         label: definition.label,
-        value: statusMetric?.text ?? 'No data',
+        value: statusMetric?.text ?? t('noData'),
         condensed: previousTextSection === metric.section,
       });
       previousTextSection = metric.section;
@@ -176,7 +179,7 @@ export function buildProviderShareRows(
                 formatMetricValue(value.number, value.kind, 'row', value.label ?? undefined),
               )
               .join(' · ')
-          : 'No data',
+          : t('noData'),
         condensed: previousTextSection === metric.section,
       });
       previousTextSection = metric.section;
@@ -243,7 +246,7 @@ export function renderProviderShareCard(
     context.fillStyle = palette.secondary;
     context.font = '12px system-ui';
     context.textAlign = 'center';
-    context.fillText('No metrics to show', SHARE_CARD_WIDTH / 2, rowTop + 27);
+    context.fillText(t('noMetricsToShow'), SHARE_CARD_WIDTH / 2, rowTop + 27);
     context.textAlign = 'left';
   } else {
     for (const row of options.rows) {
@@ -298,27 +301,39 @@ export function renderTotalSpendShareCard(
 
 function quotaShareRow(
   quota: QuotaWindow,
+  label: string,
   settings: AppSettings,
   now: number,
   sessionWindow: boolean,
 ): ShareRow {
   const used = clamp(quota.usedPercent, 0, 100);
   const remaining = Math.max(0, 100 - used);
-  let reading = `${(settings.usageDisplay === 'used' ? used : remaining).toFixed(0)}% ${settings.usageDisplay}`;
+  let reading = t(settings.usageDisplay === 'used' ? 'percentUsed' : 'percentLeft', {
+    percent: formatMetricNumber(
+      settings.usageDisplay === 'used' ? used : remaining,
+      'percent',
+      'row',
+    ),
+  });
   let fillPercent = settings.usageDisplay === 'used' ? used : remaining;
   if (quota.format === 'count' && quota.usedValue !== null && quota.limitValue !== null) {
     const displayed =
       settings.usageDisplay === 'left'
         ? Math.max(0, quota.limitValue - quota.usedValue)
         : quota.usedValue;
-    reading = `${displayed.toFixed(0)} ${quota.unit?.trim() || 'requests'} ${settings.usageDisplay}`;
+    reading = t(settings.usageDisplay === 'left' ? 'countLeft' : 'countUsed', {
+      count: formatMetricNumber(displayed, 'count', 'full'),
+      unit: quota.unit?.trim() || t('requests'),
+    });
   }
   if (quota.format === 'dollars' && quota.usedValue !== null) {
     const displayed =
       settings.usageDisplay === 'left' && quota.limitValue !== null
         ? Math.max(0, quota.limitValue - quota.usedValue)
         : quota.usedValue;
-    reading = `$${displayed.toFixed(2)} ${settings.usageDisplay === 'left' ? 'left' : 'spent'}`;
+    reading = t(settings.usageDisplay === 'left' ? 'moneyLeft' : 'moneySpent', {
+      amount: formatMetricNumber(displayed, 'dollars', 'row'),
+    });
     if (quota.limitValue !== null && quota.limitValue > 0) {
       fillPercent = (displayed / quota.limitValue) * 100;
     }
@@ -337,20 +352,28 @@ function quotaShareRow(
             : 'normal';
   const paceLabel =
     pace.severity === 'spent'
-      ? 'Limit reached'
+      ? t('limitReached')
       : pace.severity === 'runningOut'
         ? formatLimit(pace.runOutAt, now, settings.resetDisplay, settings.timeFormat)
         : pace.severity === 'close' && pace.projectedUsedPercent !== null
-          ? `~${Math.max(1, Math.round(100 - pace.projectedUsedPercent))}% spare`
+          ? t('percentSpare', {
+              percent: formatMetricNumber(
+                Math.max(1, Math.round(100 - pace.projectedUsedPercent)),
+                'percent',
+                'row',
+              ),
+            })
           : pace.severity === 'healthy' &&
               settings.alwaysShowPacing &&
               pace.projectedUsedPercent !== null
-            ? `~${Math.max(0, Math.round(100 - pace.projectedUsedPercent))}% left at reset`
+            ? t('paceLeftAtReset', {
+                percent: Math.max(0, Math.round(100 - pace.projectedUsedPercent)),
+              })
             : null;
 
   return {
     kind: 'quota',
-    label: quota.label,
+    label,
     reading,
     trailing: formatReset(quota.resetsAt, now, settings.resetDisplay, settings.timeFormat),
     fillPercent: clamp(fillPercent, 0, 100),
@@ -366,8 +389,10 @@ function usagePeriod(snapshot: ProviderSnapshot, sourceId: string) {
 }
 
 function usageReading(period: UsagePeriod | null) {
-  if (!period) return 'No data';
-  const tokens = formatMetricValue(period.tokens, 'count', 'row', 'tokens');
+  if (!period) return t('noData');
+  const tokens = t('tokensValue', {
+    count: formatMetricNumber(period.tokens, 'count', 'row'),
+  });
   if (period.estimatedCostUsd === null) return tokens;
   return `${formatMetricNumber(period.estimatedCostUsd, 'dollars', 'row')} · ${tokens}`;
 }
@@ -565,7 +590,7 @@ function drawPeriodSwitcher(
 
   context.font = `${TOTAL_SPEND_GEOMETRY.periodFontSize}px system-ui`;
   context.textAlign = 'center';
-  TOTAL_SPEND_PERIOD_LABELS.forEach((label, index) => {
+  totalSpendPeriodLabels().forEach((label, index) => {
     context.fillStyle = index === selectedIndex ? palette.text : palette.secondary;
     context.font = `${index === selectedIndex ? '600' : '500'} ${TOTAL_SPEND_GEOMETRY.periodFontSize}px system-ui`;
     context.fillText(label, innerLeft + segmentWidth * (index + 0.5), top + 18);
@@ -589,10 +614,10 @@ function drawSpendBody(
     context.textAlign = 'center';
     const empty =
       metric === 'tokens'
-        ? 'No token data for this period'
+        ? t('noTokenDataForPeriod')
         : metric === 'costPerMillion'
-          ? 'No cost-per-token data for this period'
-          : 'No cost data for this period';
+          ? t('noCostPerTokenDataForPeriod')
+          : t('noCostDataForPeriod');
     context.fillText(empty, canvasWidth / 2, top + TOTAL_SPEND_GEOMETRY.ringDiameter / 2 + 4);
     context.textAlign = 'left';
     return;
@@ -614,7 +639,10 @@ function drawSpendBody(
   context.fillText(center.primary, centerX, centerY - 1);
   context.fillStyle = palette.secondary;
   context.font = `600 ${TOTAL_SPEND_GEOMETRY.centerUnitFontSize}px system-ui`;
-  context.fillText(center.unit, centerX, centerY + 13);
+  const unitKey = ['dollars', 'tokens', 'thousand', 'million', 'billion'].includes(center.unit)
+    ? (center.unit as 'dollars' | 'tokens' | 'thousand' | 'million' | 'billion')
+    : null;
+  context.fillText(unitKey ? t(unitKey) : center.unit, centerX, centerY + 13);
   context.textAlign = 'left';
 
   const legendLeft =

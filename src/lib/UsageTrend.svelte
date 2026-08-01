@@ -72,7 +72,7 @@
     <div
       class="trend-chart-wrap"
       role="group"
-      aria-label="Usage trend chart details"
+      aria-label={t('usageTrendDetails')}
       onmouseenter={revealDetail}
       onmouseleave={concealDetail}
     >
@@ -80,12 +80,12 @@
         class="trend-bars"
         class:trend-bars--active={detailVisible}
         role="img"
-        aria-label={`30-day token chart. Peak ${compact(peak.tokens)} tokens on ${peak.date}.`}
+        aria-label={t('tokenChartPeak', { tokens: compact(peak.tokens), date: peak.date })}
       >
         {#each points as point (point.date)}
           <span
             style={`height: ${Math.max(point.tokens > 0 ? 18 : 2, (point.tokens / max) * 100)}%`}
-            title={`${point.date}: ${compact(point.tokens)} tokens`}
+            title={t('tokenChartPoint', { date: point.date, tokens: compact(point.tokens) })}
           ></span>
         {/each}
       </div>
@@ -94,8 +94,13 @@
           <header>
             <strong>{t('usageTrend')}</strong><span
               >{hoveredDate
-                ? `${dayLabel(highlightedPoint.date)} · ${compact(highlightedPoint.tokens)} tokens`
-                : `peak ${compact(peak.tokens)} tokens`}</span
+                ? t('tokenChartHoverPoint', {
+                    date: dayLabel(highlightedPoint.date),
+                    tokens: compact(highlightedPoint.tokens),
+                  })
+                : t('peakUsage', {
+                    value: t('tokensValue', { count: compact(peak.tokens) }),
+                  })}</span
             >
           </header>
           <div

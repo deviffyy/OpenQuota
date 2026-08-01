@@ -1,4 +1,5 @@
 import { getAppSettings, saveAppSettings } from './backend';
+import { t } from './i18n';
 import type { AppSettings, SettingsViewState } from './types';
 
 export class SettingsController {
@@ -40,11 +41,11 @@ export class SettingsController {
       })
       .catch(async (error: unknown) => {
         if (revision !== this.#revision) return;
-        this.onError(typeof error === 'string' ? error : 'Settings could not be saved.');
+        this.onError(typeof error === 'string' ? error : t('settingsSaveFailed'));
         try {
           this.state = await getAppSettings();
         } catch {
-          this.onError('Settings could not be saved or reloaded.');
+          this.onError(t('settingsSaveReloadFailed'));
         }
       })
       .finally(() => {

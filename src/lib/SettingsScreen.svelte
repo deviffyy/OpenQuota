@@ -46,10 +46,10 @@
   const settings = $derived(settingsView.settings);
   const revealLogLabel = $derived(
     platform === 'macos'
-      ? 'Reveal in Finder'
+      ? t('revealInFinder')
       : platform === 'windows'
-        ? 'Reveal in File Explorer'
-        : 'Open Containing Folder',
+        ? t('revealInFileExplorer')
+        : t('openContainingFolder'),
   );
   const anyNotificationEnabled = $derived(
     settings.notifications.almostOut ||
@@ -156,8 +156,11 @@
           data-tooltip={t('openFromAnywhere')}
           onclick={() => (recording = !recording)}
           onkeydown={record}
-          >{recording ? t('typeShortcut') : (settings.globalShortcut ?? t('recordShortcut'))}</button
+          >{recording
+            ? t('typeShortcut')
+            : (settings.globalShortcut ?? t('recordShortcut'))}</button
         >{#if settings.globalShortcut}<button
+            class="clear-shortcut-button"
             type="button"
             aria-label={t('clearShortcut')}
             onclick={() => patch({ globalShortcut: null })}
@@ -174,6 +177,7 @@
         label={t('language')}
         value={settings.language}
         options={[
+          { value: 'system', label: t('systemLanguage') },
           { value: 'en', label: t('english') },
           { value: 'zh-CN', label: t('simplifiedChinese') },
           { value: 'zh-TW', label: t('traditionalChinese') },
@@ -234,8 +238,8 @@
         value={settings.timeFormat}
         options={[
           { value: 'system', label: t('auto') },
-          { value: 'twelveHour', label: '12-hour' },
-          { value: 'twentyFourHour', label: '24-hour' },
+          { value: 'twelveHour', label: t('twelveHour') },
+          { value: 'twentyFourHour', label: t('twentyFourHour') },
         ]}
         onChange={(value) => patch({ timeFormat: value as AppSettings['timeFormat'] })}
       />
@@ -271,8 +275,7 @@
         ><b>{t('alwaysShowPacing')}</b><i
           class="setting-info"
           data-tooltip={t('pacingHelp')}
-          aria-label={t('pacingHelp')}
-          ><Icon name="about" size={12} strokeWidth={1.8} /></i
+          aria-label={t('pacingHelp')}><Icon name="about" size={12} strokeWidth={1.8} /></i
         ></span
       ><input
         type="checkbox"
@@ -284,15 +287,15 @@
 
   <div class="settings-section">
     <h2>
-      {t('notifications')} {#if notificationsNeedAttention}<span class="permission-warning">!</span>{/if}
+      {t('notifications')}
+      {#if notificationsNeedAttention}<span class="permission-warning">!</span>{/if}
     </h2>
     <label class="setting-row"
       ><span
         ><b>{t('almostOut')}</b><i
           class="setting-info"
           data-tooltip={t('almostOutHelp')}
-          aria-label={t('almostOutHelp')}
-          ><Icon name="about" size={12} strokeWidth={1.8} /></i
+          aria-label={t('almostOutHelp')}><Icon name="about" size={12} strokeWidth={1.8} /></i
         ></span
       ><input
         type="checkbox"
@@ -305,8 +308,7 @@
         ><b>{t('cuttingItClose')}</b><i
           class="setting-info"
           data-tooltip={t('cuttingItCloseHelp')}
-          aria-label={t('cuttingItCloseHelp')}
-          ><Icon name="about" size={12} strokeWidth={1.8} /></i
+          aria-label={t('cuttingItCloseHelp')}><Icon name="about" size={12} strokeWidth={1.8} /></i
         ></span
       ><input
         type="checkbox"
@@ -319,8 +321,7 @@
         ><b>{t('willRunOut')}</b><i
           class="setting-info"
           data-tooltip={t('willRunOutHelp')}
-          aria-label={t('willRunOutHelp')}
-          ><Icon name="about" size={12} strokeWidth={1.8} /></i
+          aria-label={t('willRunOutHelp')}><Icon name="about" size={12} strokeWidth={1.8} /></i
         ></span
       ><input
         type="checkbox"
@@ -348,7 +349,9 @@
             onclick={settingsView.notificationPermission === 'denied'
               ? onOpenNotificationSettings
               : onRequestNotifications}
-            >{settingsView.notificationPermission === 'denied' ? t('openSettings') : t('allow')}</button
+            >{settingsView.notificationPermission === 'denied'
+              ? t('openSettings')
+              : t('allow')}</button
           >
         </div>
       </div>
@@ -362,6 +365,7 @@
         label={t('logLevel')}
         value={settings.logLevel}
         options={[
+          { value: 'system', label: t('systemLanguage') },
           { value: 'error', label: t('error') },
           { value: 'warn', label: t('warning') },
           { value: 'info', label: t('info') },
@@ -483,7 +487,7 @@
       color: var(--text);
     }
 
-    .shortcut-field button[aria-label='Clear global shortcut'] {
+    .shortcut-field .clear-shortcut-button {
       display: grid;
       width: 24px;
       height: 24px;
@@ -493,8 +497,8 @@
       place-items: center;
     }
 
-    .shortcut-field button[aria-label='Clear global shortcut']:hover,
-    .shortcut-field button[aria-label='Clear global shortcut']:focus-visible {
+    .shortcut-field .clear-shortcut-button:hover,
+    .shortcut-field .clear-shortcut-button:focus-visible {
       outline: none;
       color: var(--text);
       background: var(--button-hover);

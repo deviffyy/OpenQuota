@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from './i18n';
   import Icon from './Icon.svelte';
+  import { formatMetricNumber } from './metricFormat';
   import {
     formatLimit,
     formatReset,
@@ -12,6 +13,7 @@
 
   interface Props {
     quota: QuotaWindow;
+    label?: string;
     now: number;
     usageDisplay: 'used' | 'left';
     resetDisplay: 'countdown' | 'exact';
@@ -24,6 +26,7 @@
 
   let {
     quota,
+    label,
     now,
     usageDisplay,
     resetDisplay,
@@ -35,40 +38,73 @@
   }: Props = $props();
   const used = $derived(Math.min(100, Math.max(0, quota.usedPercent)));
   const remaining = $derived(Math.max(0, 100 - used));
-  const countUnit = $derived(quota.unit?.trim() || 'requests');
-  const localizedLabel = $derived(
-    quota.label === 'Session' ? t('session') : quota.label === 'Weekly' ? t('weekly') : quota.label,
+  const countUnit = $derived(
+    quota.unit?.trim() === 'searches'
+      ? t('searches')
+      : quota.unit?.trim() === 'requests'
+        ? t('requests')
+        : quota.unit?.trim() || t('requests'),
   );
+  const localizedLabel = $derived(label ?? quota.label);
   const estimateNote = $derived(
-    quota.sourceNote?.trim() || 'Estimated from local usage data and may differ from billed usage.',
+    quota.id.startsWith('opencode.')
+      ? t('openCodeQuotaEstimate')
+      : quota.sourceNote?.trim() || t('estimatedLocally'),
   );
   const reading = $derived.by(() => {
     if (quota.format === 'count' && quota.usedValue !== null && quota.limitValue !== null) {
       const value =
         usageDisplay === 'left' ? Math.max(0, quota.limitValue - quota.usedValue) : quota.usedValue;
-      return `${value.toFixed(0)} ${countUnit} ${usageDisplay}`;
+      return t(usageDisplay === 'left' ? 'countLeft' : 'countUsed', {
+        count: formatMetricNumber(value, 'count', 'full'),
+        unit: countUnit,
+      });
     }
     if (quota.format === 'dollars' && quota.usedValue !== null) {
       if (usageDisplay === 'left' && quota.limitValue !== null) {
-        return `$${Math.max(0, quota.limitValue - quota.usedValue).toFixed(2)} left`;
+        return t('moneyLeft', {
+          amount: formatMetricNumber(
+            Math.max(0, quota.limitValue - quota.usedValue),
+            'dollars',
+            'row',
+          ),
+        });
       }
-      return `$${quota.usedValue.toFixed(2)} spent`;
+      return t('moneySpent', {
+        amount: formatMetricNumber(quota.usedValue, 'dollars', 'row'),
+      });
     }
-    return `${(usageDisplay === 'used' ? used : remaining).toFixed(0)}% ${usageDisplay}`;
+    return t(usageDisplay === 'left' ? 'percentLeft' : 'percentUsed', {
+      percent: formatMetricNumber(usageDisplay === 'used' ? used : remaining, 'percent', 'row'),
+    });
   });
   const readingTooltip = $derived.by(() => {
     if (quota.format === 'count' && quota.usedValue !== null && quota.limitValue !== null) {
       const opposite =
         usageDisplay === 'left' ? quota.usedValue : Math.max(0, quota.limitValue - quota.usedValue);
-      return `${opposite.toFixed(0)} ${countUnit} ${usageDisplay === 'left' ? 'used' : 'left'}`;
+      return t(usageDisplay === 'left' ? 'countUsed' : 'countLeft', {
+        count: formatMetricNumber(opposite, 'count', 'full'),
+        unit: countUnit,
+      });
     }
     if (quota.format === 'dollars' && quota.usedValue !== null) {
-      if (usageDisplay === 'left') return `$${quota.usedValue.toFixed(2)} spent`;
+      if (usageDisplay === 'left')
+        return t('moneySpent', {
+          amount: formatMetricNumber(quota.usedValue, 'dollars', 'row'),
+        });
       if (quota.limitValue !== null)
-        return `$${Math.max(0, quota.limitValue - quota.usedValue).toFixed(2)} left`;
+        return t('moneyLeft', {
+          amount: formatMetricNumber(
+            Math.max(0, quota.limitValue - quota.usedValue),
+            'dollars',
+            'row',
+          ),
+        });
       return null;
     }
-    return usageDisplay === 'left' ? `${used.toFixed(0)}% used` : `${remaining.toFixed(0)}% left`;
+    return t(usageDisplay === 'left' ? 'percentUsed' : 'percentLeft', {
+      percent: formatMetricNumber(usageDisplay === 'left' ? used : remaining, 'percent', 'row'),
+    });
   });
   const fillPercent = $derived.by(() => {
     if (
@@ -110,14 +146,18 @@
       (alwaysShowPacing && pace.severity === 'healthy'),
   );
   const paceLabel = $derived.by(() => {
-    if (pace.severity === 'spent') return 'Limit reached';
+    if (pace.severity === 'spent') return t('limitReached');
     if (pace.severity === 'runningOut')
       return pace.runOutAt === null
         ? null
         : formatLimit(pace.runOutAt, now, resetDisplay, timeFormat);
     if (pace.projectedUsedPercent === null) return null;
     const left = Math.max(0, 100 - pace.projectedUsedPercent);
-    return pace.severity === 'close' ? `~${Math.max(1, Math.round(left))}% spare` : paceDetail;
+    return pace.severity === 'close'
+      ? t('percentSpare', {
+          percent: formatMetricNumber(Math.max(1, Math.round(left)), 'percent', 'row'),
+        })
+      : paceDetail;
   });
   const paceTickPercent = $derived(
     pace.evenPacePercent === null
@@ -138,7 +178,7 @@
   );
 </script>
 
-<section class="metric" aria-label={`${localizedLabel} quota`}>
+<section class="metric" aria-label={t('quotaFor', { label: localizedLabel })}>
   <div class="metric__heading">
     <h2>
       {localizedLabel}
@@ -168,7 +208,7 @@
           <span
             class="pace-warning"
             data-tooltip={paceDetail ?? undefined}
-            aria-label={pace.severity === 'spent' ? 'Limit reached' : 'Will reach limit'}
+            aria-label={pace.severity === 'spent' ? t('limitReached') : t('willReachLimit')}
             ><span class="pace-warning__icon"
               ><Icon name="flame-filled" size={11} strokeWidth={1.8} /></span
             >{paceLabel ?? ''}</span
@@ -186,7 +226,7 @@
     <div
       class="meter meter--{severity}"
       role="progressbar"
-      aria-label={`${localizedLabel} used`}
+      aria-label={t('usedFor', { label: localizedLabel })}
       aria-valuemin="0"
       aria-valuemax="100"
       aria-valuenow={used}

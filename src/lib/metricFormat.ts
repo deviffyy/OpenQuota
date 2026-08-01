@@ -1,18 +1,54 @@
 import type { AppSettings } from './types';
-import { getUiLanguage, localeFor } from './i18n';
+import { getUiLanguage, localeFor, t } from './i18n';
 
 export type MetricNumberKind = 'percent' | 'dollars' | 'count';
 export type MetricNumberStyle = 'tray' | 'row' | 'full';
 
+interface MetricFormatters {
+  compact: Intl.NumberFormat;
+  row: Intl.NumberFormat;
+  full: Intl.NumberFormat;
+  percent: Intl.NumberFormat;
+  compactCurrency: Intl.NumberFormat;
+  currency: Intl.NumberFormat;
+  wholeDollar: Intl.NumberFormat;
+}
+
+const formatterCache = new Map<string, MetricFormatters>();
+
 function formatters() {
   const locale = localeFor(getUiLanguage());
-  return {
+  const cached = formatterCache.get(locale);
+  if (cached) return cached;
+  const created = {
     compact: new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 }),
     row: new Intl.NumberFormat(locale, { minimumFractionDigits: 0, maximumFractionDigits: 1 }),
     full: new Intl.NumberFormat(locale, { minimumFractionDigits: 0, maximumFractionDigits: 1 }),
-    currency: new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 }),
-    wholeDollar: new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD', minimumFractionDigits: 0, maximumFractionDigits: 0 }),
+    percent: new Intl.NumberFormat(locale, {
+      style: 'percent',
+      maximumFractionDigits: 0,
+    }),
+    compactCurrency: new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: 'USD',
+      notation: 'compact',
+      maximumFractionDigits: 1,
+    }),
+    currency: new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }),
+    wholeDollar: new Intl.NumberFormat(locale, {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }),
   };
+  formatterCache.set(locale, created);
+  return created;
 }
 
 export function formatMetricNumber(
@@ -22,12 +58,14 @@ export function formatMetricNumber(
 ) {
   if (!Number.isFinite(value)) return '—';
   const formatter = formatters();
-  if (kind === 'percent') return `${Math.round(Math.min(100, Math.max(0, value)))}%`;
+  if (kind === 'percent') return formatter.percent.format(Math.min(100, Math.max(0, value)) / 100);
   if (kind === 'dollars') {
     if (Math.abs(value) >= 1000 && style !== 'full') {
-      return `$${formatter.compact.format(value)}`;
+      return formatter.compactCurrency.format(value);
     }
-    return style === 'tray' ? formatter.wholeDollar.format(value) : formatter.currency.format(value);
+    return style === 'tray'
+      ? formatter.wholeDollar.format(value)
+      : formatter.currency.format(value);
   }
   if (style !== 'full' && Math.abs(value) >= 1000) return formatter.compact.format(value);
   return (style === 'full' ? formatter.full : formatter.row).format(value);
@@ -40,7 +78,17 @@ export function formatMetricValue(
   label?: string,
 ) {
   const formatted = formatMetricNumber(value, kind, style);
-  return label ? `${formatted} ${label}` : formatted;
+  if (!label) return formatted;
+  const message = {
+    tokens: 'tokensValue',
+    credits: 'creditsValue',
+    available: 'available',
+    searches: 'searchesValue',
+    requests: 'requestsValue',
+  }[label] as Parameters<typeof t>[0] | undefined;
+  return message
+    ? t(message, { count: formatted })
+    : t('labeledValue', { value: formatted, label });
 }
 
 export function formatSpendValue(

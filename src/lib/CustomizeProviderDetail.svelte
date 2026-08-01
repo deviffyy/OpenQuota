@@ -7,6 +7,7 @@
   import ProviderApiKeySection from './ProviderApiKeySection.svelte';
   import { reorderFlip } from './motion';
   import { pointerReorder } from './pointerReorder';
+  import { t } from './i18n';
 
   interface Props {
     settings: AppSettings;
@@ -52,7 +53,7 @@
   function togglePin(metric: MetricLayout, button: HTMLButtonElement) {
     if (!provider || !metricDefinition(metric.id)?.pinnable) return;
     if (!metric.pinned && provider.metrics.filter((item) => item.pinned).length >= 2) {
-      showMessage('Up to 2 stars per provider', 'denied');
+      showMessage(t('pinnedLimit'), 'denied');
       if (!reducedMotion) {
         button.animate?.(
           [
@@ -69,7 +70,7 @@
       }
       return;
     }
-    showMessage(metric.pinned ? 'Removed from menu bar' : 'Starred for menu bar', 'success');
+    showMessage(metric.pinned ? t('removedFromMenuBar') : t('starredForMenuBar'), 'success');
     updateMetric({ ...metric, pinned: !metric.pinned });
   }
   function showMessage(text: string, kind: 'success' | 'denied') {
@@ -114,16 +115,16 @@
 {#if provider}
   <section
     class="screen customize-detail"
-    aria-label={`Customize ${providerDisplayName(provider.id)}`}
+    aria-label={t('customizeProvider', { label: providerDisplayName(provider.id) })}
   >
     {#each ['alwaysVisible', 'onDemand'] as section (section)}
       {@const sectionMetrics = provider.metrics.filter((metric) => metric.section === section)}
       <div
         class="metric-section"
         role="group"
-        aria-label={section === 'alwaysVisible' ? 'Always Visible metrics' : 'On Demand metrics'}
+        aria-label={section === 'alwaysVisible' ? t('alwaysVisibleMetrics') : t('onDemandMetrics')}
       >
-        <h2>{section === 'alwaysVisible' ? 'Always Visible' : 'On Demand'}</h2>
+        <h2>{section === 'alwaysVisible' ? t('alwaysVisible') : t('onDemand')}</h2>
         <div class="metric-list" role="list">
           {#if sectionMetrics.length === 0}
             <div
@@ -132,7 +133,7 @@
               data-reorder-group={`customize-metrics:${provider.id}`}
               data-reorder-id={`section:${section}`}
             >
-              Drag metrics here
+              {t('dragMetricsHere')}
             </div>
           {/if}
           {#each sectionMetrics as metric (metric.id)}
@@ -167,7 +168,7 @@
                 data-reorder-touch-handle
                 role="button"
                 tabindex="0"
-                aria-label={`Move ${metricDefinition(metric.id)?.label ?? metric.id}`}
+                aria-label={t('move', { label: metricDefinition(metric.id)?.label ?? metric.id })}
                 aria-describedby="reorder-instructions"
                 aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
                 ><Icon name="grip-lines" size={16} strokeWidth={2} /></span
@@ -180,7 +181,9 @@
                     class:pinned={metric.pinned}
                     class="pin-button"
                     type="button"
-                    aria-label={`${metric.pinned ? 'Unpin' : 'Pin'} ${metricDefinition(metric.id)?.label}`}
+                    aria-label={t(metric.pinned ? 'unpinMetric' : 'pinMetric', {
+                      label: metricDefinition(metric.id)?.label ?? metric.id,
+                    })}
                     onclick={(event) => togglePin(metric, event.currentTarget)}
                     ><Icon
                       name={metric.pinned ? 'star-filled' : 'star'}
@@ -191,7 +194,7 @@
               </span>
               <label class="switch"
                 ><input
-                  aria-label={`Show ${metricDefinition(metric.id)?.label ?? metric.id}`}
+                  aria-label={t('show', { label: metricDefinition(metric.id)?.label ?? metric.id })}
                   type="checkbox"
                   checked={metric.enabled}
                   onchange={(event) =>

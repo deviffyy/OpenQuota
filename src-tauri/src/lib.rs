@@ -5,6 +5,7 @@ mod logging;
 #[cfg(any(target_os = "macos", test))]
 mod menu_bar;
 mod models;
+mod native_i18n;
 mod notifications;
 mod pacing;
 mod policy;
@@ -55,6 +56,47 @@ use crate::{
         handle_window_event, open_screen, show_popup, toggle_popup, PanelResizeSession, MAIN_WINDOW,
     },
 };
+
+fn tray_menu(app: &AppHandle, language: &str) -> tauri::Result<Menu<tauri::Wry>> {
+    let labels = native_i18n::Labels::for_preference(language);
+    #[cfg(target_os = "macos")]
+    {
+        let settings =
+            MenuItem::with_id(app, "settings", labels.settings, true, Some("CmdOrCtrl+,"))?;
+        let separator = PredefinedMenuItem::separator(app)?;
+        let quit = MenuItem::with_id(app, "quit", labels.quit, true, Some("CmdOrCtrl+Q"))?;
+        Menu::with_items(app, &[&settings, &separator, &quit])
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let open = MenuItem::with_id(app, "open", labels.open, true, None::<&str>)?;
+        let customize = MenuItem::with_id(app, "customize", labels.customize, true, None::<&str>)?;
+        let settings = MenuItem::with_id(
+            app,
+            "settings",
+            labels.settings_with_ellipsis,
+            true,
+            None::<&str>,
+        )?;
+        let separator = PredefinedMenuItem::separator(app)?;
+        let quit = MenuItem::with_id(app, "quit", labels.quit, true, None::<&str>)?;
+        Menu::with_items(app, &[&open, &customize, &settings, &separator, &quit])
+    }
+}
+
+pub(crate) fn update_tray_menu(app: &AppHandle, language: &str) {
+    let Some(tray) = app.tray_by_id("openquota-tray") else {
+        return;
+    };
+    match tray_menu(app, language) {
+        Ok(menu) => {
+            if tray.set_menu(Some(menu)).is_err() {
+                app_warn!("tray", "tray menu language update failed");
+            }
+        }
+        Err(_) => app_warn!("tray", "localized tray menu could not be built"),
+    }
+}
 
 fn spawn_startup_credential_detection(
     app: AppHandle,
@@ -264,33 +306,7 @@ pub fn run() {
             }
 
             if !desktop_integration.standalone_window {
-                #[cfg(target_os = "macos")]
-                let menu = {
-                    let settings_item =
-                        MenuItem::with_id(app, "settings", "Settings", true, Some("CmdOrCtrl+,"))?;
-                    let separator = PredefinedMenuItem::separator(app)?;
-                    let quit = MenuItem::with_id(
-                        app,
-                        "quit",
-                        "Quit OpenQuota",
-                        true,
-                        Some("CmdOrCtrl+Q"),
-                    )?;
-                    Menu::with_items(app, &[&settings_item, &separator, &quit])?
-                };
-                #[cfg(not(target_os = "macos"))]
-                let menu = {
-                    let open =
-                        MenuItem::with_id(app, "open", "Open OpenQuota", true, None::<&str>)?;
-                    let customize =
-                        MenuItem::with_id(app, "customize", "Customize…", true, None::<&str>)?;
-                    let settings_item =
-                        MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
-                    let separator = PredefinedMenuItem::separator(app)?;
-                    let quit =
-                        MenuItem::with_id(app, "quit", "Quit OpenQuota", true, None::<&str>)?;
-                    Menu::with_items(app, &[&open, &customize, &settings_item, &separator, &quit])?
-                };
+                let menu = tray_menu(app.handle(), &settings.get().language)?;
 
                 let tray = TrayIconBuilder::with_id("openquota-tray")
                     .icon(

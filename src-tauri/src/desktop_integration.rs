@@ -17,7 +17,16 @@ pub enum LinuxDesktop {
 #[derive(Debug, Clone)]
 pub struct DesktopIntegration {
     pub standalone_window: bool,
-    platform_summary: Option<String>,
+    #[cfg(any(target_os = "linux", test))]
+    platform_summary: Option<PlatformSummary>,
+}
+
+#[cfg(any(target_os = "linux", test))]
+#[derive(Debug, Clone, Copy)]
+struct PlatformSummary {
+    desktop: LinuxDesktop,
+    session: LinuxSessionType,
+    tray_available: bool,
 }
 
 impl DesktopIntegration {
@@ -33,13 +42,50 @@ impl DesktopIntegration {
         {
             Self {
                 standalone_window: false,
+                #[cfg(test)]
                 platform_summary: None,
             }
         }
     }
 
-    pub fn platform_summary(&self) -> Option<String> {
-        self.platform_summary.clone()
+    pub fn platform_summary(&self, language: &str) -> Option<String> {
+        #[cfg(not(any(target_os = "linux", test)))]
+        {
+            let _ = language;
+            None
+        }
+        #[cfg(any(target_os = "linux", test))]
+        {
+            let summary = self.platform_summary?;
+            let locale = crate::native_i18n::Locale::for_preference(language);
+            let desktop = match summary.desktop {
+                LinuxDesktop::Gnome => "GNOME",
+                LinuxDesktop::Kde => "KDE Plasma",
+                LinuxDesktop::Other => match locale {
+                    crate::native_i18n::Locale::En => "Linux desktop",
+                    crate::native_i18n::Locale::ZhCn => "Linux 桌面",
+                    crate::native_i18n::Locale::ZhTw => "Linux 桌面",
+                },
+            };
+            let session = match summary.session {
+                LinuxSessionType::X11 => "X11",
+                LinuxSessionType::Wayland => "Wayland",
+                LinuxSessionType::Unknown => match locale {
+                    crate::native_i18n::Locale::En => "unknown session",
+                    crate::native_i18n::Locale::ZhCn => "未知会话",
+                    crate::native_i18n::Locale::ZhTw => "未知對話",
+                },
+            };
+            let mode = match (locale, summary.tray_available) {
+                (crate::native_i18n::Locale::En, true) => "StatusNotifier tray",
+                (crate::native_i18n::Locale::En, false) => "standalone window",
+                (crate::native_i18n::Locale::ZhCn, true) => "StatusNotifier 托盘",
+                (crate::native_i18n::Locale::ZhCn, false) => "独立窗口",
+                (crate::native_i18n::Locale::ZhTw, true) => "StatusNotifier 狀態列",
+                (crate::native_i18n::Locale::ZhTw, false) => "獨立視窗",
+            };
+            Some(format!("{desktop} · {session} · {mode}"))
+        }
     }
 }
 
@@ -49,24 +95,13 @@ fn linux_integration(
     desktop: LinuxDesktop,
     tray_available: bool,
 ) -> DesktopIntegration {
-    let desktop = match desktop {
-        LinuxDesktop::Gnome => "GNOME",
-        LinuxDesktop::Kde => "KDE Plasma",
-        LinuxDesktop::Other => "Linux desktop",
-    };
-    let session = match session {
-        LinuxSessionType::X11 => "X11",
-        LinuxSessionType::Wayland => "Wayland",
-        LinuxSessionType::Unknown => "unknown session",
-    };
-    let mode = if tray_available {
-        "StatusNotifier tray"
-    } else {
-        "standalone window"
-    };
     DesktopIntegration {
         standalone_window: !tray_available,
-        platform_summary: Some(format!("{desktop} · {session} · {mode}")),
+        platform_summary: Some(PlatformSummary {
+            desktop,
+            session,
+            tray_available,
+        }),
     }
 }
 
@@ -147,8 +182,12 @@ mod tests {
         let integration =
             super::linux_integration(LinuxSessionType::Wayland, LinuxDesktop::Gnome, false);
         assert_eq!(
-            integration.platform_summary().as_deref(),
+            integration.platform_summary("en").as_deref(),
             Some("GNOME · Wayland · standalone window")
+        );
+        assert_eq!(
+            integration.platform_summary("zh-CN").as_deref(),
+            Some("GNOME · Wayland · 独立窗口")
         );
     }
 }

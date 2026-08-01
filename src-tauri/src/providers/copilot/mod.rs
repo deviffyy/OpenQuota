@@ -36,6 +36,8 @@ pub(crate) fn definition() -> ProviderDefinition {
         short_name: "Co".into(),
         fallback_enabled: false,
         local_usage_source_note: None,
+        local_usage_source_key: None,
+        pi_usage_source_key: None,
         links: vec![
             ProviderLink::new("Status", "https://www.githubstatus.com/"),
             ProviderLink::new("Dashboard", "https://github.com/settings/billing"),

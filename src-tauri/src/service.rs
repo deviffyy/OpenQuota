@@ -702,6 +702,8 @@ mod tests {
             short_name: "T".into(),
             fallback_enabled: true,
             local_usage_source_note: None,
+            local_usage_source_key: None,
+            pi_usage_source_key: None,
             links: vec![],
             metrics: vec![MetricDefinition::new(
                 format!("{id}.session"),
@@ -858,6 +860,8 @@ mod tests {
             short_name: "D".into(),
             fallback_enabled: true,
             local_usage_source_note: None,
+            local_usage_source_key: None,
+            pi_usage_source_key: None,
             links: Vec::new(),
             metrics: vec![
                 MetricDefinition::quota(

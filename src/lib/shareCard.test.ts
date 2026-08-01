@@ -11,7 +11,7 @@ import {
   SHARE_CARD_WIDTH,
   TOTAL_SPEND_GEOMETRY,
   TOTAL_SPEND_OUTER_PADDING,
-  TOTAL_SPEND_PERIOD_LABELS,
+  totalSpendPeriodLabels,
   totalSpendShareCardHeight,
 } from './shareCard';
 import type { AppSettings, ProviderLayout, ProviderSnapshot } from './types';
@@ -273,7 +273,7 @@ describe('share card layout', () => {
   });
 
   it('keeps Total Spend to the period switcher and usage body', () => {
-    expect(TOTAL_SPEND_PERIOD_LABELS).toEqual(['Today', 'Yesterday', '30 Days']);
+    expect(totalSpendPeriodLabels()).toEqual(['Today', 'Yesterday', '30 Days']);
     expect(TOTAL_SPEND_OUTER_PADDING).toBe(10);
     expect(TOTAL_SPEND_GEOMETRY).toMatchObject({
       width: 320,
