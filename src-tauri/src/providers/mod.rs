@@ -9,6 +9,7 @@ mod daily_usage;
 mod detection;
 pub mod devin;
 pub mod grok;
+pub mod kimi;
 mod log_usage;
 pub mod opencode;
 pub mod openrouter;
@@ -157,7 +158,7 @@ pub trait UsageProvider: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::{
-        antigravity, claude, codex, copilot, cursor, devin, grok, opencode, openrouter,
+        antigravity, claude, codex, copilot, cursor, devin, grok, kimi, opencode, openrouter,
         remember_default_account, zai, ProviderError,
     };
     use crate::models::ProviderErrorKind;
@@ -276,6 +277,16 @@ mod tests {
                 (
                     "API Keys".into(),
                     "https://z.ai/manage-apikey/apikey-list".into()
+                ),
+            ]
+        );
+        assert_eq!(
+            links(kimi::definition()),
+            [
+                ("Dashboard".into(), "https://platform.moonshot.ai/".into()),
+                (
+                    "API Keys".into(),
+                    "https://platform.moonshot.ai/console/api-keys".into()
                 ),
             ]
         );
