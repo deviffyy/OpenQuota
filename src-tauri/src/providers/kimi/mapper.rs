@@ -88,10 +88,10 @@ fn weekly_quota(body: &Value) -> Result<QuotaWindow, KimiError> {
         used_percent,
         resets_at: iso_time(usage.get("resetTime")),
         period_seconds: WEEKLY_PERIOD_SECONDS,
-        format: QuotaFormat::Count,
-        used_value: Some(used),
-        limit_value: Some(limit),
-        unit: Some("uses".into()),
+        format: QuotaFormat::Percent,
+        used_value: None,
+        limit_value: None,
+        unit: None,
         estimated: false,
         source_note: None,
     })
@@ -124,7 +124,7 @@ fn session_quota(body: &Value) -> Result<Option<QuotaWindow>, KimiError> {
     let period_seconds = entry
         .get("window")
         .and_then(|window| number(window.get("duration")).filter(|value| *value > 0.0))
-        .and_then(|duration| {
+        .map(|duration| {
             let time_unit = entry
                 .get("window")
                 .and_then(|window| window.get("timeUnit"))
@@ -134,7 +134,7 @@ fn session_quota(body: &Value) -> Result<Option<QuotaWindow>, KimiError> {
                 Some("TIME_UNIT_SECOND") => 1.0,
                 _ => 60.0,
             };
-            Some((duration * factor) as u64)
+            (duration * factor) as u64
         })
         .unwrap_or(DEFAULT_WINDOW_PERIOD_SECONDS);
 
@@ -144,10 +144,10 @@ fn session_quota(body: &Value) -> Result<Option<QuotaWindow>, KimiError> {
         used_percent,
         resets_at: iso_time(detail.get("resetTime")),
         period_seconds,
-        format: QuotaFormat::Count,
-        used_value: Some(used),
-        limit_value: Some(limit),
-        unit: Some("uses".into()),
+        format: QuotaFormat::Percent,
+        used_value: None,
+        limit_value: None,
+        unit: None,
         estimated: false,
         source_note: None,
     }))
@@ -176,6 +176,7 @@ mod tests {
     use serde_json::{json, Value};
 
     use super::{map_usage, plan_name};
+    use crate::models::QuotaFormat;
 
     fn captured() -> Value {
         serde_json::json!({
@@ -209,8 +210,10 @@ mod tests {
 
         let weekly = &mapped.quotas[1];
         assert_eq!(weekly.used_percent, 25.0);
-        assert_eq!(weekly.used_value, Some(25.0));
-        assert_eq!(weekly.limit_value, Some(100.0));
+        assert_eq!(weekly.format, QuotaFormat::Percent);
+        assert_eq!(weekly.used_value, None);
+        assert_eq!(weekly.limit_value, None);
+        assert_eq!(weekly.unit, None);
         assert_eq!(weekly.period_seconds, 7 * 24 * 60 * 60);
         assert_eq!(
             weekly.resets_at.map(|datetime| datetime.timestamp()),
