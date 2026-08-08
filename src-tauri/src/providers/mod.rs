@@ -10,6 +10,7 @@ mod detection;
 pub mod devin;
 pub mod grok;
 pub mod kimi;
+pub mod minimax;
 mod log_usage;
 pub mod opencode;
 pub mod openrouter;
@@ -158,8 +159,8 @@ pub trait UsageProvider: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::{
-        antigravity, claude, codex, copilot, cursor, devin, grok, kimi, opencode, openrouter,
-        remember_default_account, zai, ProviderError,
+        antigravity, claude, codex, copilot, cursor, devin, grok, kimi, minimax, opencode,
+        openrouter, remember_default_account, zai, ProviderError,
     };
     use crate::models::ProviderErrorKind;
     use tempfile::tempdir;
@@ -288,6 +289,13 @@ mod tests {
                     "API Keys".into(),
                     "https://platform.moonshot.ai/console/api-keys".into()
                 ),
+            ]
+        );
+        assert_eq!(
+            links(minimax::definition()),
+            [
+                ("Dashboard".into(), "https://www.minimax.io/".into()),
+                ("API Keys".into(), "https://platform.minimaxi.com/".into()),
             ]
         );
     }
