@@ -13,7 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-base64 = "0.22"
+base64 = "0.23"
 chrono = { version = "0.4", features = ["serde"] }
 notify-rust = "4.18.0"
 reqwest = { version = "0.13", default-features = false, features = ["blocking", "form", "json", "rustls"] }
