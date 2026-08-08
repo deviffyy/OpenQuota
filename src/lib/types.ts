@@ -141,6 +141,7 @@ export interface TrayMetricDefinition {
 export interface MetricDefinition {
   id: string;
   label: string;
+  labelKey?: string | null;
   source: MetricSource;
   pinnable: boolean;
   defaultEnabled: boolean;
@@ -167,6 +168,8 @@ export interface ProviderDefinition {
   shortName: string;
   fallbackEnabled: boolean;
   localUsageSourceNote: string | null;
+  localUsageSourceKey?: string | null;
+  piUsageSourceKey?: string | null;
   links: ProviderLink[];
   metrics: MetricDefinition[];
 }
@@ -198,6 +201,7 @@ export interface NotificationPreferences {
 
 export interface AppSettings {
   schemaVersion: number;
+  language: 'system' | 'en' | 'zh-CN' | 'zh-TW';
   providers: ProviderLayout[];
   knownProviderIds: string[];
   providerNames: Record<string, string>;

@@ -38,6 +38,12 @@ impl ProviderRegistry {
 
         for provider in providers {
             let mut definition = provider.definition();
+            let (source_key, pi_source_key) = usage_source_keys(&definition.id);
+            definition.local_usage_source_key = source_key.map(str::to_owned);
+            definition.pi_usage_source_key = pi_source_key.map(str::to_owned);
+            for metric in &mut definition.metrics {
+                metric.label_key = metric_label_key(&metric.id).map(str::to_owned);
+            }
             definition.links = definition
                 .links
                 .iter()
@@ -137,6 +143,57 @@ impl ProviderRegistry {
                 })
                 .collect(),
         )
+    }
+}
+
+fn metric_label_key(id: &str) -> Option<&'static str> {
+    let suffix = id.rsplit_once('.').map(|(_, suffix)| suffix).unwrap_or(id);
+    match suffix {
+        "session" => Some("session"),
+        "weekly" => Some("weekly"),
+        "trend" => Some("usageTrend"),
+        "today" => Some("today"),
+        "yesterday" => Some("yesterday"),
+        "last30" => Some("last30Days"),
+        "rateLimitResets" => Some("rateLimitResets"),
+        "onDemand" | "extra" | "payAsYouGo" => Some("extraUsage"),
+        "usage" => Some("totalUsage"),
+        "auto" => Some("autoUsage"),
+        "api" => Some("apiUsage"),
+        "requests" => Some("requestsLabel"),
+        "premium" => Some("credits"),
+        "orgCredits" => Some("orgCredits"),
+        "orgSpend" => Some("orgSpend"),
+        "chat" => Some("chat"),
+        "completions" => Some("completions"),
+        "balance" => Some("balance"),
+        "week" => Some("thisWeek"),
+        "month" => Some("thisMonth"),
+        "keyLimit" => Some("keyLimit"),
+        "webSearches" => Some("webSearches"),
+        "sparkWeekly" => Some("sparkWeekly"),
+        "claudeWeekly" => Some("claudeWeekly"),
+        "credits" => match id {
+            "codex.credits" => Some("extraUsage"),
+            _ => Some("credits"),
+        },
+        _ => None,
+    }
+}
+
+fn usage_source_keys(id: &str) -> (Option<&'static str>, Option<&'static str>) {
+    match id {
+        "claude" => (
+            Some("estimatedUsageHistorySource"),
+            Some("estimatedHistoryWithPiSource"),
+        ),
+        "codex" | "grok" => (
+            Some("estimatedLogsSource"),
+            Some("estimatedLogsWithPiSource"),
+        ),
+        "cursor" => (Some("cursorExportSource"), None),
+        "opencode" => (Some("openCodeDatabaseSource"), None),
+        _ => (Some("usageHistorySource"), None),
     }
 }
 
@@ -306,6 +363,8 @@ mod tests {
             short_name: "P".into(),
             fallback_enabled: true,
             local_usage_source_note: None,
+            local_usage_source_key: None,
+            pi_usage_source_key: None,
             links: vec![],
             metrics: vec![MetricDefinition::new(
                 format!("{id}.session"),

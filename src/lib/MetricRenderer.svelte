@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n';
   import { usageSourceNote, type ProviderCatalogIndex } from './metrics';
   import QuotaMetric from './QuotaMetric.svelte';
   import StatusMetric from './StatusMetric.svelte';
@@ -48,6 +49,7 @@
 {#if (definition?.source.kind === 'quota' || definition?.source.kind === 'quotaOrValue') && quota}
   <QuotaMetric
     {quota}
+    label={definition.label}
     {now}
     usageDisplay={settings.usageDisplay}
     resetDisplay={settings.resetDisplay}
@@ -74,19 +76,21 @@
     timeFormat={settings.timeFormat}
   />
 {:else if definition?.source.kind === 'quota' || definition?.source.kind === 'quotaOrValue'}
-  <section class="metric metric--no-data" aria-label={`${definition.label} quota`}>
+  <section class="metric metric--no-data" aria-label={t('quotaFor', { label: definition.label })}>
     <div class="metric__heading"><h2>{definition.label}</h2></div>
     <div class="meter-shell">
       <div
         class="meter"
         role="progressbar"
-        aria-label={`${definition.label} used`}
+        aria-label={t('usedFor', { label: definition.label })}
         aria-valuemin="0"
         aria-valuemax="100"
         aria-valuenow="0"
       ></div>
     </div>
-    <div class="metric__reading"><span>No data</span><span>Reset unavailable</span></div>
+    <div class="metric__reading">
+      <span>{t('noData')}</span><span>{t('resetUnavailable')}</span>
+    </div>
   </section>
 {:else if definition?.source.kind === 'trend'}
   <UsageTrend daily={snapshot.usage.daily} sourceNote={resolvedUsageSourceNote} />

@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import Icon from './Icon.svelte';
-  import { formatMetricNumber, formatMetricValue } from './metricFormat';
+  import { formatMetricNumber } from './metricFormat';
   import ModelUsageDetail from './ModelUsageDetail.svelte';
   import type { UsagePeriod } from './types';
+  import { t } from './i18n';
 
   interface Props {
     label: string;
@@ -16,8 +17,10 @@
   let hideTimer: ReturnType<typeof setTimeout> | undefined;
 
   function reading(value: UsagePeriod | null) {
-    if (!value) return 'No data';
-    const tokens = formatMetricValue(value.tokens, 'count', 'row', 'tokens');
+    if (!value) return t('noData');
+    const tokens = t('tokensValue', {
+      count: formatMetricNumber(value.tokens, 'count', 'row'),
+    });
     if (value.estimatedCostUsd === null) return tokens;
     return `${formatMetricNumber(value.estimatedCostUsd, 'dollars', 'row')} · ${tokens}`;
   }
@@ -26,7 +29,7 @@
     if (value.modelBreakdown?.models.length) return undefined;
     const note =
       value.estimatedCostUsd !== null && value.costEstimated
-        ? 'Estimated locally, so it may be off'
+        ? t('estimatedLocallyShort')
         : undefined;
     const abbreviated =
       Math.abs(value.tokens) >= 1000 || Math.abs(value.estimatedCostUsd ?? 0) >= 1000;
@@ -35,12 +38,12 @@
       value.estimatedCostUsd === null
         ? undefined
         : formatMetricNumber(value.estimatedCostUsd, 'dollars', 'full'),
-      formatMetricValue(value.tokens, 'count', 'full', 'tokens'),
+      t('tokensValue', { count: formatMetricNumber(value.tokens, 'count', 'full') }),
     ].filter(Boolean);
     return [...figures, note].filter(Boolean).join('\n');
   }
   function unknownModelTooltip(models: string[]) {
-    const heading = models.length === 1 ? 'Unknown model found' : 'Unknown models found';
+    const heading = models.length === 1 ? t('unknownModelFound') : t('unknownModelsFound');
     return [heading, ...models.map((model) => `- ${model}`)].join('\n');
   }
   function scheduleShow(event: Event) {
@@ -79,8 +82,7 @@
     >{label}{#if period?.unknownModels?.length}<i
         class="usage-label-warning"
         data-tooltip={unknownModelTooltip(period.unknownModels)}
-        aria-label="This period used a model with unknown pricing"
-        ><Icon name="warning" size={10} strokeWidth={2.2} /></i
+        aria-label={t('unknownPricing')}><Icon name="warning" size={10} strokeWidth={2.2} /></i
       >{/if}</span
   >
   <button

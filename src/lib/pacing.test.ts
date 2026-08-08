@@ -103,7 +103,7 @@ describe('quota pacing', () => {
     const reset = new Date('2026-07-10T18:30:00Z').toISOString();
     const twelveHour = formatReset(reset, now, 'exact', 'twelveHour');
     const twentyFourHour = formatReset(reset, now, 'exact', 'twentyFourHour');
-    const dayPeriod = new Intl.DateTimeFormat([], { hour: '2-digit', hour12: true })
+    const dayPeriod = new Intl.DateTimeFormat('en', { hour: '2-digit', hour12: true })
       .formatToParts(new Date(reset))
       .find((part) => part.type === 'dayPeriod')?.value;
     expect(dayPeriod).toBeTruthy();

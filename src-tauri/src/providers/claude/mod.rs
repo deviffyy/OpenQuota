@@ -33,6 +33,8 @@ fn definition_for(id: &str, display_name: &str, fallback_enabled: bool) -> Provi
         short_name: "Cl".into(),
         fallback_enabled,
         local_usage_source_note: Some("From your Claude usage history (estimated)".into()),
+        local_usage_source_key: None,
+        pi_usage_source_key: None,
         links: vec![
             ProviderLink::new("Status", "https://status.anthropic.com/"),
             ProviderLink::new("Dashboard", "https://claude.ai/settings/usage"),

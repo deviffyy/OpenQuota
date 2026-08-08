@@ -4,6 +4,12 @@ import type {
   ProviderDefinition,
   ProviderSnapshot,
 } from './types';
+import { t } from './i18n';
+
+function localizedMetricLabel(definition: MetricDefinition) {
+  const key = definition.labelKey as Parameters<typeof t>[0] | null | undefined;
+  return key ? t(key) : definition.label;
+}
 
 export class ProviderCatalogIndex {
   readonly providers: ProviderDefinition[];
@@ -34,7 +40,8 @@ export class ProviderCatalogIndex {
   }
 
   metric(id: string) {
-    return this.#metricsById.get(id);
+    const metric = this.#metricsById.get(id);
+    return metric ? { ...metric, label: localizedMetricLabel(metric) } : undefined;
   }
 
   displayName(id: string, providerNames?: Record<string, string>) {
@@ -49,19 +56,26 @@ export class ProviderCatalogIndex {
 
   localUsageSourceNote(id: string) {
     const provider = this.provider(id);
-    return (
-      provider?.localUsageSourceNote ?? `From your ${provider?.displayName ?? id} usage history`
-    );
+    const name = provider?.displayName ?? id;
+    const key = provider?.localUsageSourceKey as Parameters<typeof t>[0] | null | undefined;
+    return key
+      ? t(key, { provider: name })
+      : (provider?.localUsageSourceNote ?? t('usageHistorySource', { provider: name }));
   }
 }
 
 export function usageSourceNote(catalog: ProviderCatalogIndex, snapshot: ProviderSnapshot) {
-  return (
+  const source =
     snapshot.usage.last30Days?.modelBreakdown?.sourceNote ??
     snapshot.usage.today?.modelBreakdown?.sourceNote ??
-    snapshot.usage.yesterday?.modelBreakdown?.sourceNote ??
-    catalog.localUsageSourceNote(snapshot.providerId)
-  );
+    snapshot.usage.yesterday?.modelBreakdown?.sourceNote;
+  const name = catalog.displayName(snapshot.providerId);
+  if (source?.includes(' and pi ')) {
+    const key = catalog.provider(snapshot.providerId)?.piUsageSourceKey as
+      Parameters<typeof t>[0] | null | undefined;
+    return t(key ?? 'estimatedLogsWithPiSource', { provider: name });
+  }
+  return catalog.localUsageSourceNote(snapshot.providerId);
 }
 
 export const emptyProviderCatalog = new ProviderCatalogIndex({ providers: [] });

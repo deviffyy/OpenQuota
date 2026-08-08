@@ -327,6 +327,7 @@ pub struct TrayMetricDefinition {
 pub struct MetricDefinition {
     pub id: String,
     pub label: String,
+    pub label_key: Option<String>,
     pub source: MetricSource,
     pub pinnable: bool,
     pub default_enabled: bool,
@@ -351,6 +352,7 @@ impl MetricDefinition {
         Self {
             id: id.into(),
             label: label.into(),
+            label_key: None,
             source,
             pinnable,
             default_enabled,
@@ -538,6 +540,8 @@ pub struct ProviderDefinition {
     pub short_name: String,
     pub fallback_enabled: bool,
     pub local_usage_source_note: Option<String>,
+    pub local_usage_source_key: Option<String>,
+    pub pi_usage_source_key: Option<String>,
     #[serde(default)]
     pub links: Vec<ProviderLink>,
     pub metrics: Vec<MetricDefinition>,
@@ -682,6 +686,8 @@ pub struct NotificationPreferences {
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub schema_version: u32,
+    #[serde(default = "default_language")]
+    pub language: String,
     pub providers: Vec<ProviderLayout>,
     pub known_provider_ids: Vec<String>,
     pub provider_names: BTreeMap<String, String>,
@@ -706,10 +712,25 @@ pub struct AppSettings {
     pub detection_notice_dismissed: bool,
 }
 
+fn default_language() -> String {
+    "system".to_owned()
+}
+
+pub fn normalize_language_preference(value: &str) -> &'static str {
+    match value {
+        "system" => "system",
+        "en" => "en",
+        "zh-CN" => "zh-CN",
+        "zh-TW" => "zh-TW",
+        _ => "en",
+    }
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             schema_version: 6,
+            language: default_language(),
             providers: Vec::new(),
             known_provider_ids: Vec::new(),
             provider_names: BTreeMap::new(),
@@ -780,6 +801,22 @@ mod tests {
         assert_eq!(settings.last_update_check_at, None);
         assert_eq!(settings.log_level, LogLevel::Info);
         assert_eq!(settings.window_mode, WindowMode::Popup);
+    }
+
+    #[test]
+    fn older_settings_without_language_default_to_system() {
+        let mut value = serde_json::to_value(AppSettings::default()).unwrap();
+        value.as_object_mut().unwrap().remove("language");
+
+        let settings: AppSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(settings.language, "system");
+    }
+
+    #[test]
+    fn unsupported_language_preferences_fall_back_to_english() {
+        assert_eq!(super::normalize_language_preference("invalid-locale"), "en");
+        assert_eq!(super::normalize_language_preference("zh-CN"), "zh-CN");
+        assert_eq!(super::normalize_language_preference("zh-TW"), "zh-TW");
     }
 
     #[test]

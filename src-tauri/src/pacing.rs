@@ -125,19 +125,37 @@ pub enum Milestone {
 }
 
 impl Milestone {
-    pub fn title(self) -> &'static str {
-        match self {
-            Self::AlmostOut => "Almost Out",
-            Self::CuttingItClose => "Cutting It Close",
-            Self::WillRunOut => "Will Run Out",
+    pub fn title(self, locale: crate::native_i18n::Locale) -> &'static str {
+        match (locale, self) {
+            (crate::native_i18n::Locale::En, Self::AlmostOut) => "Almost Out",
+            (crate::native_i18n::Locale::En, Self::CuttingItClose) => "Cutting It Close",
+            (crate::native_i18n::Locale::En, Self::WillRunOut) => "Will Run Out",
+            (crate::native_i18n::Locale::ZhCn, Self::AlmostOut) => "即将用尽",
+            (crate::native_i18n::Locale::ZhCn, Self::CuttingItClose) => "接近限额",
+            (crate::native_i18n::Locale::ZhCn, Self::WillRunOut) => "将会用尽",
+            (crate::native_i18n::Locale::ZhTw, Self::AlmostOut) => "即將用盡",
+            (crate::native_i18n::Locale::ZhTw, Self::CuttingItClose) => "接近限額",
+            (crate::native_i18n::Locale::ZhTw, Self::WillRunOut) => "將會用盡",
         }
     }
 
-    pub fn body(self) -> &'static str {
-        match self {
-            Self::AlmostOut => "Under 10% usage remaining for this window.",
-            Self::CuttingItClose => "Projected to finish close to your limit.",
-            Self::WillRunOut => "Projected to run out before the limit resets.",
+    pub fn body(self, locale: crate::native_i18n::Locale) -> &'static str {
+        match (locale, self) {
+            (crate::native_i18n::Locale::En, Self::AlmostOut) => {
+                "Under 10% usage remaining for this window."
+            }
+            (crate::native_i18n::Locale::En, Self::CuttingItClose) => {
+                "Projected to finish close to your limit."
+            }
+            (crate::native_i18n::Locale::En, Self::WillRunOut) => {
+                "Projected to run out before the limit resets."
+            }
+            (crate::native_i18n::Locale::ZhCn, Self::AlmostOut) => "此周期的剩余用量低于 10%。",
+            (crate::native_i18n::Locale::ZhCn, Self::CuttingItClose) => "预计将在接近限额时结束。",
+            (crate::native_i18n::Locale::ZhCn, Self::WillRunOut) => "预计将在限额重置前用尽。",
+            (crate::native_i18n::Locale::ZhTw, Self::AlmostOut) => "此週期的剩餘用量低於 10%。",
+            (crate::native_i18n::Locale::ZhTw, Self::CuttingItClose) => "預計將在接近限額時結束。",
+            (crate::native_i18n::Locale::ZhTw, Self::WillRunOut) => "預計將在限額重設前用盡。",
         }
     }
 }
@@ -147,7 +165,7 @@ pub struct PaceAlert {
     pub milestone: Milestone,
     pub provider: String,
     pub metric: String,
-    metric_id: String,
+    pub(crate) metric_id: String,
     previous_severity: Option<PaceSeverity>,
     previous_was_under_ten: bool,
 }
@@ -661,6 +679,8 @@ mod tests {
             short_name: "C".into(),
             fallback_enabled: true,
             local_usage_source_note: None,
+            local_usage_source_key: None,
+            pi_usage_source_key: None,
             links: vec![],
             metrics: vec![MetricDefinition::new(
                 "custom.rolling",
@@ -750,6 +770,8 @@ mod tests {
             short_name: "Sw".into(),
             fallback_enabled: true,
             local_usage_source_note: None,
+            local_usage_source_key: None,
+            pi_usage_source_key: None,
             links: vec![],
             metrics: vec![
                 quota_metric("switching.session", "session", "S"),

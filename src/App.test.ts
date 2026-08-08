@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.svelte';
+import { setUiLanguage } from './lib/i18n';
 import type {
   AppSettings,
   ProviderCatalog,
@@ -110,7 +111,10 @@ describe('OpenQuota dashboard', () => {
       return Promise.reject(new Error(`unexpected command ${command}`));
     });
   });
-  afterEach(cleanup);
+  afterEach(() => {
+    cleanup();
+    setUiLanguage('en');
+  });
 
   it('renders quota, total spend, and the 30-day trend from backend data', async () => {
     const { container } = render(App);
@@ -253,6 +257,118 @@ describe('OpenQuota dashboard', () => {
     }
   });
 
+  it('switches language immediately, persists it, and preserves temporary Settings state', async () => {
+    render(App);
+    await screen.findByText('Plus');
+    const appRoot = document.querySelector('main');
+    await fireEvent.click(screen.getByLabelText('Open options'));
+    await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+
+    const shortcut = screen.getByRole('button', { name: 'Record Shortcut' });
+    await fireEvent.click(shortcut);
+    expect(shortcut).toHaveTextContent('Type Shortcut…');
+
+    await fireEvent.click(screen.getByRole('combobox', { name: 'Language' }));
+    await fireEvent.click(screen.getByRole('option', { name: '简体中文' }));
+
+    expect(await screen.findByRole('region', { name: '设置' })).toBeInTheDocument();
+    expect(document.querySelector('main')).toBe(appRoot);
+    expect(screen.getByRole('button', { name: '输入快捷键…' })).toBe(shortcut);
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith(
+        'save_app_settings',
+        expect.objectContaining({ settings: expect.objectContaining({ language: 'zh-CN' }) }),
+      ),
+    );
+  });
+
+  it('translates the Total Spend accessible name without changing its meaning', async () => {
+    let language: AppSettings['language'] = 'zh-CN';
+    mockInvoke((command: string) => {
+      if (command === 'get_usage_state') return Promise.resolve(liveState);
+      if (command === 'get_app_settings')
+        return Promise.resolve({
+          ...settingsState,
+          settings: { ...settingsState.settings, language },
+        });
+      if (command === 'get_panel_resize_edge') return Promise.resolve('bottom');
+      if (command === 'get_panel_height_mode') return Promise.resolve('automatic');
+      if (command === 'fit_panel_to_content') return Promise.resolve(true);
+      if (command === 'check_for_updates')
+        return Promise.resolve({
+          available: false,
+          currentVersion: '0.3.3',
+          version: null,
+          body: null,
+          installable: true,
+          releaseUrl: '',
+        });
+      return Promise.resolve();
+    });
+
+    const simplified = render(App);
+    expect(await screen.findByRole('combobox', { name: '总消费指标' })).toBeInTheDocument();
+    simplified.unmount();
+
+    language = 'zh-TW';
+    render(App);
+    expect(await screen.findByRole('combobox', { name: '總消費指標' })).toBeInTheDocument();
+  });
+
+  it('loads a persisted language and safely renders invalid saved values in English', async () => {
+    mockInvoke((command: string) => {
+      if (command === 'get_usage_state') return Promise.resolve(liveState);
+      if (command === 'get_app_settings')
+        return Promise.resolve({
+          ...settingsState,
+          settings: { ...settingsState.settings, language: 'zh-TW' },
+        });
+      if (command === 'get_panel_resize_edge') return Promise.resolve('bottom');
+      if (command === 'get_panel_height_mode') return Promise.resolve('automatic');
+      if (command === 'fit_panel_to_content') return Promise.resolve(true);
+      if (command === 'check_for_updates')
+        return Promise.resolve({
+          available: false,
+          currentVersion: '0.3.3',
+          version: null,
+          body: null,
+          installable: true,
+          releaseUrl: '',
+        });
+      return Promise.resolve();
+    });
+    const first = render(App);
+    expect(await screen.findByRole('combobox', { name: '總消費指標' })).toBeInTheDocument();
+    first.unmount();
+
+    mockInvoke((command: string) => {
+      if (command === 'get_usage_state') return Promise.resolve(liveState);
+      if (command === 'get_app_settings')
+        return Promise.resolve({
+          ...settingsState,
+          settings: {
+            ...settingsState.settings,
+            language: 'invalid-locale' as AppSettings['language'],
+          },
+        });
+      if (command === 'get_panel_resize_edge') return Promise.resolve('bottom');
+      if (command === 'get_panel_height_mode') return Promise.resolve('automatic');
+      if (command === 'fit_panel_to_content') return Promise.resolve(true);
+      if (command === 'check_for_updates')
+        return Promise.resolve({
+          available: false,
+          currentVersion: '0.3.3',
+          version: null,
+          body: null,
+          installable: true,
+          releaseUrl: '',
+        });
+      return Promise.resolve();
+    });
+    render(App);
+    expect(await screen.findByRole('combobox', { name: 'Total Spend Metric' })).toBeInTheDocument();
+  });
+
   it('renders Claude and Antigravity independently with provider-specific quota formats', async () => {
     const multiProviderSettings = {
       ...settingsState,
@@ -328,7 +444,7 @@ describe('OpenQuota dashboard', () => {
     expect(screen.getAllByRole('progressbar')).toHaveLength(6);
     expect(
       within(screen.getByRole('region', { name: 'Total Spend' })).getByRole('img', {
-        name: 'Only includes Claude and Codex',
+        name: 'Only includes Claude and Codex.',
       }),
     ).toBeInTheDocument();
   });

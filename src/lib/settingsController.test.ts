@@ -19,6 +19,7 @@ function settingsView(theme: AppSettings['theme'] = 'system'): SettingsViewState
     platformSummary: null,
     settings: {
       schemaVersion: 6,
+      language: 'en',
       providerNames: {},
       providers: [],
       knownProviderIds: [],

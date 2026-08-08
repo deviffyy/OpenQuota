@@ -32,6 +32,8 @@ pub(crate) fn definition() -> ProviderDefinition {
         short_name: "Cx".into(),
         fallback_enabled: true,
         local_usage_source_note: Some("From your Codex logs (estimated)".into()),
+        local_usage_source_key: None,
+        pi_usage_source_key: None,
         links: vec![
             ProviderLink::new("Status", "https://status.openai.com/"),
             ProviderLink::new("Dashboard", "https://chatgpt.com/codex/settings/usage"),

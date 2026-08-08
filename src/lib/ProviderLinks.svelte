@@ -1,6 +1,7 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
   import type { ProviderLink } from './types';
+  import { t } from './i18n';
 
   interface Props {
     links: ProviderLink[];
@@ -15,7 +16,7 @@
   {#each links as link, linkIndex (`${link.label}:${link.url}`)}
     <button
       type="button"
-      aria-label={`${link.label}, opens in browser`}
+      aria-label={t('opensInBrowser', { label: link.label })}
       onclick={() => onOpen(linkIndex)}
     >
       <span>{link.label}</span><Icon name="external-link" size={10} strokeWidth={1.8} />

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { setUiLanguage, t } from './i18n';
 import {
   formatMetricNumber,
   formatMetricValue,
@@ -27,5 +28,17 @@ describe('shared metric formatting', () => {
       primary: '461.8',
       unit: 'million',
     });
+  });
+
+  it('uses the resolved UI locale for numbers, percentages, currency, and complete messages', () => {
+    setUiLanguage('zh-CN');
+    expect(formatMetricNumber(12345.6, 'count', 'full')).toBe('12,345.6');
+    expect(formatMetricNumber(25, 'percent', 'row')).toBe('25%');
+    expect(formatMetricNumber(12.5, 'dollars', 'full')).toContain('12.50');
+    expect(t('tokensValue', { count: formatMetricNumber(12000, 'count', 'row') })).toBe(
+      '1.2万 个令牌',
+    );
+    expect(t('resetsTodayAt', { time: '18:30' })).toBe('今天 18:30 重置');
+    setUiLanguage('en');
   });
 });

@@ -4,6 +4,7 @@
   import { springMotion } from './motion';
   import ProviderLinks from './ProviderLinks.svelte';
   import type { ProviderLink } from './types';
+  import { t } from './i18n';
 
   interface Props {
     providerId: string;
@@ -24,7 +25,7 @@
     data-reorder-id="section:onDemand"
     type="button"
     aria-expanded={expanded}
-    aria-label={expanded ? 'Show less' : 'Show more'}
+    aria-label={expanded ? t('showLess') : t('showMore')}
     onclick={onToggle}
   >
     <Icon name={expanded ? 'chevron-up' : 'chevron-down'} size={10} strokeWidth={2.2} />
