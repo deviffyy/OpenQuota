@@ -28,7 +28,7 @@
     onSettings,
     reducedMotion,
   }: Props = $props();
-  const providerDisplayName = (id: string) => catalog.displayName(id);
+  const providerDisplayName = (id: string) => catalog.displayName(id, settings.providerNames);
   function updateProvider(provider: ProviderLayout) {
     onChange({
       ...settings,
@@ -52,7 +52,7 @@
 
 <section class="screen customize-screen" aria-label={t('customize')}>
   <div class="customize-list" role="list">
-    {#each settings.providers as provider (provider.id)}
+    {#each settings.providers.filter( (provider) => catalog.provider(provider.id) ) as provider (provider.id)}
       <div
         role="listitem"
         class:inactive={!provider.enabled}

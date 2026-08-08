@@ -5,21 +5,33 @@ updates:
     schedule:
       interval: weekly
     groups:
-      frontend-dependencies:
+      frontend-minor-and-patch:
+        applies-to: version-updates
         patterns: ['*']
+        update-types:
+          - minor
+          - patch
 
   - package-ecosystem: cargo
     directory: /src-tauri
     schedule:
       interval: weekly
     groups:
-      rust-dependencies:
+      # Cargo 0.x minor releases may contain breaking API changes, so only patches are grouped.
+      rust-patches:
+        applies-to: version-updates
         patterns: ['*']
+        update-types:
+          - patch
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
     groups:
-      github-actions:
+      github-actions-minor-and-patch:
+        applies-to: version-updates
         patterns: ['*']
+        update-types:
+          - minor
+          - patch

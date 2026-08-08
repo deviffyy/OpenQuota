@@ -227,7 +227,11 @@ fn resolved_groups(
                     let metric_definition = registry.metric(&metric.id)?;
                     let mut resolved =
                         tray_metric(metric_definition, snapshot, settings.usage_display, locale)?;
-                    resolved.detail = format!("{} {}", definition.display_name, resolved.detail);
+                    resolved.detail = format!(
+                        "{} {}",
+                        settings.provider_display_name(definition),
+                        resolved.detail
+                    );
                     Some(resolved)
                 })
                 .collect::<Vec<_>>();

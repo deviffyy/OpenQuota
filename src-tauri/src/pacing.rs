@@ -276,7 +276,9 @@ impl NotificationEvaluator {
                 &window.label,
             );
             for alert in &mut new_alerts {
-                alert.provider = provider_definition.display_name.clone();
+                alert.provider = settings
+                    .provider_display_name(provider_definition)
+                    .to_owned();
                 alert.metric_id.clone_from(&metric_id);
                 alert.previous_severity = previous_severity;
                 alert.previous_was_under_ten = previous_was_under_ten;

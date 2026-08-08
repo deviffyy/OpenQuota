@@ -29,7 +29,7 @@ export function createWindowController(options: WindowControllerOptions) {
   let contentMorphTimer: ReturnType<typeof setTimeout> | undefined;
   let resizeInFlight = false;
   let pendingResizeHeight: number | null = null;
-  let dashboardHeight: number | null = null;
+  let dashboardBodyHeight: number | null = null;
 
   function shouldDefer() {
     return options.reordering() || shouldDeferPanelFit(options.screen(), options.refreshing());
@@ -78,6 +78,7 @@ export function createWindowController(options: WindowControllerOptions) {
     const header = document.querySelector<HTMLElement>('.screen-header');
     const footer = document.querySelector<HTMLElement>('.footer');
     const dragger = document.querySelector<HTMLElement>('.panel-resize-dragger');
+    const floatingChrome = document.querySelector<HTMLElement>('.floating-chrome');
     if (!page || !content || !stage) return;
 
     const renderedHeight = page.getBoundingClientRect().height;
@@ -89,30 +90,32 @@ export function createWindowController(options: WindowControllerOptions) {
     const contentStyle = window.getComputedStyle(content);
     const contentPadding =
       cssPixels(contentStyle.paddingTop) + cssPixels(contentStyle.paddingBottom);
+    const chromeHeight = floatingChrome?.offsetHeight ?? 0;
     const idealHeight =
       pageHeight +
       contentPadding +
       (header?.offsetHeight ?? 0) +
       (footer?.offsetHeight ?? 0) +
-      (dragger?.offsetHeight ?? 0);
+      (dragger?.offsetHeight ?? 0) +
+      chromeHeight;
     const monitor = await currentMonitor().catch(() => null);
     const workAreaHeight = monitor
       ? monitor.workArea.size.height / monitor.scaleFactor
       : window.screen.availHeight;
     const contentTarget = panelTargetHeight(idealHeight, workAreaHeight);
-    if (screen === 'dashboard') dashboardHeight = contentTarget;
+    if (screen === 'dashboard') dashboardBodyHeight = contentTarget - chromeHeight;
 
     let current: number | null = null;
-    if (screen === 'settings' && dashboardHeight === null) {
+    if (screen === 'settings' && dashboardBodyHeight === null) {
       const appWindow = getCurrentWindow();
       const scale = await appWindow.scaleFactor();
       current = (await appWindow.innerSize()).height / scale;
     }
-    const target = screenPanelHeight(
-      screen,
-      contentTarget,
-      dashboardHeight ?? Math.round(current ?? contentTarget),
+    const dashboardTarget = panelTargetHeight(
+      (dashboardBodyHeight ?? Math.round(current ?? contentTarget) - chromeHeight) + chromeHeight,
+      workAreaHeight,
     );
+    const target = screenPanelHeight(screen, contentTarget, dashboardTarget);
 
     if (options.reducedMotion() || contentMorphActive) {
       ++resizeGeneration;

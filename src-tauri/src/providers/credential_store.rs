@@ -2,6 +2,26 @@
 const MACOS_ITEM_NOT_FOUND: i32 = -25_300;
 
 #[cfg(target_os = "macos")]
+pub fn generic_password_service_exists(
+    service: &str,
+    _timeout: std::time::Duration,
+) -> Option<bool> {
+    use security_framework::item::{ItemClass, ItemSearchOptions};
+
+    match ItemSearchOptions::new()
+        .class(ItemClass::generic_password())
+        .service(service)
+        .load_attributes(true)
+        .skip_authenticated_items(true)
+        .search()
+    {
+        Ok(_) => Some(true),
+        Err(error) if error.code() == MACOS_ITEM_NOT_FOUND => Some(false),
+        Err(_) => None,
+    }
+}
+
+#[cfg(target_os = "macos")]
 pub fn read_generic_password(service: &str, account: &str) -> Result<Option<Vec<u8>>, String> {
     use security_framework::passwords::{generic_password, PasswordOptions};
 
@@ -67,6 +87,37 @@ pub fn read_generic_password(service: &str, account: &str) -> Result<Option<Vec<
         bytes
     };
     Ok(Some(value))
+}
+
+#[cfg(target_os = "windows")]
+pub fn generic_password_service_exists(
+    service: &str,
+    _timeout: std::time::Duration,
+) -> Option<bool> {
+    use std::{ptr, slice};
+    use windows_sys::Win32::Security::Credentials::{CredEnumerateW, CredFree, CREDENTIALW};
+
+    let filter = format!("{service}:*")
+        .encode_utf16()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let mut count = 0_u32;
+    let mut credentials: *mut *mut CREDENTIALW = ptr::null_mut();
+    let found = unsafe { CredEnumerateW(filter.as_ptr(), 0, &mut count, &mut credentials) };
+    if found == 0 {
+        return match std::io::Error::last_os_error().raw_os_error() {
+            Some(1168) => Some(false),
+            _ => None,
+        };
+    }
+    let exists = !credentials.is_null()
+        && unsafe { slice::from_raw_parts(credentials, count as usize) }
+            .iter()
+            .any(|credential| !credential.is_null());
+    if !credentials.is_null() {
+        unsafe { CredFree(credentials.cast()) };
+    }
+    Some(exists)
 }
 
 #[cfg(target_os = "windows")]
@@ -180,6 +231,34 @@ pub fn read_generic_password(service: &str, account: &str) -> Result<Option<Vec<
 }
 
 #[cfg(target_os = "linux")]
+pub fn generic_password_service_exists(
+    service: &str,
+    timeout: std::time::Duration,
+) -> Option<bool> {
+    use std::collections::HashMap;
+    use std::sync::mpsc;
+
+    use secret_service::{blocking::SecretService, EncryptionType};
+
+    if timeout.is_zero() {
+        return None;
+    }
+    let service = service.to_owned();
+    let (sender, receiver) = mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let result = (|| {
+            let secret_service = SecretService::connect(EncryptionType::Dh).ok()?;
+            let matches = secret_service
+                .search_items(HashMap::from([("service", service.as_str())]))
+                .ok()?;
+            Some(!matches.unlocked.is_empty() || !matches.locked.is_empty())
+        })();
+        let _ = sender.send(result);
+    });
+    receiver.recv_timeout(timeout).ok().flatten()
+}
+
+#[cfg(target_os = "linux")]
 pub fn read_owned_password(service: &str, account: &str) -> Result<Option<Vec<u8>>, String> {
     read_generic_password(service, account)
 }
@@ -268,6 +347,14 @@ pub fn delete_owned_password(service: &str, account: &str) -> Result<(), String>
 fn linux_secret_service_unavailable() -> String {
     "Linux Secret Service is unavailable. Start a Secret Service-compatible keyring, such as GNOME Keyring or KWallet, and try again."
         .into()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+pub fn generic_password_service_exists(
+    _service: &str,
+    _timeout: std::time::Duration,
+) -> Option<bool> {
+    Some(false)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]

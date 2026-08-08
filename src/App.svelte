@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import {
     beginPanelResize,
@@ -10,7 +10,7 @@
     getPanelResizeEdge,
     lockPanelResizeAxis,
     onOpenScreen,
-    onPopupHidden,
+    onMainWindowHidden,
     onSettingsState,
     onUpdateProgress,
     onUsageState,
@@ -31,6 +31,7 @@
   import CustomizeProviderDetail from './lib/CustomizeProviderDetail.svelte';
   import CustomizeProviderList from './lib/CustomizeProviderList.svelte';
   import ConfirmationSheet from './lib/ConfirmationSheet.svelte';
+  import { restoreCustomization } from './lib/customizationHistory';
   import Dashboard from './lib/Dashboard.svelte';
   import Icon from './lib/Icon.svelte';
   import { getUiLanguage, setUiLanguage, t, uiLanguage } from './lib/i18n';
@@ -40,6 +41,8 @@
   import OpenQuotaMark from './lib/OpenQuotaMark.svelte';
   import { horizontalPageTransition, shouldSlideBetweenScreens } from './lib/pageTransition';
   import { desktopPlatform, shortcutLabels } from './lib/platform';
+  import { withProviderName } from './lib/providerNames';
+  import RenameProviderSheet from './lib/RenameProviderSheet.svelte';
   import {
     buildProviderShareRows,
     renderProviderShareCard,
@@ -83,12 +86,19 @@
   const platform = desktopPlatform();
   const shortcuts = shortcutLabels(platform);
   const settingsController = new SettingsController((message) => (settingsError = message));
-  const providerDisplayName = (id: string) => catalog.displayName(id);
   const settingsState = $derived(settingsController.state);
+  const floatingWindow = $derived(
+    !!settingsState &&
+      (!settingsState.trayAvailable || settingsState.settings.windowMode === 'floating'),
+  );
+  const providerDisplayName = (id: string) =>
+    catalog.displayName(id, settingsState?.settings.providerNames);
   const updates = new UpdateController();
   let resizeEdge = $state<PanelResizeEdge>(platform === 'windows' ? 'top' : 'bottom');
+  const renderedResizeEdge = $derived(floatingWindow ? 'bottom' : resizeEdge);
   let panelHeightMode = $state<PanelHeightMode>('automatic');
   let panelHeightModeRequest = 0;
+  let renameCard = $state<{ id: string; initialValue: string } | null>(null);
   let lastResizeGripPointerAt = Number.NEGATIVE_INFINITY;
   let panelResizeOperation: Promise<void> | null = null;
   const windowController = createWindowController({
@@ -132,7 +142,7 @@
     windowController.beginContentMorph();
   }
 
-  function closePopup() {
+  function closeMainWindow() {
     resetTransientUi();
     navigate('dashboard');
     void dismissMainWindow();
@@ -141,6 +151,7 @@
     closeOptionsMenu();
     showAbout = false;
     resetConfirmationOpen = false;
+    renameCard = null;
     resettingCustomization = false;
     confirmationMessage = null;
     const content = document.querySelector<HTMLElement>('.content');
@@ -163,12 +174,25 @@
   function back() {
     if (screen.startsWith('provider:')) navigate('customize');
     else if (screen !== 'dashboard') navigate('dashboard');
-    else closePopup();
+    else closeMainWindow();
   }
   function saveSettings(next: AppSettings) {
     settingsError = null;
-    settingsController.save(next);
+    const windowModeChanged = settingsState?.settings.windowMode !== next.windowMode;
+    if (windowModeChanged) beginContentMorph();
+    const save = settingsController.save(next);
+    if (windowModeChanged) void save.finally(updatePanelResizeEdge);
   }
+
+  function toggleFloatingWindow() {
+    const current = settingsState;
+    if (!current?.trayAvailable) return;
+    saveSettings({
+      ...current.settings,
+      windowMode: floatingWindow ? 'popup' : 'floating',
+    });
+  }
+
   function cloneSettings(value: AppSettings): AppSettings {
     return JSON.parse(JSON.stringify(value)) as AppSettings;
   }
@@ -187,6 +211,31 @@
     }
     customizationHistory = [...customizationHistory.slice(-19), cloneSettings(current.settings)];
     saveSettings(next);
+  }
+  function openRenameProvider(providerId: string) {
+    const current = settingsState;
+    if (!current) return;
+    renameCard = {
+      id: providerId,
+      initialValue: current.settings.providerNames[providerId] ?? '',
+    };
+  }
+  async function closeRenameProvider() {
+    const providerId = renameCard?.id;
+    renameCard = null;
+    if (!providerId) return;
+    await tick();
+    const provider = [...document.querySelectorAll<HTMLElement>('[data-provider-id]')].find(
+      (element) => element.dataset.providerId === providerId,
+    );
+    provider?.querySelector<HTMLElement>('[data-reorder-touch-handle]')?.focus();
+  }
+  function renameProvider(name: string) {
+    const current = settingsState;
+    if (!current || !renameCard) return;
+    const changed = withProviderName(current.settings, renameCard.id, name);
+    if (changed !== current.settings) saveSettings(changed);
+    void closeRenameProvider();
   }
   function beginCustomizationGesture() {
     if (!settingsState) return;
@@ -209,10 +258,11 @@
     queueMicrotask(scheduleWindowFit);
   }
   function undoCustomization() {
+    const current = settingsState;
     const previous = customizationHistory.at(-1);
-    if (!previous) return;
+    if (!current || !previous) return;
     customizationHistory = customizationHistory.slice(0, -1);
-    saveSettings(previous);
+    saveSettings(restoreCustomization(current.settings, previous));
   }
   async function refresh() {
     if (anyRefreshing) return;
@@ -321,7 +371,12 @@
     const snapshot = [providerDisplayName(providerId), card.innerText.trim()].join('\n');
     try {
       const rows = buildProviderShareRows(catalog, provider, layout, current.settings, now);
-      const canvas = renderProviderShareCard(catalog, { providerId, plan: provider.plan, rows });
+      const canvas = renderProviderShareCard(catalog, {
+        providerId,
+        providerNames: current.settings.providerNames,
+        plan: provider.plan,
+        rows,
+      });
       await copyCanvas(canvas, snapshot);
     } catch {
       settingsError = t('providerScreenshotCopyFailed');
@@ -335,6 +390,7 @@
     try {
       const canvas = renderTotalSpendShareCard(catalog, {
         projection,
+        providerNames: current.settings.providerNames,
         metric: current.settings.totalSpendMetric,
         period: current.settings.totalSpendPeriod,
       });
@@ -386,6 +442,12 @@
     if (restoreFocus) optionsMenuElement.querySelector<HTMLElement>('summary')?.focus();
   }
   function handleWindowPointerDown(event: PointerEvent) {
+    if (
+      event.target instanceof Element &&
+      event.target.closest('.floating-chrome__drag') !== null
+    ) {
+      handleFloatingWindowPointerDown(event);
+    }
     if (
       optionsMenuElement?.open &&
       event.target instanceof Node &&
@@ -452,6 +514,13 @@
     void operation.finally(() => {
       if (panelResizeOperation === operation) panelResizeOperation = null;
     });
+  }
+  function handleFloatingWindowPointerDown(event: PointerEvent) {
+    if (event.button !== 0 || !('__TAURI_INTERNALS__' in window)) return;
+    event.preventDefault();
+    void getCurrentWindow()
+      .startDragging()
+      .catch(() => (settingsError = 'OpenQuota window could not be moved.'));
   }
   async function changePanelHeightMode(mode: PanelHeightMode) {
     if (!('__TAURI_INTERNALS__' in window)) return;
@@ -521,7 +590,9 @@
     const observePanelParts = () => {
       resizeObserver?.disconnect();
       document
-        .querySelectorAll<HTMLElement>('.screen-page, .screen-header, .footer, .notice')
+        .querySelectorAll<HTMLElement>(
+          '.floating-chrome, .screen-page, .screen-header, .footer, .notice',
+        )
         .forEach((element) => resizeObserver?.observe(element));
       scheduleWindowFit();
     };
@@ -581,7 +652,7 @@
       onOpenScreen((target) => navigate(target === 'settings' ? 'settings' : 'customize')),
     );
     listeners.add(
-      onPopupHidden(() => {
+      onMainWindowHidden(() => {
         resetTransientUi();
         navigate('dashboard');
       }),
@@ -618,6 +689,8 @@
 
 <main
   class="popover"
+  class:popover--floating={floatingWindow}
+  class:popover--macos={floatingWindow && platform === 'macos'}
   aria-label={t('dashboard')}
   data-language={$uiLanguage}
   oncontextmenu={(event) => event.preventDefault()}
@@ -625,14 +698,30 @@
   <p id="reorder-instructions" class="sr-only">
     {t('reorderInstructions')}
   </p>
-  {#if resizeEdge === 'top'}
+  {#if renderedResizeEdge === 'top'}
     <div
       class="panel-resize-dragger panel-resize-dragger--top"
       role="separator"
-      aria-label={t('panelHeight')}
+      aria-label={t('resizePanelHeight')}
       aria-orientation="horizontal"
       onpointerdown={handlePanelResizePointerDown}
     ></div>
+  {/if}
+  {#if floatingWindow}
+    <header class="floating-chrome" aria-label={t('windowControls')}>
+      <div class="floating-chrome__drag">
+        <OpenQuotaMark size={14} />
+        <span>OpenQuota</span>
+      </div>
+      <button
+        class="floating-chrome__close"
+        type="button"
+        aria-label={settingsState?.trayAvailable ? t('hideOpenQuota') : t('closeOpenQuota')}
+        onclick={closeMainWindow}
+      >
+        <Icon name="close" size={12} strokeWidth={2.1} />
+      </button>
+    </header>
   {/if}
   {#if settingsState}
     {#if screen !== 'dashboard'}
@@ -686,6 +775,7 @@
               <Dashboard
                 {viewState}
                 {catalog}
+                renamableProviderIds={settingsState.renamableProviderIds}
                 settings={settingsState.settings}
                 {now}
                 onSettingsChange={saveSettings}
@@ -694,6 +784,7 @@
                 onReorderEnd={endCustomizationGesture}
                 onCustomize={() => navigate('customize')}
                 onOpenProviderCustomize={(id) => navigate(`provider:${id}`)}
+                onRenameProvider={openRenameProvider}
                 onShare={shareProvider}
                 onShareTotal={shareTotalSpend}
                 onRefresh={refreshProvider}
@@ -739,7 +830,9 @@
                 settings={settingsState.settings}
                 providerId={screen.slice(9)}
                 {catalog}
+                renamableProviderIds={settingsState.renamableProviderIds}
                 onChange={saveCustomization}
+                onNameChange={saveSettings}
                 onReorderStart={beginCustomizationGesture}
                 onReorderEnd={endCustomizationGesture}
                 {reducedMotion}
@@ -764,77 +857,93 @@
           >
         </button>
         {#if screen === 'dashboard'}
-          <details class="options-menu" bind:this={optionsMenuElement}>
-            <summary aria-label={t('openOptions')} onkeydown={handleOptionsKey}
-              ><span>{t('options')}</span><Icon
-                name="chevron-down"
-                size={11}
-                strokeWidth={2.2}
-              /></summary
-            >
-            <div
-              class="options-menu__panel"
-              role="menu"
-              aria-label={t('optionsMenu')}
-              tabindex="-1"
-              onkeydown={handleOptionsKey}
-              onclick={(event) => {
-                if (event.target instanceof Element && event.target.closest('button')) {
-                  closeOptionsMenu();
-                }
-              }}
-            >
+          <div class="footer-actions">
+            {#if settingsState.trayAvailable}
               <button
-                class="menu-item"
+                class="window-mode-toggle"
+                class:window-mode-toggle--active={floatingWindow}
                 type="button"
-                aria-label={t('customize')}
-                onclick={() => navigate('customize')}
-                ><Icon name="sliders" /><span>{t('customize')}</span><kbd>↩</kbd></button
+                aria-label={floatingWindow ? t('returnToTrayPopup') : t('keepWindowOpen')}
+                aria-pressed={floatingWindow}
+                data-tooltip={floatingWindow ? t('returnToTrayPopup') : t('keepWindowOpen')}
+                onclick={toggleFloatingWindow}
               >
-              <button
-                class="menu-item"
-                type="button"
-                aria-label={t('settings')}
-                onclick={() => navigate('settings')}
-                ><Icon name="gear" /><span>{t('settings')}</span><kbd>{shortcuts.settings}</kbd
-                ></button
+                <Icon name={floatingWindow ? 'pin-filled' : 'pin'} size={14} strokeWidth={1.9} />
+              </button>
+            {/if}
+            <details class="options-menu" bind:this={optionsMenuElement}>
+              <summary aria-label={t('openOptions')} onkeydown={handleOptionsKey}
+                ><span>{t('options')}</span><Icon
+                  name="chevron-down"
+                  size={11}
+                  strokeWidth={2.2}
+                /></summary
               >
-              <hr />
-              <details
-                bind:this={shareMenuElement}
-                class="share-menu"
-                ontoggle={(event) => (shareMenuOpen = event.currentTarget.open)}
+              <div
+                class="options-menu__panel"
+                role="menu"
+                aria-label={t('optionsMenu')}
+                tabindex="-1"
+                onkeydown={handleOptionsKey}
+                onclick={(event) => {
+                  if (event.target instanceof Element && event.target.closest('button')) {
+                    closeOptionsMenu();
+                  }
+                }}
               >
-                <summary
-                  ><span class="share-menu__direction"><Icon name="chevron-left" size={12} /></span
-                  ><span>{t('shareScreenshot')}</span></summary
+                <button
+                  class="menu-item"
+                  type="button"
+                  aria-label={t('customize')}
+                  onclick={() => navigate('customize')}
+                  ><Icon name="sliders" /><span>{t('customize')}</span><kbd>↩</kbd></button
                 >
-                <div>
-                  {#if shareMenuOpen}
-                    {#each settingsState.settings.providers.filter((provider) => provider.enabled) as provider (provider.id)}
-                      <button type="button" onclick={() => shareProvider(provider.id)}
-                        >{providerDisplayName(provider.id)}</button
-                      >
-                    {/each}
-                  {/if}
-                </div>
-              </details>
-              <button class="menu-item" type="button" onclick={() => void checkForUpdates(true)}
-                ><Icon name="refresh" /><span>{t('checkUpdates')}</span></button
-              >
-              <hr />
-              <button class="menu-item" type="button" onclick={() => (showAbout = true)}
-                ><Icon name="about" /><span>{t('about')}</span></button
-              >
-              <button
-                class="menu-item menu-item--danger"
-                type="button"
-                aria-label={t('quit')}
-                onclick={quitApp}
-                ><Icon name="power" /><span>{t('quit')}</span><kbd>{shortcuts.quit}</kbd></button
-              >
-            </div>
-          </details>
+                <button
+                  class="menu-item"
+                  type="button"
+                  aria-label={t('settings')}
+                  onclick={() => navigate('settings')}
+                  ><Icon name="gear" /><span>{t('settings')}</span><kbd>{shortcuts.settings}</kbd
+                  ></button
+                >
+                <hr />
+                <details
+                  bind:this={shareMenuElement}
+                  class="share-menu"
+                  ontoggle={(event) => (shareMenuOpen = event.currentTarget.open)}
+                >
+                  <summary
+                    ><span class="share-menu__direction"
+                      ><Icon name="chevron-left" size={12} /></span
+                    ><span>{t('shareScreenshot')}</span></summary
+                  >
+                  <div>
+                    {#if shareMenuOpen}
+                      {#each settingsState.settings.providers.filter((provider) => provider.enabled && catalog.provider(provider.id)) as provider (provider.id)}
+                        <button type="button" onclick={() => shareProvider(provider.id)}
+                          >{providerDisplayName(provider.id)}</button
+                        >
+                      {/each}
+                    {/if}
+                  </div>
+                </details>
+                <button class="menu-item" type="button" onclick={() => void checkForUpdates(true)}
+                  ><Icon name="refresh" /><span>{t('checkUpdates')}</span></button
+                >
+                <hr />
+                <button class="menu-item" type="button" onclick={() => (showAbout = true)}
+                  ><Icon name="about" /><span>{t('about')}</span></button
+                >
+                <button
+                  class="menu-item menu-item--danger"
+                  type="button"
+                  aria-label={t('quit')}
+                  onclick={quitApp}
+                  ><Icon name="power" /><span>{t('quit')}</span><kbd>{shortcuts.quit}</kbd></button
+                >
+              </div>
+            </details>
+          </div>
         {/if}
       </footer>
     {/if}
@@ -853,6 +962,14 @@
         pending={resettingCustomization}
         onConfirm={() => void confirmCustomizationReset()}
         onCancel={() => (resetConfirmationOpen = false)}
+      />
+    {/if}
+
+    {#if renameCard}
+      <RenameProviderSheet
+        initialValue={renameCard.initialValue}
+        onRename={renameProvider}
+        onCancel={() => void closeRenameProvider()}
       />
     {/if}
 
@@ -888,7 +1005,7 @@
       {/if}
     </div>
   {/if}
-  {#if resizeEdge === 'bottom'}
+  {#if renderedResizeEdge === 'bottom'}
     <div
       class="panel-resize-dragger panel-resize-dragger--bottom"
       role="separator"
@@ -912,6 +1029,84 @@
       background: var(--tray);
       isolation: isolate;
       user-select: none;
+    }
+
+    .floating-chrome {
+      position: relative;
+      z-index: 30;
+      display: grid;
+      width: 100%;
+      height: 32px;
+      flex: 0 0 32px;
+      grid-template-columns: 32px 1fr 32px;
+      align-items: center;
+      border-bottom: 1px solid var(--separator);
+      background: color-mix(in srgb, var(--text) 3%, var(--tray));
+    }
+
+    .floating-chrome__drag {
+      grid-row: 1;
+      grid-column: 1 / -1;
+      display: flex;
+      height: 100%;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      color: var(--secondary);
+      cursor: grab;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      touch-action: none;
+    }
+
+    .floating-chrome__drag:active {
+      cursor: grabbing;
+    }
+
+    .floating-chrome__drag > * {
+      pointer-events: none;
+    }
+
+    .floating-chrome__close {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      width: 24px;
+      height: 24px;
+      grid-row: 1;
+      grid-column: 3;
+      align-items: center;
+      justify-self: center;
+      padding: 0;
+      border: 0;
+      border-radius: 7px;
+      color: var(--secondary);
+      background: transparent;
+      cursor: default;
+      place-items: center;
+      transition:
+        color 120ms ease,
+        background-color 120ms ease,
+        transform 80ms ease;
+    }
+
+    .popover--macos .floating-chrome__close {
+      grid-column: 1;
+    }
+
+    .floating-chrome__close:hover {
+      color: var(--text);
+      background: color-mix(in srgb, var(--text) 9%, transparent);
+    }
+
+    .floating-chrome__close:active {
+      transform: scale(0.92);
+    }
+
+    .floating-chrome__close:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--meter-fill) 55%, transparent);
+      outline-offset: -1px;
     }
 
     .panel-resize-dragger {
@@ -1138,6 +1333,64 @@
 
     .identity:disabled {
       cursor: default;
+    }
+
+    .footer-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-left: auto;
+    }
+
+    .footer-actions .options-menu {
+      margin-left: 0;
+    }
+
+    .window-mode-toggle {
+      display: grid;
+      width: 26px;
+      height: 26px;
+      padding: 0;
+      border: 0;
+      border-radius: 8px;
+      color: var(--secondary);
+      background: transparent;
+      cursor: pointer;
+      place-items: center;
+      transition:
+        color 120ms ease,
+        background-color 120ms ease,
+        transform 80ms ease;
+    }
+
+    .window-mode-toggle:hover {
+      color: var(--text);
+      background: var(--button-hover);
+    }
+
+    .window-mode-toggle--active {
+      color: var(--meter-fill);
+    }
+
+    .window-mode-toggle:active {
+      transform: scale(0.92);
+    }
+
+    .window-mode-toggle:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--meter-fill) 55%, transparent);
+      outline-offset: 1px;
+    }
+
+    .window-mode-toggle::after {
+      top: auto;
+      bottom: calc(100% + 7px);
+      transform: translate(-50%, 2px) scale(0.97);
+      transform-origin: bottom center;
+    }
+
+    .window-mode-toggle:hover::after,
+    .window-mode-toggle:focus-visible::after {
+      transform: translate(-50%, 0) scale(1);
     }
 
     .options-menu {

@@ -5,7 +5,7 @@ use std::{
 
 use crate::models::{MetricSection, MetricSource, ProviderCatalog, ProviderDefinition};
 
-use super::UsageProvider;
+use super::{CacheIdentity, UsageProvider};
 
 const MAX_DEFAULT_PINS: usize = 2;
 
@@ -96,6 +96,32 @@ impl ProviderRegistry {
             .and_then(|index| self.catalog.providers.get(*index))
     }
 
+    pub fn cache_identity(&self, id: &str) -> CacheIdentity<'_> {
+        self.runtimes
+            .get(id)
+            .map(|runtime| runtime.cache_identity())
+            .unwrap_or(CacheIdentity::Unscoped)
+    }
+
+    pub fn supports_account_names(&self, id: &str) -> bool {
+        self.runtimes
+            .get(id)
+            .is_some_and(|runtime| runtime.supports_account_names())
+    }
+
+    pub fn observed_account_provider_ids(&self) -> Vec<String> {
+        self.catalog
+            .providers
+            .iter()
+            .filter(|definition| {
+                self.runtimes
+                    .get(&definition.id)
+                    .is_some_and(|runtime| runtime.account_identity().is_some())
+            })
+            .map(|definition| definition.id.clone())
+            .collect()
+    }
+
     pub fn metric(&self, id: &str) -> Option<&crate::models::MetricDefinition> {
         let (provider_index, metric_index) = *self.metric_indices.get(id)?;
         self.catalog
@@ -178,6 +204,10 @@ struct DefinitionOnlyProvider(ProviderDefinition);
 impl UsageProvider for DefinitionOnlyProvider {
     fn definition(&self) -> ProviderDefinition {
         self.0.clone()
+    }
+
+    fn supports_account_names(&self) -> bool {
+        matches!(super::provider_family(&self.0.id), "claude" | "codex")
     }
 
     fn has_local_credentials(&self) -> bool {

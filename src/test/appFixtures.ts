@@ -334,17 +334,21 @@ export const antigravityState: ProviderViewState = {
 };
 
 export const settingsState: SettingsViewState = {
+  accountRevision: 0,
+  renamableProviderIds: ['claude', 'codex'],
   notificationPermission: 'prompt',
   integrationError: null,
-  standaloneWindow: false,
+  trayAvailable: true,
   platformSummary: null,
   settings: {
-    schemaVersion: 5,
+    schemaVersion: 6,
     language: 'en',
+    providerNames: {},
     knownProviderIds: ['claude', 'codex', 'antigravity'],
     showTotalSpend: true,
     theme: 'system',
     density: 'default',
+    windowMode: 'popup',
     menuBarStyle: 'text',
     usageDisplay: 'left',
     resetDisplay: 'countdown',

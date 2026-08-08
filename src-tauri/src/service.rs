@@ -11,7 +11,8 @@ use crate::{
         MetricSource, ProviderErrorKind, ProviderSnapshot, ProviderViewState, SnapshotSource,
     },
     policy::{FAILURE_RETRY_BACKOFF, REFRESH_INTERVAL, STALE_AFTER},
-    providers::{ProviderError, ProviderRegistry},
+    providers::{ProviderError, ProviderRefresh, ProviderRegistry},
+    settings::SettingsService,
     storage::Storage,
 };
 
@@ -33,23 +34,49 @@ pub struct ProviderService {
     last_failed_refresh: Mutex<HashMap<String, Instant>>,
     last_full_refresh_at: RwLock<Option<chrono::DateTime<Utc>>>,
     refresh_timeout: Duration,
+    settings: Option<Arc<SettingsService>>,
 }
 
 impl ProviderService {
+    #[cfg(test)]
     pub fn new(registry: Arc<ProviderRegistry>, storage: Arc<Storage>) -> Self {
-        Self::with_refresh_timeout(registry, storage, PROVIDER_REFRESH_TIMEOUT)
+        Self::with_refresh_timeout_and_settings(registry, storage, PROVIDER_REFRESH_TIMEOUT, None)
     }
 
+    pub fn new_with_settings(
+        registry: Arc<ProviderRegistry>,
+        storage: Arc<Storage>,
+        settings: Arc<SettingsService>,
+    ) -> Self {
+        Self::with_refresh_timeout_and_settings(
+            registry,
+            storage,
+            PROVIDER_REFRESH_TIMEOUT,
+            Some(settings),
+        )
+    }
+
+    #[cfg(test)]
     fn with_refresh_timeout(
         registry: Arc<ProviderRegistry>,
         storage: Arc<Storage>,
         refresh_timeout: Duration,
     ) -> Self {
+        Self::with_refresh_timeout_and_settings(registry, storage, refresh_timeout, None)
+    }
+
+    fn with_refresh_timeout_and_settings(
+        registry: Arc<ProviderRegistry>,
+        storage: Arc<Storage>,
+        refresh_timeout: Duration,
+        settings: Option<Arc<SettingsService>>,
+    ) -> Self {
         let mut states = BTreeMap::new();
         let mut refresh_flights = HashMap::new();
         for definition in &registry.catalog().providers {
             let id = definition.id.clone();
-            let state = match storage.load_snapshot(&id) {
+            let state = match storage.load_snapshot_for_identity(&id, registry.cache_identity(&id))
+            {
                 Ok(Some(snapshot)) => {
                     crate::app_debug!("cache", "loaded cached snapshot for {id}");
                     ProviderViewState::from_cache(snapshot)
@@ -75,6 +102,7 @@ impl ProviderService {
             last_failed_refresh: Mutex::new(HashMap::new()),
             last_full_refresh_at: RwLock::new(None),
             refresh_timeout,
+            settings,
         }
     }
 
@@ -207,7 +235,7 @@ impl ProviderService {
             });
             let worker_provider = provider.clone();
             let mut worker =
-                tauri::async_runtime::spawn_blocking(move || worker_provider.refresh());
+                tauri::async_runtime::spawn_blocking(move || worker_provider.refresh_for_service());
             let mut late_worker = None;
             let refresh_result = match tokio::time::timeout(self.refresh_timeout, &mut worker).await
             {
@@ -232,8 +260,10 @@ impl ProviderService {
                     ))
                 }
             };
-            let refresh_result = refresh_result
-                .and_then(|snapshot| validate_snapshot(&self.registry, &provider_id, snapshot));
+            let refresh_result = refresh_result.and_then(|refresh| {
+                validate_snapshot(&self.registry, &provider_id, refresh.snapshot.clone())?;
+                Ok(refresh)
+            });
             match &refresh_result {
                 Ok(_) => {
                     crate::app_info!(&tag, "refresh end ({}ms)", started.elapsed().as_millis())
@@ -257,13 +287,13 @@ impl ProviderService {
                 failures.insert(provider_id.clone(), Instant::now());
             }
 
-            if let Ok(mut flight_state) = flight.state.lock() {
-                flight_state.completed_generation = generation;
-                flight_state.attempt_generation = None;
-            }
-            flight.completed_tx.send_replace(generation);
+            let run_follow_up = if let Some(worker) = late_worker {
+                if let Ok(mut flight_state) = flight.state.lock() {
+                    flight_state.completed_generation = generation;
+                    flight_state.attempt_generation = None;
+                }
+                flight.completed_tx.send_replace(generation);
 
-            if let Some(worker) = late_worker {
                 match worker.await {
                     Ok(_) => crate::app_debug!(
                         &tag,
@@ -274,19 +304,20 @@ impl ProviderService {
                         "timed-out refresh worker stopped; discarded late failure"
                     ),
                 }
-            }
 
-            let run_follow_up = if let Ok(mut flight_state) = flight.state.lock() {
-                if flight_state.requested_generation > flight_state.completed_generation {
-                    let generation = flight_state.completed_generation.saturating_add(1);
-                    flight_state.attempt_generation = Some(generation);
-                    true
+                if let Ok(mut flight_state) = flight.state.lock() {
+                    settle_completed_generation(&mut flight_state, generation)
                 } else {
-                    flight_state.runner_active = false;
                     false
                 }
             } else {
-                false
+                let run_follow_up = if let Ok(mut flight_state) = flight.state.lock() {
+                    settle_completed_generation(&mut flight_state, generation)
+                } else {
+                    false
+                };
+                flight.completed_tx.send_replace(generation);
+                run_follow_up
             };
             if !run_follow_up {
                 return;
@@ -391,17 +422,46 @@ impl ProviderService {
     fn apply_refresh_result(
         &self,
         provider_id: &str,
-        result: Result<ProviderSnapshot, ProviderError>,
+        result: Result<ProviderRefresh, ProviderError>,
     ) -> ProviderViewState {
-        let cache_error = result
+        let account_error = result
             .as_ref()
             .ok()
-            .is_some_and(|snapshot| self.storage.save_snapshot(snapshot).is_err());
-        if cache_error {
+            .and_then(|refresh| refresh.account.as_ref())
+            .is_some_and(|account| {
+                self.settings.as_ref().is_some_and(|settings| {
+                    settings
+                        .activate_account(account.family, account.provider_id, &account.identity)
+                        .is_err()
+                })
+            });
+        let cache_error = !account_error
+            && result.as_ref().ok().is_some_and(|refresh| {
+                self.storage
+                    .save_snapshot_for_identity(
+                        &refresh.snapshot,
+                        refresh.cache_identity.as_deref(),
+                    )
+                    .is_err()
+            });
+        if account_error {
+            crate::app_warn!(
+                "config",
+                "account settings for {provider_id} could not be updated"
+            );
+        } else if cache_error {
             crate::app_warn!("cache", "snapshot for {provider_id} could not be persisted");
         } else if result.is_ok() {
             crate::app_debug!("cache", "snapshot for {provider_id} persisted");
         }
+        let result = if account_error {
+            Err(ProviderError::new(
+                ProviderErrorKind::Storage,
+                "The refreshed account state could not be saved.",
+            ))
+        } else {
+            result.map(|refresh| refresh.snapshot)
+        };
         self.update_state(provider_id, |state| {
             merge_refresh_result(state, result);
             if cache_error {
@@ -448,6 +508,18 @@ struct RefreshFlightState {
     attempt_generation: Option<u64>,
     requested_generation: u64,
     completed_generation: u64,
+}
+
+fn settle_completed_generation(state: &mut RefreshFlightState, generation: u64) -> bool {
+    state.completed_generation = generation;
+    state.attempt_generation = None;
+    if state.requested_generation > state.completed_generation {
+        state.attempt_generation = Some(state.completed_generation.saturating_add(1));
+        true
+    } else {
+        state.runner_active = false;
+        false
+    }
 }
 
 impl RefreshFlight {
@@ -606,7 +678,10 @@ mod tests {
             StatusMetric, StatusTone, UsageHistory,
         },
         policy::{FAILURE_RETRY_BACKOFF, STALE_AFTER},
-        providers::{ProviderError, ProviderRegistry, UsageProvider},
+        providers::{
+            AccountRefresh, ProviderError, ProviderRefresh, ProviderRegistry, UsageProvider,
+        },
+        settings::SettingsService,
         storage::Storage,
     };
 
@@ -633,6 +708,10 @@ mod tests {
         active: Arc<AtomicUsize>,
         maximum: Arc<AtomicUsize>,
         delay: Duration,
+    }
+
+    struct AccountSwitchProvider {
+        identity: String,
     }
 
     impl UsageProvider for SlowProvider {
@@ -692,6 +771,36 @@ mod tests {
             let mut snapshot = test_snapshot(self.id);
             snapshot.plan = credential;
             Ok(snapshot)
+        }
+    }
+
+    impl UsageProvider for AccountSwitchProvider {
+        fn definition(&self) -> ProviderDefinition {
+            test_definition("codex")
+        }
+
+        fn has_local_credentials(&self) -> bool {
+            true
+        }
+
+        fn supports_account_names(&self) -> bool {
+            true
+        }
+
+        fn refresh(&self) -> Result<ProviderSnapshot, ProviderError> {
+            Ok(test_snapshot("codex"))
+        }
+
+        fn refresh_for_service(&self) -> Result<ProviderRefresh, ProviderError> {
+            Ok(ProviderRefresh {
+                snapshot: test_snapshot("codex"),
+                cache_identity: Some(self.identity.clone()),
+                account: Some(AccountRefresh {
+                    family: "codex",
+                    provider_id: "codex",
+                    identity: self.identity.clone(),
+                }),
+            })
         }
     }
 
@@ -817,6 +926,51 @@ mod tests {
         let old_service = ProviderService::new(registry, storage);
         let old = old_service.state();
         assert!(old.providers.get("cached").unwrap().stale);
+    }
+
+    #[test]
+    fn successful_refresh_switches_account_name_and_cache_without_a_restart() {
+        let directory = tempdir().unwrap();
+        let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
+        let provider = Arc::new(AccountSwitchProvider {
+            identity: "bbbbbbbb22222222".into(),
+        }) as Arc<dyn UsageProvider>;
+        let registry = Arc::new(ProviderRegistry::new(vec![provider]).unwrap());
+        let (settings, _) =
+            SettingsService::new_deferred(storage.clone(), registry.clone()).unwrap();
+        let settings = Arc::new(settings);
+        settings
+            .activate_account("codex", "codex", "aaaaaaaa11111111")
+            .unwrap();
+        let mut renamed = settings.get();
+        renamed.provider_names.insert("codex".into(), "GPT".into());
+        settings
+            .update_from_view(renamed, settings.account_revision())
+            .unwrap();
+
+        let service = Arc::new(ProviderService::new_with_settings(
+            registry,
+            storage.clone(),
+            settings.clone(),
+        ));
+        let state = refresh_with_test_timeout(&service, "codex", true);
+
+        assert!(state.error.is_none());
+        assert!(!settings.get().provider_names.contains_key("codex"));
+        assert!(storage
+            .load_snapshot_for_identity(
+                "codex",
+                crate::providers::CacheIdentity::Resolved("bbbbbbbb22222222"),
+            )
+            .unwrap()
+            .is_some());
+        assert!(storage
+            .load_snapshot_for_identity(
+                "codex",
+                crate::providers::CacheIdentity::Resolved("aaaaaaaa11111111"),
+            )
+            .unwrap()
+            .is_none());
     }
 
     #[test]

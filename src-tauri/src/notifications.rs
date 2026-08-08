@@ -10,7 +10,7 @@ use crate::{
     service::UsageViewState,
     settings::SettingsService,
     tray_presentation,
-    window::{show_popup, MAIN_WINDOW},
+    window::{show_main_window, MAIN_WINDOW},
 };
 
 pub fn permission(app: &AppHandle) -> &'static str {
@@ -117,7 +117,7 @@ fn show(app: &AppHandle, title: &str, body: &str, language: &str) -> Result<(), 
             let _ = app.run_on_main_thread(move || {
                 app_for_window.state::<PopupDismissGuard>().cancel_pending();
                 if let Some(window) = app_for_window.get_webview_window(MAIN_WINDOW) {
-                    show_popup(&window);
+                    show_main_window(&window);
                 }
             });
         });

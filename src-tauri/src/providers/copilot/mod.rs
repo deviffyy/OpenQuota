@@ -344,7 +344,7 @@ fn require_usage_success(response: &CopilotResponse) -> Result<(), CopilotError>
 mod tests {
     use std::{
         io::{Read, Write},
-        net::TcpListener,
+        net::{Shutdown, TcpListener, TcpStream},
         sync::{Arc, Mutex},
         thread,
         time::{Duration, Instant},
@@ -354,7 +354,7 @@ mod tests {
 
     use crate::{
         models::{MetricSection, MetricValueKind, ProviderErrorKind, QuotaFormat},
-        providers::{test_http, UsageProvider},
+        providers::UsageProvider,
     };
 
     use super::{
@@ -368,102 +368,153 @@ mod tests {
         body: String,
     }
 
-    fn routing_server(routes: Vec<Route>, expected: usize) -> (String, Arc<Mutex<Vec<String>>>) {
+    struct TestServer {
+        base_url: String,
+        requests: Arc<Mutex<Vec<String>>>,
+        worker: Option<thread::JoinHandle<Result<(), String>>>,
+    }
+
+    impl TestServer {
+        fn finish(mut self) -> Arc<Mutex<Vec<String>>> {
+            let result = self
+                .worker
+                .take()
+                .expect("test server worker should exist")
+                .join()
+                .expect("test server worker should not panic");
+            result.expect("test server should serve every expected request");
+            self.requests.clone()
+        }
+    }
+
+    impl Drop for TestServer {
+        fn drop(&mut self) {
+            if let Some(worker) = self.worker.take() {
+                let _ = worker.join();
+            }
+        }
+    }
+
+    fn accept_before(listener: &TcpListener, deadline: Instant) -> Result<TcpStream, String> {
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    stream.set_nonblocking(false).map_err(|error| {
+                        format!("could not configure test HTTP stream: {error}")
+                    })?;
+                    return Ok(stream);
+                }
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::WouldBlock
+                        && Instant::now() < deadline =>
+                {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    return Err("timed out waiting for a test HTTP request".into());
+                }
+                Err(error) => return Err(format!("could not accept test HTTP request: {error}")),
+            }
+        }
+    }
+
+    fn read_request(stream: &mut TcpStream) -> Result<Option<String>, String> {
+        stream
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .map_err(|error| format!("could not configure test HTTP stream: {error}"))?;
+        let mut bytes = Vec::new();
+        loop {
+            let mut chunk = [0_u8; 1024];
+            let count = stream
+                .read(&mut chunk)
+                .map_err(|error| format!("could not read test HTTP request: {error}"))?;
+            if count == 0 {
+                return Ok(None);
+            }
+            bytes.extend_from_slice(&chunk[..count]);
+            if bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+                return Ok(Some(String::from_utf8_lossy(&bytes).into_owned()));
+            }
+        }
+    }
+
+    fn write_response(stream: &mut TcpStream, status: u16, body: &str) -> Result<(), String> {
+        let response = format!(
+            "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        stream
+            .write_all(response.as_bytes())
+            .and_then(|_| stream.flush())
+            .map_err(|error| format!("could not write test HTTP response: {error}"))?;
+        stream
+            .shutdown(Shutdown::Write)
+            .map_err(|error| format!("could not finish test HTTP response: {error}"))
+    }
+
+    fn routing_server(routes: Vec<Route>, expected: usize) -> TestServer {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let address = listener.local_addr().unwrap();
         let requests = Arc::new(Mutex::new(Vec::new()));
         let captured = requests.clone();
-        thread::spawn(move || {
+        let worker = thread::spawn(move || {
             let deadline = Instant::now() + Duration::from_secs(5);
             while captured.lock().unwrap().len() < expected && Instant::now() < deadline {
-                let Ok((mut stream, _)) = listener.accept() else {
-                    thread::sleep(Duration::from_millis(5));
+                let mut stream = accept_before(&listener, deadline)?;
+                let Some(request) = read_request(&mut stream)? else {
                     continue;
                 };
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(1)))
-                    .unwrap();
-                let mut bytes = Vec::new();
-                loop {
-                    let mut chunk = [0_u8; 1024];
-                    let count = stream.read(&mut chunk).unwrap_or(0);
-                    if count == 0 {
-                        break;
-                    }
-                    bytes.extend_from_slice(&chunk[..count]);
-                    if bytes.windows(4).any(|window| window == b"\r\n\r\n") {
-                        break;
-                    }
-                }
-                let request = String::from_utf8_lossy(&bytes);
-                let path = request
+                let Some(path) = request
                     .lines()
                     .next()
                     .and_then(|line| line.split_whitespace().nth(1))
-                    .unwrap_or("/")
-                    .to_owned();
-                captured.lock().unwrap().push(path.clone());
+                    .map(str::to_owned)
+                else {
+                    continue;
+                };
                 let route = routes.iter().find(|route| path.contains(&route.path));
                 let (status, body) = route
                     .map(|route| (route.status, route.body.as_str()))
                     .unwrap_or((404, "{}"));
-                let response = format!(
-                    "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
-                );
-                let _ = stream.write_all(response.as_bytes());
+                write_response(&mut stream, status, body)?;
+                captured.lock().unwrap().push(path);
             }
+            (captured.lock().unwrap().len() == expected)
+                .then_some(())
+                .ok_or_else(|| "test HTTP server received fewer requests than expected".into())
         });
-        (format!("http://{address}"), requests)
+        TestServer {
+            base_url: format!("http://{address}"),
+            requests,
+            worker: Some(worker),
+        }
     }
 
-    fn usage_sequence_server(responses: Vec<(u16, Value)>) -> (String, Arc<Mutex<Vec<String>>>) {
+    fn usage_sequence_server(responses: Vec<(u16, Value)>) -> TestServer {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let address = listener.local_addr().unwrap();
         let requests = Arc::new(Mutex::new(Vec::new()));
         let captured = requests.clone();
-        thread::spawn(move || {
+        let worker = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(5);
             for (status, body) in responses {
-                let deadline = Instant::now() + Duration::from_secs(5);
-                let mut stream = loop {
-                    match listener.accept() {
-                        Ok((stream, _)) => break stream,
-                        Err(_) if Instant::now() < deadline => {
-                            thread::sleep(Duration::from_millis(5));
-                        }
-                        Err(_) => return,
-                    }
+                let mut stream = accept_before(&listener, deadline)?;
+                let Some(request) = read_request(&mut stream)? else {
+                    return Err("test HTTP client disconnected before sending a request".into());
                 };
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(1)))
-                    .unwrap();
-                let mut bytes = Vec::new();
-                loop {
-                    let mut chunk = [0_u8; 1024];
-                    let count = stream.read(&mut chunk).unwrap_or(0);
-                    if count == 0 {
-                        break;
-                    }
-                    bytes.extend_from_slice(&chunk[..count]);
-                    if bytes.windows(4).any(|window| window == b"\r\n\r\n") {
-                        break;
-                    }
-                }
-                captured
-                    .lock()
-                    .unwrap()
-                    .push(String::from_utf8_lossy(&bytes).into_owned());
                 let body = body.to_string();
-                let response = format!(
-                    "HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-                    body.len()
-                );
-                let _ = stream.write_all(response.as_bytes());
+                write_response(&mut stream, status, &body)?;
+                captured.lock().unwrap().push(request);
             }
+            Ok(())
         });
-        (format!("http://{address}"), requests)
+        TestServer {
+            base_url: format!("http://{address}"),
+            requests,
+            worker: Some(worker),
+        }
     }
 
     fn route(path: &str, status: u16, body: Value) -> Route {
@@ -519,56 +570,57 @@ mod tests {
         })
     }
 
-    fn provider(token: Option<&str>, usage_status: u16, body: Value) -> CopilotProvider {
-        let url = test_http::serve_once(usage_status, &[], &body.to_string());
-        CopilotProvider::with_dependencies(
+    fn single_response_provider(
+        token: Option<&str>,
+        usage_status: u16,
+        body: Value,
+    ) -> (CopilotProvider, TestServer) {
+        let server = usage_sequence_server(vec![(usage_status, body)]);
+        let provider = CopilotProvider::with_dependencies(
             CopilotAuthStore::for_test_token(token),
             CopilotClient::for_test(
-                &url,
+                &server.base_url,
                 "http://127.0.0.1:1",
                 "http://127.0.0.1:1/",
                 Duration::from_secs(1),
             ),
-        )
+        );
+        (provider, server)
     }
 
     fn routed_provider(
         token: Option<&str>,
         routes: Vec<Route>,
         expected: usize,
-    ) -> (CopilotProvider, Arc<Mutex<Vec<String>>>) {
-        let (base, requests) = routing_server(routes, expected);
-        (
-            CopilotProvider::with_dependencies(
-                CopilotAuthStore::for_test_token(token),
-                CopilotClient::for_test(
-                    &format!("{base}/copilot_internal/user"),
-                    &format!("{base}/user/orgs?per_page=100"),
-                    &format!("{base}/"),
-                    Duration::from_secs(3),
-                ),
+    ) -> (CopilotProvider, TestServer) {
+        let server = routing_server(routes, expected);
+        let provider = CopilotProvider::with_dependencies(
+            CopilotAuthStore::for_test_token(token),
+            CopilotClient::for_test(
+                &format!("{}/copilot_internal/user", server.base_url),
+                &format!("{}/user/orgs?per_page=100", server.base_url),
+                &format!("{}/", server.base_url),
+                Duration::from_secs(3),
             ),
-            requests,
-        )
+        );
+        (provider, server)
     }
 
     fn sequence_provider(
         tokens: &[&str],
         responses: Vec<(u16, Value)>,
-    ) -> (CopilotProvider, Arc<Mutex<Vec<String>>>) {
-        let (url, requests) = usage_sequence_server(responses);
-        (
-            CopilotProvider::with_dependencies(
-                CopilotAuthStore::for_test_tokens(tokens),
-                CopilotClient::for_test(
-                    &url,
-                    "http://127.0.0.1:1",
-                    "http://127.0.0.1:1/",
-                    Duration::from_secs(1),
-                ),
+    ) -> (CopilotProvider, TestServer) {
+        let server = usage_sequence_server(responses);
+        let provider = CopilotProvider::with_dependencies(
+            CopilotAuthStore::for_test_tokens(tokens),
+            CopilotClient::for_test(
+                &server.base_url,
+                "http://127.0.0.1:1",
+                "http://127.0.0.1:1/",
+                Duration::from_secs(1),
             ),
-            requests,
-        )
+        );
+        (provider, server)
     }
 
     #[test]
@@ -585,9 +637,9 @@ mod tests {
 
     #[test]
     fn successful_refresh_maps_plan_credits_and_exact_extra_usage() {
-        let snapshot = provider(Some("secret-token"), 200, paid_body())
-            .refresh()
-            .unwrap();
+        let (provider, server) = single_response_provider(Some("secret-token"), 200, paid_body());
+        let snapshot = provider.refresh().unwrap();
+        server.finish();
 
         assert_eq!(snapshot.provider_id, "copilot");
         assert_eq!(snapshot.plan.as_deref(), Some("Pro"));
@@ -605,12 +657,13 @@ mod tests {
 
     #[test]
     fn refresh_uses_the_next_candidate_after_an_authentication_rejection() {
-        let (provider, requests) = sequence_provider(
+        let (provider, server) = sequence_provider(
             &["stale-token", "valid-token"],
             vec![(401, json!({})), (200, paid_body())],
         );
 
         let snapshot = provider.refresh().unwrap();
+        let requests = server.finish();
 
         assert_eq!(snapshot.plan.as_deref(), Some("Pro"));
         let requests = requests.lock().unwrap();
@@ -629,10 +682,11 @@ mod tests {
             (429, json!({}), ProviderErrorKind::RateLimited),
             (200, Value::Null, ProviderErrorKind::InvalidResponse),
         ] {
-            let (provider, requests) =
+            let (provider, server) =
                 sequence_provider(&["first-token", "unused-token"], vec![(status, body)]);
 
             let error = provider.refresh().unwrap_err();
+            let requests = server.finish();
 
             assert_eq!(error.kind(), expected_kind);
             assert_eq!(requests.lock().unwrap().len(), 1);
@@ -656,32 +710,34 @@ mod tests {
         assert!(missing.to_string().contains("gh auth login"));
 
         for status in [401, 403] {
-            let invalid = provider(Some("secret-token"), status, json!({}))
-                .refresh()
-                .unwrap_err();
+            let (provider, server) =
+                single_response_provider(Some("secret-token"), status, json!({}));
+            let invalid = provider.refresh().unwrap_err();
+            server.finish();
             assert_eq!(invalid.kind(), ProviderErrorKind::Authentication);
             assert!(!invalid.to_string().contains("secret-token"));
         }
 
-        let rate_limited = provider(Some("secret-token"), 429, json!({}))
-            .refresh()
-            .unwrap_err();
+        let (provider, server) = single_response_provider(Some("secret-token"), 429, json!({}));
+        let rate_limited = provider.refresh().unwrap_err();
+        server.finish();
         assert_eq!(rate_limited.kind(), ProviderErrorKind::RateLimited);
 
-        let malformed = provider(Some("secret-token"), 200, Value::Null)
-            .refresh()
-            .unwrap_err();
+        let (provider, server) = single_response_provider(Some("secret-token"), 200, Value::Null);
+        let malformed = provider.refresh().unwrap_err();
+        server.finish();
         assert_eq!(malformed.kind(), ProviderErrorKind::InvalidResponse);
 
-        let unavailable = provider(Some("secret-token"), 200, json!({"copilot_plan":"pro"}))
-            .refresh()
-            .unwrap_err();
+        let (provider, server) =
+            single_response_provider(Some("secret-token"), 200, json!({"copilot_plan":"pro"}));
+        let unavailable = provider.refresh().unwrap_err();
+        server.finish();
         assert_eq!(unavailable.kind(), ProviderErrorKind::Permission);
     }
 
     #[test]
     fn org_managed_seat_uses_exact_organization_billing_metrics() {
-        let (provider, _) = routed_provider(
+        let (provider, server) = routed_provider(
             Some("secret-token"),
             vec![
                 route("/copilot_internal/user", 200, business_body()),
@@ -696,6 +752,7 @@ mod tests {
         );
 
         let snapshot = provider.refresh().unwrap();
+        server.finish();
 
         assert_eq!(snapshot.plan.as_deref(), Some("Business"));
         assert!(snapshot.quotas.is_empty());
@@ -709,7 +766,7 @@ mod tests {
     #[test]
     fn optional_org_permission_and_malformed_responses_keep_the_plan_only_card() {
         for (status, body) in [(403, json!({})), (200, json!({"organization":"acme"}))] {
-            let (provider, _) = routed_provider(
+            let (provider, server) = routed_provider(
                 Some("secret-token"),
                 vec![
                     route("/copilot_internal/user", 200, business_body()),
@@ -719,6 +776,7 @@ mod tests {
                 3,
             );
             let snapshot = provider.refresh().unwrap();
+            server.finish();
             assert_eq!(snapshot.plan.as_deref(), Some("Business"));
             assert!(snapshot.quotas.is_empty());
             assert!(snapshot.value_metrics.is_empty());
@@ -727,7 +785,7 @@ mod tests {
 
     #[test]
     fn cached_org_skips_discovery_and_survives_transient_billing_failure() {
-        let (provider, requests) = routed_provider(
+        let (provider, server) = routed_provider(
             Some("secret-token"),
             vec![
                 route("/copilot_internal/user", 200, business_body()),
@@ -738,6 +796,7 @@ mod tests {
         *provider.cached_org.lock().unwrap() = Some("acme".into());
 
         let snapshot = provider.refresh().unwrap();
+        let requests = server.finish();
 
         assert!(snapshot.value_metrics.is_empty());
         assert_eq!(provider.cached_org.lock().unwrap().as_deref(), Some("acme"));
@@ -747,7 +806,7 @@ mod tests {
 
     #[test]
     fn stale_cached_org_is_evicted_before_reprobing_other_orgs() {
-        let (provider, _) = routed_provider(
+        let (provider, server) = routed_provider(
             Some("secret-token"),
             vec![
                 route("/copilot_internal/user", 200, business_body()),
@@ -764,6 +823,7 @@ mod tests {
         *provider.cached_org.lock().unwrap() = Some("old".into());
 
         let snapshot = provider.refresh().unwrap();
+        server.finish();
 
         assert_eq!(snapshot.value_metrics[0].values[0].number, 12.0);
         assert_eq!(provider.cached_org.lock().unwrap().as_deref(), Some("new"));
@@ -771,7 +831,7 @@ mod tests {
 
     #[test]
     fn one_transient_org_does_not_hide_a_later_readable_org() {
-        let (provider, _) = routed_provider(
+        let (provider, server) = routed_provider(
             Some("secret-token"),
             vec![
                 route("/copilot_internal/user", 200, business_body()),
@@ -795,6 +855,7 @@ mod tests {
         );
 
         let snapshot = provider.refresh().unwrap();
+        server.finish();
 
         assert_eq!(snapshot.value_metrics[0].values[0].number, 42.0);
         assert_eq!(provider.cached_org.lock().unwrap().as_deref(), Some("acme"));
@@ -802,9 +863,10 @@ mod tests {
 
     #[test]
     fn detection_and_refresh_use_the_same_auth_chain() {
-        let provider = provider(Some("same-secret"), 200, paid_body());
+        let (provider, server) = single_response_provider(Some("same-secret"), 200, paid_body());
         assert!(provider.has_local_credentials());
         assert!(provider.refresh().is_ok());
+        server.finish();
 
         let missing = CopilotProvider::with_dependencies(
             CopilotAuthStore::for_test_token(None),

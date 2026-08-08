@@ -8,6 +8,8 @@ pub struct ModelRates {
     pub output_above_200k_per_million: Option<f64>,
     pub cache_write_above_200k_per_million: Option<f64>,
     pub cache_read_above_200k_per_million: Option<f64>,
+    pub cache_read_is_explicit: bool,
+    pub long_context_threshold_tokens: u64,
     pub fast_multiplier: f64,
 }
 
@@ -22,6 +24,8 @@ impl ModelRates {
             output_above_200k_per_million: None,
             cache_write_above_200k_per_million: None,
             cache_read_above_200k_per_million: None,
+            cache_read_is_explicit: true,
+            long_context_threshold_tokens: 200_000,
             fast_multiplier: 1.0,
         }
     }
@@ -44,12 +48,15 @@ impl ModelRates {
             cache_read_above_200k_per_million: self
                 .cache_read_above_200k_per_million
                 .map(|rate| rate * factor),
+            cache_read_is_explicit: self.cache_read_is_explicit,
+            long_context_threshold_tokens: self.long_context_threshold_tokens,
             fast_multiplier: 1.0,
         }
     }
 
     pub fn cost_dollars(self, tokens: TokenBreakdown, apply_long_context_rates: bool) -> f64 {
-        let use_long_context = apply_long_context_rates && tokens.prompt_tokens() > 200_000;
+        let use_long_context =
+            apply_long_context_rates && tokens.prompt_tokens() > self.long_context_threshold_tokens;
         let select = |base: f64, long_context: Option<f64>| {
             if use_long_context {
                 long_context.unwrap_or(base)

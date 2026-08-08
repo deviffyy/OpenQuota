@@ -127,6 +127,7 @@ where
 pub fn scan_or_cached_usage<E>(
     storage: &Storage,
     provider_id: &str,
+    identity: super::CacheIdentity<'_>,
     provider_name: &str,
     scan: impl FnOnce() -> Result<UsageHistory, E>,
     warnings: &mut Vec<String>,
@@ -143,7 +144,7 @@ pub fn scan_or_cached_usage<E>(
                 "Local {provider_name} usage history could not be refreshed; cached history is shown when available."
             ));
             storage
-                .load_snapshot(provider_id)
+                .load_snapshot_for_identity(provider_id, identity)
                 .ok()
                 .flatten()
                 .map(|snapshot| snapshot.usage)
@@ -230,6 +231,32 @@ mod tests {
         models::{DailyUsage, ProviderSnapshot, UsageHistory},
         storage::Storage,
     };
+
+    fn cached_usage() -> UsageHistory {
+        UsageHistory {
+            daily: vec![DailyUsage {
+                date: "2026-07-18".into(),
+                tokens: 42,
+                estimated_cost_usd: Some(0.5),
+                estimate_complete: true,
+            }],
+            ..UsageHistory::default()
+        }
+    }
+
+    fn codex_snapshot(usage: UsageHistory) -> ProviderSnapshot {
+        ProviderSnapshot {
+            provider_id: "codex".into(),
+            plan: None,
+            quotas: Vec::new(),
+            value_metrics: Vec::new(),
+            status_metrics: Vec::new(),
+            notices: Vec::new(),
+            usage,
+            warnings: Vec::new(),
+            refreshed_at: Utc::now(),
+        }
+    }
 
     #[test]
     fn timestamp_variants_resolve_to_the_same_absolute_instant() {
@@ -325,33 +352,16 @@ mod tests {
     fn failed_scan_keeps_cached_history_without_hiding_live_provider_data() {
         let directory = tempdir().unwrap();
         let storage = Storage::open(&directory.path().join("openquota.db")).unwrap();
-        let cached_usage = UsageHistory {
-            daily: vec![DailyUsage {
-                date: "2026-07-18".into(),
-                tokens: 42,
-                estimated_cost_usd: Some(0.5),
-                estimate_complete: true,
-            }],
-            ..UsageHistory::default()
-        };
+        let cached_usage = cached_usage();
         storage
-            .save_snapshot(&ProviderSnapshot {
-                provider_id: "codex".into(),
-                plan: None,
-                quotas: Vec::new(),
-                value_metrics: Vec::new(),
-                status_metrics: Vec::new(),
-                notices: Vec::new(),
-                usage: cached_usage.clone(),
-                warnings: Vec::new(),
-                refreshed_at: Utc::now(),
-            })
+            .save_snapshot(&codex_snapshot(cached_usage.clone()))
             .unwrap();
         let mut warnings = Vec::new();
 
         let usage = scan_or_cached_usage(
             &storage,
             "codex",
+            crate::providers::CacheIdentity::Unscoped,
             "Codex",
             || Err::<UsageHistory, ()>(()),
             &mut warnings,
@@ -360,5 +370,45 @@ mod tests {
         assert_eq!(usage, cached_usage);
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].contains("Codex"));
+    }
+
+    #[test]
+    fn failed_scan_does_not_reuse_history_from_a_different_account() {
+        let directory = tempdir().unwrap();
+        let storage = Storage::open(&directory.path().join("openquota.db")).unwrap();
+        let cached_usage = cached_usage();
+        storage
+            .save_snapshot_for_identity(&codex_snapshot(cached_usage.clone()), Some("account-a"))
+            .unwrap();
+
+        let mut warnings = Vec::new();
+        let other_account = scan_or_cached_usage(
+            &storage,
+            "codex",
+            crate::providers::CacheIdentity::Resolved("account-b"),
+            "Codex",
+            || Err::<UsageHistory, ()>(()),
+            &mut warnings,
+        );
+        let same_account = scan_or_cached_usage(
+            &storage,
+            "codex",
+            crate::providers::CacheIdentity::Resolved("account-a"),
+            "Codex",
+            || Err::<UsageHistory, ()>(()),
+            &mut warnings,
+        );
+        let unresolved_account = scan_or_cached_usage(
+            &storage,
+            "codex",
+            crate::providers::CacheIdentity::Unresolved,
+            "Codex",
+            || Err::<UsageHistory, ()>(()),
+            &mut warnings,
+        );
+
+        assert_eq!(other_account, UsageHistory::default());
+        assert_eq!(same_account, cached_usage);
+        assert_eq!(unresolved_account, same_account);
     }
 }

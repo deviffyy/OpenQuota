@@ -277,7 +277,6 @@
     background: var(--separator);
   }
 
-  .context-menu button:hover,
   .share-menu button:hover,
   .share-menu > summary:hover {
     background: var(--button-hover);

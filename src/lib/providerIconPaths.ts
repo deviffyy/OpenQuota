@@ -22,16 +22,22 @@ const visuals: Record<string, { source: string; color: string | null }> = {
   zai: { source: zai, color: null },
 };
 
+export function providerFamily(providerId: string) {
+  return providerId.split('@', 1)[0];
+}
+
 export function providerIconPath(providerId: string) {
-  const source = visuals[providerId]?.source;
+  const source = visuals[providerFamily(providerId)]?.source;
   if (!source) return '';
   return [...source.matchAll(/<path\b[^>]*\bd="([^"]+)"/g)].map((match) => match[1]).join(' ');
 }
 
 export function providerIconColor(providerId: string) {
-  return visuals[providerId]?.color ?? null;
+  return visuals[providerFamily(providerId)]?.color ?? null;
 }
 
 export function providerIconViewBox(providerId: string) {
-  return visuals[providerId]?.source.match(/viewBox="([^"]+)"/)?.[1] ?? '0 0 100 100';
+  return (
+    visuals[providerFamily(providerId)]?.source.match(/viewBox="([^"]+)"/)?.[1] ?? '0 0 100 100'
+  );
 }

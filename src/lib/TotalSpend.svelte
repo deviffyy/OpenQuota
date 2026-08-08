@@ -8,6 +8,7 @@
   import { TOTAL_SPEND_GEOMETRY } from './shareCard';
   import { ringSectorPath, spendRingArcs } from './spendRing';
   import { emptySpendMessage, projectSpend, type SpendProjection } from './totalSpend';
+  import { providerFamily } from './providerIconPaths';
   import type { AppSettings, UsageHistory } from './types';
 
   interface Props {
@@ -18,7 +19,7 @@
     onShare: (projection: SpendProjection) => boolean | Promise<boolean>;
   }
   let { providers, settings, catalog, onChange, onShare }: Props = $props();
-  const providerDisplayName = (id: string) => catalog.displayName(id);
+  const providerDisplayName = (id: string) => catalog.displayName(id, settings.providerNames);
   const projection = $derived(
     projectSpend(providers, settings.totalSpendPeriod, settings.totalSpendMetric),
   );
@@ -143,7 +144,7 @@
               <path
                 class="spend-ring__segment"
                 d={ringSectorPath(segment, TOTAL_SPEND_GEOMETRY)}
-                style={`--segment-color: var(--provider-${segment.id}, var(--provider))`}
+                style={`--segment-color: var(--provider-${providerFamily(segment.id)}, var(--provider))`}
               />
             {/each}
           </svg>
@@ -156,7 +157,8 @@
         <div class="spend-legend">
           {#each projection.slices as provider (provider.id)}
             <span
-              ><i style={`background: var(--provider-${provider.id}, var(--provider))`}
+              ><i
+                style={`background: var(--provider-${providerFamily(provider.id)}, var(--provider))`}
               ></i>{providerDisplayName(provider.id)}</span
             ><strong>{display(provider.value)}</strong>
           {/each}

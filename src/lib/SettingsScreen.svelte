@@ -221,6 +221,19 @@
         onChange={(value) => patch({ density: value as AppSettings['density'] })}
       />
     </div>
+    {#if settingsView.trayAvailable}
+      <div class="setting-row">
+        <span><b>{t('windowMode')}</b></span><SelectMenu
+          label={t('windowMode')}
+          value={settings.windowMode}
+          options={[
+            { value: 'popup', label: t('trayPopup') },
+            { value: 'floating', label: t('floatingWindow') },
+          ]}
+          onChange={(value) => patch({ windowMode: value as AppSettings['windowMode'] })}
+        />
+      </div>
+    {/if}
     <div class="setting-row">
       <span><b>{t('panelHeight')}</b></span><SelectMenu
         label={t('panelHeight')}

@@ -8,12 +8,14 @@ import type { AppSettings } from './types';
 afterEach(cleanup);
 
 const settings: AppSettings = {
-  schemaVersion: 5,
+  schemaVersion: 6,
   language: 'en',
+  providerNames: {},
   knownProviderIds: ['codex', 'claude', 'antigravity'],
   showTotalSpend: false,
   theme: 'system',
   density: 'default',
+  windowMode: 'popup',
   menuBarStyle: 'text',
   usageDisplay: 'left',
   resetDisplay: 'countdown',
@@ -92,6 +94,52 @@ async function drag(
 }
 
 describe('pointer reorder integrations', () => {
+  it('renames an observed Claude card from its dedicated Name section', async () => {
+    const onChange = vi.fn();
+    render(CustomizeProviderDetail, {
+      settings,
+      providerId: 'claude',
+      catalog: providerCatalogIndex,
+      renamableProviderIds: ['claude'],
+      onChange,
+      onNameChange: onChange,
+      onReorderStart: vi.fn(),
+      onReorderEnd: vi.fn(),
+      reducedMotion: false,
+    });
+
+    const input = screen.getByRole('textbox', { name: 'Name for Claude' });
+    expect(input).toHaveAttribute('placeholder', 'Claude');
+    await fireEvent.input(input, { target: { value: 'Personal' } });
+    await fireEvent.blur(input);
+
+    expect((onChange.mock.calls[0][0] as AppSettings).providerNames).toEqual({
+      claude: 'Personal',
+    });
+  });
+
+  it('cancels a card-name draft with Escape', async () => {
+    const onNameChange = vi.fn();
+    render(CustomizeProviderDetail, {
+      settings: { ...settings, providerNames: { claude: 'Work' } },
+      providerId: 'claude',
+      catalog: providerCatalogIndex,
+      renamableProviderIds: ['claude'],
+      onChange: vi.fn(),
+      onNameChange,
+      onReorderStart: vi.fn(),
+      onReorderEnd: vi.fn(),
+      reducedMotion: false,
+    });
+
+    const input = screen.getByRole('textbox', { name: 'Name for Claude' });
+    await fireEvent.input(input, { target: { value: 'Discard me' } });
+    await fireEvent.keyDown(input, { key: 'Escape' });
+
+    expect(input).toHaveValue('Work');
+    expect(onNameChange).not.toHaveBeenCalled();
+  });
+
   it('keeps dashboard visibility and menu bar stars independent', async () => {
     const onChange = vi.fn();
     const independent = structuredClone(settings);
@@ -104,7 +152,9 @@ describe('pointer reorder integrations', () => {
       settings: independent,
       providerId: 'codex',
       catalog: providerCatalogIndex,
+      renamableProviderIds: [],
       onChange,
+      onNameChange: vi.fn(),
       onReorderStart: vi.fn(),
       onReorderEnd: vi.fn(),
       reducedMotion: false,
@@ -134,7 +184,9 @@ describe('pointer reorder integrations', () => {
       settings,
       providerId: 'codex',
       catalog: providerCatalogIndex,
+      renamableProviderIds: [],
       onChange,
+      onNameChange: vi.fn(),
       onReorderStart: vi.fn(),
       onReorderEnd: vi.fn(),
       reducedMotion: false,
@@ -209,7 +261,9 @@ describe('pointer reorder integrations', () => {
       settings,
       providerId: 'codex',
       catalog: providerCatalogIndex,
+      renamableProviderIds: [],
       onChange,
+      onNameChange: vi.fn(),
       onReorderStart: vi.fn(),
       onReorderEnd: vi.fn(),
       reducedMotion: false,

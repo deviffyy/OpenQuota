@@ -14,9 +14,12 @@
     | 'grip-dots'
     | 'grip-lines'
     | 'lock'
+    | 'pin'
+    | 'pin-filled'
     | 'external-link'
     | 'eye'
     | 'eye-off'
+    | 'edit'
     | 'power'
     | 'refresh'
     | 'reset'
@@ -77,6 +80,8 @@
     <path d="M12 3v12M8 7l4-4 4 4" /><path d="M6 11H4v9h16v-9h-2" />
   {:else if name === 'external-link'}
     <path d="M14 5h5v5" /><path d="m19 5-8 8" /><path d="M17 13v6H5V7h6" />
+  {:else if name === 'edit'}
+    <path d="M4 20h4l11-11-4-4L4 16v4Z" /><path d="m13.5 6.5 4 4" />
   {:else if name === 'eye'}
     <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" /><circle
       cx="12"
@@ -89,6 +94,14 @@
     /><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
   {:else if name === 'lock'}
     <rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" />
+  {:else if name === 'pin'}
+    <path d="M9 3h6v4.2c0 1.7.7 3.1 2 4.3V13H7v-1.5c1.3-1.2 2-2.6 2-4.3V3Z" /><path d="M12 13v8" />
+  {:else if name === 'pin-filled'}
+    <path
+      d="M8 2h8v5.2c0 1.5.7 2.8 2 3.8a1 1 0 0 1-.6 1.8H6.6A1 1 0 0 1 6 11c1.3-1 2-2.3 2-3.8V2Z"
+      fill="currentColor"
+      stroke="none"
+    /><path d="M12 13v9" />
   {:else if name === 'about'}
     <circle cx="12" cy="12" r="9" /><path d="M12 11v6" /><path d="M12 7h.01" />
   {:else if name === 'power'}

@@ -5,7 +5,7 @@
 <h1 align="center">OpenQuota</h1>
 
 <p align="center">
-  Track your AI coding subscriptions from the system tray.
+  Track usage and limits across your AI coding tools.
 </p>
 
 <p align="center">
@@ -15,12 +15,12 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
 </p>
 
-OpenQuota keeps your session limits, weekly quotas, reset times, token usage, and estimated spend
-in one compact panel. Pin the metrics you care about to the tray and see what remains without
-interrupting your work.
+OpenQuota brings usage data from Claude Code, Codex, Cursor, Copilot, and other AI coding providers
+into one compact panel. See session and weekly limits, reset times, token usage, and estimated
+spend at a glance.
 
 <p align="center">
-  <img src="assets/screenshot.png" alt="OpenQuota dashboard showing AI provider quotas, usage, and estimated spend" width="420">
+  <img src="assets/openquota-demo.gif" alt="OpenQuota dashboard showing animated AI usage in light and dark themes" width="840">
 </p>
 
 ## Download
@@ -41,18 +41,23 @@ OpenQuota checks for updates automatically. Installable updates are cryptographi
 
 ## Supported providers
 
-- **Claude Code** — session and weekly limits, model-specific usage, token history, and estimated
-  spend
-- **Codex** — session and weekly limits, credits, token history, model breakdown, and estimated
-  spend
-- **Cursor** — total, Auto and API usage, credits, token history, and estimated spend
-- **Antigravity** — shared Gemini and Claude quota pools
-- **Copilot** — premium requests, extra usage, chat and completion quotas, plus organization billing
-- **Devin** — daily and weekly limits, reset times, and extra usage balance
-- **Grok** — weekly allowance, extra usage status, token history, and estimated spend
-- **OpenCode** — OpenCode Go session, weekly and monthly spend caps, plus local hosted usage history
-- **OpenRouter** — credit balance and daily, weekly and monthly spend (API key)
-- **Z.ai** — GLM Coding Plan session, weekly, and web-search quotas (API key)
+- **[Claude Code](docs/providers/claude.md)** — multiple accounts, session and weekly limits,
+  model-specific usage, token history, and estimated spend
+- **[Codex](docs/providers/codex.md)** — session and weekly limits, credits, token history, model
+  breakdown, and estimated spend
+- **[Cursor](docs/providers/cursor.md)** — total, Auto and API usage, credits, token history, and
+  estimated spend
+- **[Antigravity](docs/providers/antigravity.md)** — shared Gemini and Claude quota pools
+- **[Copilot](docs/providers/copilot.md)** — premium requests, extra usage, chat and completion
+  quotas, plus organization billing
+- **[Devin](docs/providers/devin.md)** — daily and weekly limits, reset times, and extra usage balance
+- **[Grok](docs/providers/grok.md)** — weekly allowance, extra usage status, token history, and
+  estimated spend
+- **[OpenCode](docs/providers/opencode.md)** — OpenCode Go session, weekly and monthly spend caps,
+  plus local hosted usage history
+- **[OpenRouter](docs/providers/openrouter.md)** — credit balance and daily, weekly and monthly spend
+  (API key)
+- **[Z.ai](docs/providers/zai.md)** — GLM Coding Plan session, weekly, and web-search quotas (API key)
 
 Most providers use credentials already available on your computer. OpenRouter and Z.ai require API
 keys, which you can add in Customize; OpenQuota stores them securely in your operating system's
@@ -61,7 +66,8 @@ API-key-only sessions.
 
 ## Features
 
-- **Tray dashboard.** View all provider quotas and reset times in a compact popup.
+- **Tray or floating dashboard.** View quotas in a compact popup, or keep the panel open and move it
+  around your desktop.
 - **Pinned metrics.** Keep important values visible in the tray or macOS menu bar.
 - **Used or left.** Display how much quota you have consumed or how much remains.
 - **Usage history.** Review today, yesterday, and the last 30 days of token usage and estimated
@@ -108,6 +114,11 @@ corepack pnpm tauri build --bundles dmg   # macOS
 
 Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before contributing,
 and report security problems privately as described in [SECURITY.md](SECURITY.md).
+
+## Acknowledgements
+
+OpenQuota was inspired by [OpenUsage](https://github.com/robinebers/openusage) and developed as a
+cross-platform alternative for Windows, Linux, and macOS.
 
 ## License
 

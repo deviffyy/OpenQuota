@@ -7,6 +7,7 @@ describe('provider catalog index', () => {
     const catalog = new ProviderCatalogIndex(providerCatalog);
 
     expect(catalog.displayName('codex')).toBe('Codex');
+    expect(catalog.displayName('codex', { codex: '  Work Account  ' })).toBe('Work Account');
     expect(catalog.metric('claude.session')).toMatchObject({
       label: 'Session',
       source: { kind: 'quota', sourceId: 'session', sessionWindow: true },

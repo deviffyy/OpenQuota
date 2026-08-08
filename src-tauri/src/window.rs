@@ -16,8 +16,11 @@ use tauri::{
 use tauri_plugin_positioner::{Position, WindowExt};
 
 use crate::{
-    desktop_integration::DesktopIntegration, models::ThemePreference, popup::PopupDismissGuard,
-    settings::SettingsService, storage::Storage,
+    desktop_integration::DesktopIntegration,
+    models::{ThemePreference, WindowMode},
+    popup::PopupDismissGuard,
+    settings::SettingsService,
+    storage::Storage,
 };
 
 pub const MAIN_WINDOW: &str = "main";
@@ -211,6 +214,12 @@ pub fn apply_panel_surface(
     window: &WebviewWindow,
     preference: ThemePreference,
 ) -> tauri::Result<()> {
+    let native_theme = match preference {
+        ThemePreference::Dark => Some(Theme::Dark),
+        ThemePreference::Light => Some(Theme::Light),
+        ThemePreference::System => None,
+    };
+    window.set_theme(native_theme)?;
     apply_panel_surface_for_theme(window, preference, window.theme().unwrap_or(Theme::Light))
 }
 
@@ -227,7 +236,7 @@ pub fn activate_existing_instance(app: &AppHandle) {
         return;
     };
     if app.try_state::<DesktopIntegration>().is_some() {
-        show_popup(&window);
+        show_main_window(&window);
         return;
     }
 
@@ -237,65 +246,125 @@ pub fn activate_existing_instance(app: &AppHandle) {
     let _ = window.set_focus();
 }
 
-pub fn show_popup(window: &WebviewWindow) {
-    finish_native_panel_resize(window);
-    crate::webview_memory::set_inactive(window, false);
-    let standalone = window
-        .app_handle()
-        .state::<DesktopIntegration>()
-        .standalone_window;
-    if standalone || cfg!(target_os = "linux") {
-        let _ = window.unminimize();
-        let _ = restore_manual_panel_height(window);
+fn position_popup(window: &WebviewWindow) {
+    if cfg!(target_os = "linux") {
         let _ = window.center();
     } else {
         let _ = window
             .as_ref()
             .window()
             .move_window_constrained(Position::TrayCenter);
+    }
+}
+
+pub fn show_main_window(window: &WebviewWindow) {
+    finish_native_panel_resize(window);
+    crate::webview_memory::set_inactive(window, false);
+    if window
+        .app_handle()
+        .state::<DesktopIntegration>()
+        .is_floating()
+    {
+        let _ = window.unminimize();
+        let _ = restore_manual_panel_height(window);
+    } else {
+        position_popup(window);
         let _ = restore_manual_panel_height(window);
     }
     let _ = window.show();
     let _ = window.set_focus();
 }
 
-fn hide_popup_window(window: &Window) {
+fn set_window_chrome(window: &WebviewWindow, floating: bool) -> tauri::Result<()> {
+    window
+        .set_resizable(false)
+        .and_then(|_| window.set_skip_taskbar(!floating))
+        .and_then(|_| window.set_always_on_top(!floating))
+        .and_then(|_| window.set_decorations(false))
+}
+
+pub fn apply_window_mode(
+    window: &WebviewWindow,
+    mode: WindowMode,
+    center_floating: bool,
+) -> Result<(), String> {
+    let integration = window.app_handle().state::<DesktopIntegration>();
+    let previous_floating = integration.is_floating();
+    let floating = !integration.tray_available() || mode == WindowMode::Floating;
+
+    window
+        .app_handle()
+        .state::<PopupDismissGuard>()
+        .cancel_pending();
+    finish_native_panel_resize(window);
+    if set_window_chrome(window, floating).is_err() {
+        let _ = set_window_chrome(window, previous_floating);
+        return Err("OpenQuota window mode could not be changed.".to_owned());
+    }
+
+    integration.apply_window_mode(mode);
+    window
+        .app_handle()
+        .state::<PopupDismissGuard>()
+        .cancel_pending();
+    let result = {
+        crate::webview_memory::set_inactive(window, false);
+        let _ = window.unminimize();
+        if floating {
+            if center_floating {
+                let _ = window.center();
+            }
+        } else {
+            position_popup(window);
+        }
+        let _ = restore_manual_panel_height(window);
+        window
+            .show()
+            .and_then(|_| window.set_focus())
+            .map_err(|_| "OpenQuota window could not be shown.".to_owned())
+    };
+    if result.is_err() {
+        integration.set_floating(previous_floating);
+        let _ = set_window_chrome(window, previous_floating);
+    }
+    result
+}
+
+fn hide_main_native_window(window: &Window) {
     if window.hide().is_err() {
         return;
     }
     if let Some(webview) = window.app_handle().get_webview_window(MAIN_WINDOW) {
         crate::webview_memory::set_inactive(&webview, true);
     }
-    let _ = window.app_handle().emit("popup-hidden", ());
+    let _ = window.app_handle().emit("main-window-hidden", ());
 }
 
-pub fn hide_popup(window: &WebviewWindow) {
+pub fn hide_main_window(window: &WebviewWindow) {
     finish_native_panel_resize(window);
-    hide_popup_window(&window.as_ref().window());
+    hide_main_native_window(&window.as_ref().window());
 }
 
-pub fn toggle_popup(app: &AppHandle) {
+pub fn toggle_main_window(app: &AppHandle) {
     app.state::<PopupDismissGuard>().cancel_pending();
 
     let Some(window) = app.get_webview_window(MAIN_WINDOW) else {
         return;
     };
 
-    if window.is_visible().unwrap_or(false) {
-        if app.state::<DesktopIntegration>().standalone_window {
-            let _ = window.minimize();
-        } else {
-            hide_popup(&window);
-        }
+    let visible = window.is_visible().unwrap_or(false);
+    let minimized = window.is_minimized().unwrap_or(false);
+    if visible && !minimized {
+        hide_main_window(&window);
     } else {
-        show_popup(&window);
+        show_main_window(&window);
     }
 }
 
 pub fn open_screen(app: &AppHandle, screen: &str) {
     app.state::<PopupDismissGuard>().cancel_pending();
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
-        show_popup(&window);
+        show_main_window(&window);
         let _ = app.emit("open-screen", screen);
     }
 }
@@ -318,6 +387,18 @@ fn panel_resize_edge_for_frames(
         PanelResizeEdge::Top
     } else {
         PanelResizeEdge::Bottom
+    }
+}
+
+fn panel_resize_edge_for_context(
+    current: VerticalFrame,
+    work_area: VerticalFrame,
+    floating: bool,
+) -> PanelResizeEdge {
+    if floating {
+        PanelResizeEdge::Bottom
+    } else {
+        panel_resize_edge_for_frames(current, work_area)
     }
 }
 
@@ -349,7 +430,7 @@ pub fn panel_resize_edge(window: &WebviewWindow) -> Result<PanelResizeEdge, Stri
         .map_err(|_| "OpenQuota display is unavailable.")?
         .ok_or("OpenQuota display is unavailable.")?;
     let work_area = monitor.work_area();
-    Ok(panel_resize_edge_for_frames(
+    Ok(panel_resize_edge_for_context(
         VerticalFrame {
             top: position.y,
             height: size.height,
@@ -358,6 +439,10 @@ pub fn panel_resize_edge(window: &WebviewWindow) -> Result<PanelResizeEdge, Stri
             top: work_area.position.y,
             height: work_area.size.height,
         },
+        window
+            .app_handle()
+            .state::<DesktopIntegration>()
+            .is_floating(),
     ))
 }
 
@@ -389,7 +474,14 @@ fn panel_maximum_height(window: &WebviewWindow) -> Result<u32, String> {
     };
     let current_bottom = i64::from(current.top) + i64::from(current.height);
     let work_bottom = i64::from(work.top) + i64::from(work.height);
-    let room = match panel_resize_edge_for_frames(current, work) {
+    let room = match panel_resize_edge_for_context(
+        current,
+        work,
+        window
+            .app_handle()
+            .state::<DesktopIntegration>()
+            .is_floating(),
+    ) {
         PanelResizeEdge::Top => current_bottom.saturating_sub(i64::from(work.top)),
         PanelResizeEdge::Bottom => work_bottom.saturating_sub(i64::from(current.top)),
     }
@@ -429,7 +521,7 @@ fn resize_panel_for_context(window: &WebviewWindow, height: u32) -> Result<(), S
     if window
         .app_handle()
         .state::<DesktopIntegration>()
-        .standalone_window
+        .is_floating()
     {
         return window
             .set_size(LogicalSize::new(PANEL_WIDTH, f64::from(height)))
@@ -626,7 +718,7 @@ fn schedule_outside_click_dismiss(window: Window) {
                     session.finish(current_logical_height(&window));
                 }
                 let _ = window.set_resizable(false);
-                hide_popup_window(&window);
+                hide_main_native_window(&window);
             }
         });
     });
@@ -663,7 +755,7 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
             if !window
                 .app_handle()
                 .state::<DesktopIntegration>()
-                .standalone_window =>
+                .is_floating() =>
         {
             schedule_outside_click_dismiss(window.clone())
         }
@@ -673,11 +765,8 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
             }
             let _ = window.set_resizable(false);
             api.prevent_close();
-            if window
-                .app_handle()
-                .state::<DesktopIntegration>()
-                .standalone_window
-            {
+            let integration = window.app_handle().state::<DesktopIntegration>();
+            if integration.exits_on_close() {
                 window.app_handle().exit(0);
                 return;
             }
@@ -685,7 +774,7 @@ pub fn handle_window_event(window: &Window, event: &WindowEvent) {
                 .app_handle()
                 .state::<PopupDismissGuard>()
                 .cancel_pending();
-            hide_popup_window(window);
+            hide_main_native_window(window);
         }
         _ => {}
     }
@@ -698,9 +787,9 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        anchored_vertical_frame, panel_resize_edge_for_frames, panel_surface_color,
-        PanelHeightMode, PanelResizeEdge, PanelResizeSession, VerticalFrame, DARK_PANEL_SURFACE,
-        LIGHT_PANEL_SURFACE,
+        anchored_vertical_frame, panel_resize_edge_for_context, panel_resize_edge_for_frames,
+        panel_surface_color, PanelHeightMode, PanelResizeEdge, PanelResizeSession, VerticalFrame,
+        DARK_PANEL_SURFACE, LIGHT_PANEL_SURFACE,
     };
     use crate::models::ThemePreference;
     use crate::storage::Storage;
@@ -789,6 +878,20 @@ mod tests {
             ),
             PanelResizeEdge::Bottom
         );
+    }
+
+    #[test]
+    fn floating_window_always_uses_the_bottom_resize_grip() {
+        let work = VerticalFrame {
+            top: 0,
+            height: 1_080,
+        };
+        for top in [0, 140, 700] {
+            assert_eq!(
+                panel_resize_edge_for_context(VerticalFrame { top, height: 320 }, work, true),
+                PanelResizeEdge::Bottom
+            );
+        }
     }
 
     #[test]

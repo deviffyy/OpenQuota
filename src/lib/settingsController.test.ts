@@ -11,18 +11,22 @@ vi.mock('./backend', () => mocks);
 
 function settingsView(theme: AppSettings['theme'] = 'system'): SettingsViewState {
   return {
+    accountRevision: 0,
+    renamableProviderIds: [],
     notificationPermission: 'prompt',
     integrationError: null,
-    standaloneWindow: false,
+    trayAvailable: true,
     platformSummary: null,
     settings: {
-      schemaVersion: 5,
+      schemaVersion: 6,
       language: 'en',
+      providerNames: {},
       providers: [],
       knownProviderIds: [],
       showTotalSpend: true,
       theme,
       density: 'default',
+      windowMode: 'popup',
       menuBarStyle: 'text',
       usageDisplay: 'left',
       resetDisplay: 'countdown',
@@ -64,6 +68,7 @@ describe('SettingsController', () => {
 
     expect(controller.state?.settings.theme).toBe('dark');
     await vi.waitFor(() => expect(mocks.saveAppSettings).toHaveBeenCalledTimes(1));
+    expect(mocks.saveAppSettings).toHaveBeenCalledWith(expect.any(Object), 0);
     resolvers[0](settingsView('light'));
     await vi.waitFor(() => expect(mocks.saveAppSettings).toHaveBeenCalledTimes(2));
     resolvers[1](settingsView('dark'));
@@ -81,5 +86,40 @@ describe('SettingsController', () => {
 
     await vi.waitFor(() => expect(controller.state?.settings.theme).toBe('system'));
     expect(onError).toHaveBeenCalledWith('Autostart unavailable.');
+  });
+
+  it('reloads an external account change after pending saves settle', async () => {
+    let finishSave: ((state: SettingsViewState) => void) | undefined;
+    mocks.saveAppSettings.mockImplementation(
+      () => new Promise<SettingsViewState>((resolve) => (finishSave = resolve)),
+    );
+    const external = {
+      ...settingsView('dark'),
+      accountRevision: 1,
+    };
+    mocks.getAppSettings.mockResolvedValue(external);
+    const controller = new SettingsController(vi.fn());
+    controller.setState(settingsView());
+
+    controller.save({ ...settingsView().settings, theme: 'light' });
+    await vi.waitFor(() => expect(mocks.saveAppSettings).toHaveBeenCalledTimes(1));
+    controller.acceptExternalState(external);
+    expect(controller.state?.accountRevision).toBe(0);
+    finishSave?.(settingsView('light'));
+
+    await vi.waitFor(() => expect(mocks.getAppSettings).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(controller.state?.accountRevision).toBe(1));
+    expect(controller.state?.settings.theme).toBe('dark');
+  });
+
+  it('never replaces a newer account state with an older response', () => {
+    const controller = new SettingsController(vi.fn());
+    controller.setState({ ...settingsView('dark'), accountRevision: 2 });
+
+    controller.setState({ ...settingsView('light'), accountRevision: 1 });
+    controller.acceptExternalState({ ...settingsView('light'), accountRevision: 1 });
+
+    expect(controller.state?.accountRevision).toBe(2);
+    expect(controller.state?.settings.theme).toBe('dark');
   });
 });

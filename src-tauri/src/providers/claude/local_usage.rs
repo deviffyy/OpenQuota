@@ -41,7 +41,7 @@ pub struct ClaudeTokenEvent {
     pub cost_usd: Option<f64>,
 }
 
-const LOG_CACHE_SCHEMA_VERSION: u8 = 2;
+const LOG_CACHE_SCHEMA_VERSION: u8 = 3;
 
 impl ClaudeTokenEvent {
     fn total_tokens(&self) -> u64 {
@@ -53,6 +53,10 @@ pub fn scan_local_usage(
     storage: &Storage,
     now: DateTime<Utc>,
     pricing: &ModelPricing,
+    provider_id: &str,
+    configured_roots: &[PathBuf],
+    include_standard_roots: bool,
+    include_pi: bool,
 ) -> Result<UsageHistory, ClaudeError> {
     let since_date = now
         .with_timezone(&Local)
@@ -60,13 +64,13 @@ pub fn scan_local_usage(
         .checked_sub_days(Days::new(30))
         .unwrap_or(NaiveDate::MIN);
     let mut events = Vec::new();
-    let paths = discover_files();
+    let paths = discover_files(configured_roots, include_standard_roots);
     let mut seen_paths = HashSet::with_capacity(paths.len());
     for path in paths {
         seen_paths.insert(path.clone());
         let Some(parsed) = load_or_parse_log(
             storage,
-            "claude",
+            provider_id,
             &path,
             LOG_CACHE_SCHEMA_VERSION,
             parse_jsonl,
@@ -82,19 +86,23 @@ pub fn scan_local_usage(
         );
     }
     storage
-        .prune_log_events("claude", &seen_paths)
+        .prune_log_events(provider_id, &seen_paths)
         .map_err(|_| ClaudeError::LocalUsage)?;
     let mut accumulator = DailyUsageAccumulator::default();
     aggregate_into(deduplicate(events), now, pricing, &mut accumulator);
-    let includes_pi = match pi_usage::scan_into(storage, now, pricing, "claude", &mut accumulator) {
-        Ok(includes_pi) => includes_pi,
-        Err(_) => {
-            crate::app_warn!(
-                "plugin:pi",
-                "pi usage history could not be folded into Claude"
-            );
-            false
+    let includes_pi = if include_pi {
+        match pi_usage::scan_into(storage, now, pricing, provider_id, &mut accumulator) {
+            Ok(includes_pi) => includes_pi,
+            Err(_) => {
+                crate::app_warn!(
+                    "plugin:pi",
+                    "pi usage history could not be folded into Claude"
+                );
+                false
+            }
         }
+    } else {
+        false
     };
     let source_note = if includes_pi {
         "From your Claude usage history and pi (estimated)"
@@ -104,11 +112,19 @@ pub fn scan_local_usage(
     Ok(accumulator.build(now, source_note))
 }
 
-fn discover_files() -> Vec<PathBuf> {
+fn discover_files(configured_roots: &[PathBuf], include_standard_roots: bool) -> Vec<PathBuf> {
     let home = home_directory();
-    let config = env_text("CLAUDE_CONFIG_DIR");
-    let xdg = env_text("XDG_CONFIG_HOME");
-    discover_files_in_roots(&claude_roots(config.as_deref(), xdg.as_deref(), &home))
+    let mut roots = if include_standard_roots {
+        let config = env_text("CLAUDE_CONFIG_DIR");
+        let xdg = env_text("XDG_CONFIG_HOME");
+        claude_roots(config.as_deref(), xdg.as_deref(), &home)
+    } else {
+        Vec::new()
+    };
+    roots.extend(configured_roots.iter().cloned());
+    roots.sort();
+    roots.dedup();
+    discover_files_in_roots(&roots)
 }
 
 fn discover_files_in_roots(roots: &[PathBuf]) -> Vec<PathBuf> {
@@ -144,7 +160,17 @@ fn claude_roots(config: Option<&str>, xdg: Option<&str>, home: &Path) -> Vec<Pat
     };
 
     if let Some(config) = config.map(str::trim).filter(|value| !value.is_empty()) {
-        add_if_valid(PathBuf::from(config));
+        for value in config
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            let mut root = expand_home(value, home);
+            if root.file_name().and_then(|name| name.to_str()) == Some("projects") {
+                root.pop();
+            }
+            add_if_valid(root);
+        }
     } else {
         let xdg = xdg
             .map(str::trim)
@@ -153,10 +179,10 @@ fn claude_roots(config: Option<&str>, xdg: Option<&str>, home: &Path) -> Vec<Pat
             .unwrap_or_else(|| home.join(".config"));
         add_if_valid(xdg.join("claude"));
         add_if_valid(home.join(".claude"));
+    }
 
-        for root in cowork_claude_roots(home) {
-            add_if_valid(root);
-        }
+    for root in cowork_claude_roots(home) {
+        add_if_valid(root);
     }
     roots
 }
@@ -193,10 +219,7 @@ fn child_directories(path: &Path) -> Vec<PathBuf> {
 }
 
 fn env_text(name: &str) -> Option<String> {
-    std::env::var(name)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
+    crate::provider_environment::value(name)
 }
 
 fn home_directory() -> PathBuf {
@@ -224,11 +247,16 @@ pub fn parse_jsonl(content: &str) -> Vec<ClaudeTokenEvent> {
         .lines()
         .filter(|line| line.contains("\"usage\":{"))
         .filter(|line| !has_unsupported_null_field(line))
-        .filter_map(parse_line)
+        .flat_map(|line| parse_entries(line).unwrap_or_default())
         .collect()
 }
 
+#[cfg(test)]
 fn parse_line(line: &str) -> Option<ClaudeTokenEvent> {
+    parse_entries(line)?.into_iter().next()
+}
+
+fn parse_entries(line: &str) -> Option<Vec<ClaudeTokenEvent>> {
     let object: Value = serde_json::from_str(line).ok()?;
     let timestamp = parse_log_timestamp(object.get("timestamp")?.as_str()?)?;
     let message = object.get("message")?;
@@ -250,6 +278,76 @@ fn parse_line(line: &str) -> Option<ClaudeTokenEvent> {
         return None;
     }
     let usage = message.get("usage")?;
+    let message_id = message.get("id").and_then(Value::as_str).map(str::to_owned);
+    let request_id = object
+        .get("requestId")
+        .and_then(Value::as_str)
+        .map(str::to_owned);
+    let sidechain = object
+        .get("isSidechain")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let parent = usage_event(
+        timestamp,
+        message
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty() && *value != "<synthetic>")
+            .map(str::to_owned),
+        usage,
+        message_id.clone(),
+        request_id.clone(),
+        sidechain,
+        object.get("costUSD").and_then(number),
+    )?;
+    let mut events = vec![parent];
+    let mut advisor_index = 0;
+    for iteration in usage
+        .get("iterations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if iteration.get("type").and_then(Value::as_str) != Some("advisor_message") {
+            continue;
+        }
+        let Some(model) = iteration
+            .get("model")
+            .and_then(Value::as_str)
+            .filter(|model| !model.is_empty())
+        else {
+            continue;
+        };
+        let advisor_message_id = message_id
+            .as_ref()
+            .map(|message_id| format!("{message_id}:advisor:{advisor_index}"));
+        let Some(advisor) = usage_event(
+            timestamp,
+            Some(model.to_owned()),
+            iteration,
+            advisor_message_id,
+            request_id.clone(),
+            sidechain,
+            None,
+        ) else {
+            continue;
+        };
+        events.push(advisor);
+        advisor_index += 1;
+    }
+    Some(events)
+}
+
+fn usage_event(
+    timestamp: DateTime<Utc>,
+    model: Option<String>,
+    usage: &Value,
+    message_id: Option<String>,
+    request_id: Option<String>,
+    sidechain: bool,
+    cost_usd: Option<f64>,
+) -> Option<ClaudeTokenEvent> {
     let input = integer(usage.get("input_tokens"))?;
     let output = integer(usage.get("output_tokens"))?;
     let speed = usage.get("speed").and_then(Value::as_str);
@@ -272,29 +370,18 @@ fn parse_line(line: &str) -> Option<ClaudeTokenEvent> {
         });
     Some(ClaudeTokenEvent {
         timestamp,
-        model: message
-            .get("model")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty() && *value != "<synthetic>")
-            .map(str::to_owned),
+        model,
         input,
         cache_write_5m,
         cache_write_1h,
         cache_read: integer(usage.get("cache_read_input_tokens")).unwrap_or_default(),
         output,
-        message_id: message.get("id").and_then(Value::as_str).map(str::to_owned),
-        request_id: object
-            .get("requestId")
-            .and_then(Value::as_str)
-            .map(str::to_owned),
-        sidechain: object
-            .get("isSidechain")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
+        message_id,
+        request_id,
+        sidechain,
         is_fast: speed == Some("fast"),
         has_speed: speed.is_some(),
-        cost_usd: object.get("costUSD").and_then(number),
+        cost_usd,
     })
 }
 
@@ -457,10 +544,10 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        aggregate, claude_roots, deduplicate, discover_files_in_roots, has_unsupported_null_field,
-        is_semver_prefix, parse_jsonl, parse_line, ClaudeTokenEvent,
+        aggregate, claude_roots, deduplicate, discover_files, discover_files_in_roots,
+        has_unsupported_null_field, is_semver_prefix, parse_jsonl, parse_line, ClaudeTokenEvent,
     };
-    use crate::pricing::test_bundled_pricing;
+    use crate::pricing::{test_bundled_pricing, TokenBreakdown};
 
     #[test]
     fn provider_fixture_parses_and_deduplicates_claude_usage_lines() {
@@ -488,6 +575,64 @@ mod tests {
         assert!(event.is_fast);
         assert!(event.has_speed);
         assert_eq!(event.cost_usd, Some(0.5));
+    }
+
+    #[test]
+    fn expands_only_advisor_iterations_without_recounting_main_usage() {
+        let line = r#"{"timestamp":"2026-02-20T12:00:00.000Z","requestId":"req_1","costUSD":1.23,"message":{"id":"msg_1","model":"main-model","usage":{"input_tokens":2,"output_tokens":491,"cache_creation_input_tokens":7853,"cache_read_input_tokens":226584,"iterations":[{"type":"message","input_tokens":1,"output_tokens":200},{"type":"advisor_message","model":"claude-opus-4-6","input_tokens":10,"output_tokens":2,"cache_creation_input_tokens":3,"cache_read_input_tokens":4},{"type":"message","input_tokens":1,"output_tokens":291}]}}}"#;
+
+        let events = parse_jsonl(line);
+
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].model.as_deref(), Some("main-model"));
+        assert_eq!(events[0].input, 2);
+        assert_eq!(events[0].cache_write_5m, 7853);
+        assert_eq!(events[0].cache_read, 226584);
+        assert_eq!(events[0].output, 491);
+        assert_eq!(events[0].cost_usd, Some(1.23));
+        assert_eq!(events[1].model.as_deref(), Some("claude-opus-4-6"));
+        assert_eq!(events[1].message_id.as_deref(), Some("msg_1:advisor:0"));
+        assert_eq!(events[1].request_id.as_deref(), Some("req_1"));
+        assert_eq!(events[1].input, 10);
+        assert_eq!(events[1].cache_write_5m, 3);
+        assert_eq!(events[1].cache_read, 4);
+        assert_eq!(events[1].output, 2);
+        assert_eq!(events[1].cost_usd, None);
+
+        let duplicated = format!("{line}\n{line}");
+        assert_eq!(deduplicate(parse_jsonl(&duplicated)).len(), 2);
+    }
+
+    #[test]
+    fn advisor_iteration_uses_its_own_model_price_alongside_parent_cost() {
+        let content = r#"{"timestamp":"2026-07-15T08:00:00Z","requestId":"req_1","costUSD":0.001,"message":{"id":"msg_1","model":"main-model","usage":{"input_tokens":1,"output_tokens":2,"iterations":[{"type":"advisor_message","model":"claude-opus-4-6","input_tokens":10,"output_tokens":2}]}}}"#;
+        let pricing = test_bundled_pricing();
+        let advisor_cost = pricing
+            .estimated_cost_dollars(
+                "claude-opus-4-6",
+                TokenBreakdown {
+                    input: 10,
+                    output: 2,
+                    ..TokenBreakdown::default()
+                },
+                true,
+            )
+            .unwrap();
+        let now = Utc.with_ymd_and_hms(2026, 7, 15, 12, 0, 0).unwrap();
+
+        let history = aggregate(deduplicate(parse_jsonl(content)), now, &pricing);
+        let today = history.today.unwrap();
+
+        assert_eq!(today.tokens, 15);
+        assert!((today.estimated_cost_usd.unwrap() - (0.001 + advisor_cost)).abs() < 1e-12);
+        let models = today.model_breakdown.unwrap().models;
+        assert_eq!(
+            models
+                .iter()
+                .find(|entry| entry.model == "claude-opus-4-6")
+                .map(|entry| entry.total_tokens),
+            Some(12)
+        );
     }
 
     #[test]
@@ -568,19 +713,22 @@ mod tests {
     }
 
     #[test]
-    fn config_override_is_one_root_even_when_its_path_contains_a_comma() {
+    fn config_override_supports_multiple_roots_projects_alias_and_cowork() {
         let directory = tempdir().unwrap();
         let home = directory.path().join("home");
-        let configured = directory.path().join("claude,work");
+        let first = home.join("claude-one");
+        let second = directory.path().join("claude-two");
         let cowork = home.join(
             "Library/Application Support/Claude/local-agent-mode-sessions/group/sub/local_1/.claude",
         );
-        fs::create_dir_all(configured.join("projects")).unwrap();
+        fs::create_dir_all(first.join("projects")).unwrap();
+        fs::create_dir_all(second.join("projects")).unwrap();
         fs::create_dir_all(cowork.join("projects")).unwrap();
+        let configured = format!("~/claude-one,{}", second.join("projects").display());
 
-        let roots = claude_roots(Some(configured.to_str().unwrap()), None, &home);
+        let roots = claude_roots(Some(&configured), None, &home);
 
-        assert_eq!(roots, vec![configured]);
+        assert_eq!(roots, vec![first, second, cowork]);
     }
 
     #[test]
@@ -599,6 +747,24 @@ mod tests {
         assert_eq!(
             discover_files_in_roots(&[root]),
             vec![fs::canonicalize(log).unwrap()]
+        );
+    }
+
+    #[test]
+    fn account_scan_is_limited_to_its_configured_roots() {
+        let directory = tempdir().unwrap();
+        let account_root = directory.path().join("account");
+        let other_root = directory.path().join("other");
+        let account_log = account_root.join("projects/project/account.jsonl");
+        let other_log = other_root.join("projects/project/other.jsonl");
+        fs::create_dir_all(account_log.parent().unwrap()).unwrap();
+        fs::create_dir_all(other_log.parent().unwrap()).unwrap();
+        fs::write(&account_log, "{}").unwrap();
+        fs::write(&other_log, "{}").unwrap();
+
+        assert_eq!(
+            discover_files(&[account_root], false),
+            vec![fs::canonicalize(account_log).unwrap()]
         );
     }
 

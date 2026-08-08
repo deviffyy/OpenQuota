@@ -4,6 +4,7 @@ import App from './App.svelte';
 import { setUiLanguage } from './lib/i18n';
 import type {
   AppSettings,
+  ProviderCatalog,
   ProviderViewState,
   SettingsViewState,
   UsageViewState,
@@ -21,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
   listen: vi.fn(),
   currentMonitor: vi.fn(),
+  startDragging: vi.fn(),
   startResizeDragging: vi.fn(),
 }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }));
@@ -30,6 +32,7 @@ vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
     scaleFactor: () => Promise.resolve(1),
     innerSize: () => Promise.resolve({ width: 320, height: 600 }),
+    startDragging: mocks.startDragging,
     startResizeDragging: mocks.startResizeDragging,
   }),
 }));
@@ -42,13 +45,16 @@ type InvokeArgs = {
 };
 type InvokeImplementation = (command: string, args?: InvokeArgs) => unknown;
 
-function mockInvoke(implementation: InvokeImplementation) {
+function mockInvoke(
+  implementation: InvokeImplementation,
+  catalog: ProviderCatalog = providerCatalog,
+) {
   mocks.invoke.mockImplementation((command: string, args?: InvokeArgs) => {
     if (command === 'get_bootstrap_state') {
       return Promise.all([
         implementation('get_usage_state', args),
         implementation('get_app_settings', args),
-      ]).then(([usage, settings]) => ({ usage, settings, catalog: providerCatalog }));
+      ]).then(([usage, settings]) => ({ usage, settings, catalog }));
     }
     return implementation(command, args);
   });
@@ -61,6 +67,7 @@ describe('OpenQuota dashboard', () => {
       workArea: { size: { width: 1280, height: 700 } },
     });
     mocks.listen.mockReset().mockResolvedValue(vi.fn());
+    mocks.startDragging.mockReset().mockResolvedValue(undefined);
     mocks.startResizeDragging.mockReset().mockResolvedValue(undefined);
     mocks.invoke.mockReset();
     mockInvoke((command: string, args?: InvokeArgs) => {
@@ -124,6 +131,130 @@ describe('OpenQuota dashboard', () => {
       '$3.84 · Estimated locally, so it may be off',
     );
     expect(screen.getByText(`OpenQuota ${import.meta.env.APP_VERSION}`)).toBeInTheDocument();
+    expect(container.querySelector('.floating-chrome')).not.toBeInTheDocument();
+  });
+
+  it('toggles floating window mode from the footer pin when a tray is available', async () => {
+    render(App);
+    await screen.findByText('Plus');
+
+    const pin = screen.getByRole('button', { name: 'Keep Window Open' });
+    expect(pin).toHaveAttribute('aria-pressed', 'false');
+    await fireEvent.click(pin);
+
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith(
+        'save_app_settings',
+        expect.objectContaining({
+          settings: expect.objectContaining({ windowMode: 'floating' }),
+        }),
+      ),
+    );
+    expect(screen.getByRole('button', { name: 'Return to Tray Popup' })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Return to Tray Popup' }));
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith(
+        'save_app_settings',
+        expect.objectContaining({
+          settings: expect.objectContaining({ windowMode: 'popup' }),
+        }),
+      ),
+    );
+  });
+
+  it('provides a native drag surface and hide control in floating window mode', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    });
+    const userAgent = navigator.userAgent;
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    });
+    const defaultInvoke = mocks.invoke.getMockImplementation()!;
+    mockInvoke((command: string, args?: InvokeArgs) => {
+      if (command === 'get_app_settings')
+        return Promise.resolve({
+          ...settingsState,
+          settings: { ...settingsState.settings, windowMode: 'floating' as const },
+        });
+      if (command === 'get_panel_resize_edge') return new Promise(() => undefined);
+      return defaultInvoke(command, args);
+    });
+
+    try {
+      const { container } = render(App);
+      await screen.findByText('Plus');
+      const dragSurface = container.querySelector<HTMLElement>('.floating-chrome__drag');
+      expect(dragSurface).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Hide OpenQuota' })).toBeInTheDocument();
+      expect(screen.getByRole('separator', { name: 'Resize panel height' })).toHaveClass(
+        'panel-resize-dragger--bottom',
+      );
+
+      await fireEvent.pointerDown(dragSurface!, { button: 0 });
+      expect(mocks.startDragging).toHaveBeenCalledOnce();
+    } finally {
+      delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+      Object.defineProperty(navigator, 'userAgent', { configurable: true, value: userAgent });
+    }
+  });
+
+  it('refreshes the resize edge after switching from floating window to tray popup', async () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    });
+    const userAgent = navigator.userAgent;
+    Object.defineProperty(navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+    });
+    let appliedMode: AppSettings['windowMode'] = 'floating';
+    const defaultInvoke = mocks.invoke.getMockImplementation()!;
+    mockInvoke((command: string, args?: InvokeArgs) => {
+      if (command === 'get_app_settings')
+        return Promise.resolve({
+          ...settingsState,
+          settings: { ...settingsState.settings, windowMode: 'floating' as const },
+        });
+      if (command === 'save_app_settings') {
+        appliedMode = args?.settings?.windowMode ?? appliedMode;
+        return Promise.resolve({
+          ...settingsState,
+          settings: args?.settings ?? settingsState.settings,
+        });
+      }
+      if (command === 'get_panel_resize_edge')
+        return Promise.resolve(appliedMode === 'floating' ? 'bottom' : 'top');
+      return defaultInvoke(command, args);
+    });
+
+    try {
+      render(App);
+      await screen.findByText('Plus');
+      expect(screen.getByRole('separator', { name: 'Resize panel height' })).toHaveClass(
+        'panel-resize-dragger--bottom',
+      );
+      await fireEvent.click(screen.getByLabelText('Open options'));
+      await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+      await fireEvent.click(screen.getByRole('combobox', { name: 'Window Mode' }));
+      await fireEvent.click(screen.getByRole('option', { name: 'Tray Popup' }));
+
+      await waitFor(() =>
+        expect(screen.getByRole('separator', { name: 'Resize panel height' })).toHaveClass(
+          'panel-resize-dragger--top',
+        ),
+      );
+    } finally {
+      delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
+      Object.defineProperty(navigator, 'userAgent', { configurable: true, value: userAgent });
+    }
   });
 
   it('switches language immediately, persists it, and preserves temporary Settings state', async () => {
@@ -316,6 +447,157 @@ describe('OpenQuota dashboard', () => {
         name: 'Only includes Claude and Codex.',
       }),
     ).toBeInTheDocument();
+  });
+
+  it('renames an observed Claude card from its context menu', async () => {
+    const claudeSettings: SettingsViewState = {
+      ...settingsState,
+      settings: {
+        ...settingsState.settings,
+        providers: [
+          {
+            id: 'claude',
+            enabled: true,
+            detected: true,
+            expanded: false,
+            metrics: [
+              { id: 'claude.session', enabled: true, section: 'alwaysVisible', pinned: true },
+            ],
+          },
+        ],
+      },
+    };
+    const claudeUsage: UsageViewState = { providers: { claude: claudeState } };
+    mockInvoke((command: string, args?: InvokeArgs) => {
+      if (
+        command === 'get_usage_state' ||
+        command === 'refresh_usage' ||
+        command === 'refresh_provider_usage'
+      )
+        return Promise.resolve(claudeUsage);
+      if (command === 'get_app_settings') return Promise.resolve(claudeSettings);
+      if (command === 'save_app_settings')
+        return Promise.resolve({
+          ...claudeSettings,
+          settings: args?.settings ?? claudeSettings.settings,
+        });
+      if (command === 'get_panel_resize_edge') return Promise.resolve('bottom');
+      if (command === 'get_panel_height_mode') return Promise.resolve('automatic');
+      if (command === 'fit_panel_to_content') return Promise.resolve(true);
+      if (command === 'check_for_updates')
+        return Promise.resolve({
+          available: false,
+          currentVersion: '0.1.0',
+          version: null,
+          body: null,
+          installable: true,
+          releaseUrl: 'https://github.com/deviffyy/OpenQuota/releases/latest',
+        });
+      return Promise.resolve();
+    });
+
+    render(App);
+    const provider = await screen.findByRole('group', { name: 'Claude provider' });
+    await fireEvent.contextMenu(provider);
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename…' }));
+    const dialog = screen.getByRole('dialog', { name: 'Rename Card' });
+    const input = within(dialog).getByRole('textbox', { name: 'Name' });
+    await fireEvent.input(input, { target: { value: 'Personal' } });
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Rename' }));
+
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith('save_app_settings', {
+        expectedAccountRevision: 0,
+        settings: expect.objectContaining({ providerNames: { claude: 'Personal' } }),
+      }),
+    );
+    expect(await screen.findByRole('heading', { name: 'Personal' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Move Personal' })).toHaveFocus(),
+    );
+    const savesAfterRename = mocks.invoke.mock.calls.filter(
+      ([command]) => command === 'save_app_settings',
+    ).length;
+    await fireEvent.keyDown(document, { key: 'z', ctrlKey: true });
+    await Promise.resolve();
+    expect(
+      mocks.invoke.mock.calls.filter(([command]) => command === 'save_app_settings'),
+    ).toHaveLength(savesAfterRename);
+  });
+
+  it('renames an observed extra Claude account card', async () => {
+    const providerId = 'claude@1234abcd';
+    const extraCatalog = structuredClone(providerCatalog);
+    const baseDefinition = extraCatalog.providers.find((provider) => provider.id === 'claude')!;
+    extraCatalog.providers.push({
+      ...baseDefinition,
+      id: providerId,
+      displayName: 'Claude — Work',
+      fallbackEnabled: false,
+      metrics: baseDefinition.metrics.map((metric) => ({
+        ...metric,
+        id: metric.id.replace('claude.', `${providerId}.`),
+      })),
+    });
+    const extraSettings: SettingsViewState = {
+      ...settingsState,
+      renamableProviderIds: [providerId],
+      settings: {
+        ...settingsState.settings,
+        providers: [
+          {
+            id: providerId,
+            enabled: true,
+            detected: true,
+            expanded: false,
+            metrics: [
+              {
+                id: `${providerId}.session`,
+                enabled: true,
+                section: 'alwaysVisible',
+                pinned: true,
+              },
+            ],
+          },
+        ],
+      },
+    };
+    const extraState: ProviderViewState = {
+      ...claudeState,
+      snapshot: claudeState.snapshot
+        ? { ...claudeState.snapshot, providerId }
+        : claudeState.snapshot,
+    };
+    const usage: UsageViewState = { providers: { [providerId]: extraState } };
+    mockInvoke((command: string, args?: InvokeArgs) => {
+      if (command === 'get_usage_state') return Promise.resolve(usage);
+      if (command === 'get_app_settings') return Promise.resolve(extraSettings);
+      if (command === 'save_app_settings')
+        return Promise.resolve({
+          ...extraSettings,
+          settings: args?.settings ?? extraSettings.settings,
+        });
+      if (command === 'get_panel_resize_edge') return Promise.resolve('bottom');
+      if (command === 'get_panel_height_mode') return Promise.resolve('automatic');
+      if (command === 'fit_panel_to_content') return Promise.resolve(true);
+      return Promise.resolve();
+    }, extraCatalog);
+
+    render(App);
+    const provider = await screen.findByRole('group', { name: 'Claude — Work provider' });
+    await fireEvent.contextMenu(provider);
+    await fireEvent.click(screen.getByRole('menuitem', { name: 'Rename…' }));
+    const dialog = screen.getByRole('dialog', { name: 'Rename Card' });
+    await fireEvent.input(within(dialog).getByRole('textbox', { name: 'Name' }), {
+      target: { value: 'Client' },
+    });
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Rename' }));
+
+    expect(await screen.findByRole('heading', { name: 'Client' })).toBeInTheDocument();
+    expect(mocks.invoke).toHaveBeenCalledWith('save_app_settings', {
+      expectedAccountRevision: 0,
+      settings: expect.objectContaining({ providerNames: { [providerId]: 'Client' } }),
+    });
   });
 
   it('persists Total Spend metric and period choices', async () => {
@@ -640,7 +922,7 @@ describe('OpenQuota dashboard', () => {
       if (command === 'get_app_settings')
         return Promise.resolve({
           ...settingsState,
-          standaloneWindow: true,
+          trayAvailable: false,
           platformSummary: 'GNOME · Wayland · standalone window',
         });
       if (command === 'check_for_updates')
@@ -656,9 +938,13 @@ describe('OpenQuota dashboard', () => {
     });
     render(App);
     await screen.findByText('Plus');
+    expect(screen.getByRole('button', { name: 'Close OpenQuota' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Keep Window Open' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Return to Tray Popup' })).not.toBeInTheDocument();
     await fireEvent.click(screen.getByLabelText('Open options'));
     await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
     expect(screen.getByText('GNOME · Wayland · standalone window')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: 'Window Mode' })).not.toBeInTheDocument();
   });
 
   it('records a global shortcut and requests notification permission', async () => {
@@ -1064,11 +1350,11 @@ describe('OpenQuota dashboard', () => {
   });
 
   it('resets native Options and Share details when the popup is hidden', async () => {
-    let emitPopupHidden: (() => void) | undefined;
+    let emitMainWindowHidden: (() => void) | undefined;
     mocks.listen.mockImplementation(
       (eventName: string, handler: (event: { payload: unknown }) => void) => {
-        if (eventName === 'popup-hidden') {
-          emitPopupHidden = () => handler({ payload: undefined });
+        if (eventName === 'main-window-hidden') {
+          emitMainWindowHidden = () => handler({ payload: undefined });
         }
         return Promise.resolve(vi.fn());
       },
@@ -1088,8 +1374,8 @@ describe('OpenQuota dashboard', () => {
       expect(within(shareMenu).getByRole('button', { name: 'Codex' })).toBeInTheDocument(),
     );
 
-    await waitFor(() => expect(emitPopupHidden).toBeTypeOf('function'));
-    emitPopupHidden!();
+    await waitFor(() => expect(emitMainWindowHidden).toBeTypeOf('function'));
+    emitMainWindowHidden!();
 
     await waitFor(() => {
       expect(optionsMenu).not.toHaveAttribute('open');
@@ -1195,6 +1481,18 @@ describe('OpenQuota dashboard', () => {
       await screen.findByText('Plus');
       await fireEvent.click(screen.getByLabelText('Open options'));
       await fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+      const windowMode = screen.getByRole('combobox', { name: 'Window Mode' });
+      await fireEvent.click(windowMode);
+      await fireEvent.click(screen.getByRole('option', { name: 'Floating Window' }));
+      await waitFor(() =>
+        expect(mocks.invoke).toHaveBeenCalledWith(
+          'save_app_settings',
+          expect.objectContaining({
+            settings: expect.objectContaining({ windowMode: 'floating' }),
+          }),
+        ),
+      );
+
       const heightMode = screen.getByRole('combobox', { name: 'Panel Height' });
       await waitFor(() => expect(heightMode).toHaveTextContent('Manual'));
 
@@ -1265,6 +1563,24 @@ describe('OpenQuota dashboard', () => {
     expect(screen.getByRole('menuitem', { name: 'Refresh Codex' })).toHaveFocus();
     await fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     expect(document.querySelector('.context-menu')).toBeNull();
+  });
+
+  it('does not preselect a context-menu item after a pointer invocation', async () => {
+    render(App);
+    await screen.findByText('Plus');
+    await fireEvent.contextMenu(screen.getByRole('group', { name: 'Codex provider' }), {
+      button: 2,
+      clientX: 120,
+      clientY: 180,
+    });
+    const hide = screen.getByRole('menuitem', { name: 'Hide Codex' });
+    const menu = hide.closest<HTMLElement>('[role="menu"]');
+    if (!menu) throw new Error('Context menu was not rendered.');
+    await waitFor(() => expect(menu).toHaveFocus());
+    expect(hide).not.toHaveFocus();
+
+    await fireEvent.keyDown(menu, { key: 'ArrowDown' });
+    expect(hide).toHaveFocus();
   });
 
   it('hides a dashboard metric without removing its menu bar star', async () => {

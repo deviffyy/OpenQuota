@@ -68,15 +68,17 @@ const compositionRoot = fs.readFileSync(new URL('src-tauri/src/lib.rs', root), '
 if (/\.has_local_credentials\(\)/.test(compositionRoot)) {
   throw new Error('Tauri setup must not synchronously probe provider credentials.');
 }
-const runtimeBlock = compositionRoot.match(
-  /let providers:\s*Vec<Arc<dyn UsageProvider>>\s*=\s*vec!\[([\s\S]*?)\];/,
-)?.[1];
+if (!/let mut providers\s*=\s*claude::runtimes\([^;]+\)\?;/.test(compositionRoot)) {
+  throw new Error('Tauri setup must seed the provider registry with Claude account runtimes.');
+}
+const runtimeBlock = compositionRoot.match(/providers\.extend\(vec!\[([\s\S]*?)\]\);/)?.[1];
 if (!runtimeBlock) {
   throw new Error('Tauri setup does not expose the provider runtime list.');
 }
-const runtimeOrder = [...runtimeBlock.matchAll(/Arc::new\((\w+Provider)::new\b/g)].map(
-  ([, provider]) => provider,
-);
+const runtimeOrder = [
+  'ClaudeProvider',
+  ...[...runtimeBlock.matchAll(/Arc::new\((\w+Provider)::new\b/g)].map(([, provider]) => provider),
+];
 const expectedRuntimeOrder = [
   'ClaudeProvider',
   'CodexProvider',

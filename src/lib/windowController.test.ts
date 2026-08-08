@@ -180,6 +180,53 @@ describe('hybrid window controller', () => {
     controller.dispose();
   });
 
+  it('preserves dashboard content height when floating chrome changes in Settings', async () => {
+    let activeScreen: 'dashboard' | 'settings' = 'dashboard';
+    const page = document.querySelector<HTMLElement>('.screen-page')!;
+    let renderedHeight = 300;
+    page.getBoundingClientRect = vi.fn(
+      () =>
+        ({
+          width: 292,
+          height: renderedHeight,
+          top: 0,
+          right: 292,
+          bottom: renderedHeight,
+          left: 0,
+          x: 0,
+          y: 0,
+        }) as DOMRect,
+    );
+    const chrome = document.createElement('header');
+    chrome.className = 'floating-chrome';
+    Object.defineProperty(chrome, 'offsetHeight', { configurable: true, value: 32 });
+    document.querySelector('main')!.prepend(chrome);
+    const controller = createWindowController({
+      screen: () => activeScreen,
+      refreshing: () => false,
+      reordering: () => false,
+      automatic: () => true,
+      reducedMotion: () => true,
+      onError: vi.fn(),
+    });
+
+    controller.scheduleFit();
+    await waitFor(() => expect(mocks.fitPanelToContent).toHaveBeenLastCalledWith(462));
+
+    activeScreen = 'settings';
+    page.dataset.screen = 'settings';
+    renderedHeight = 700;
+    controller.scheduleFit();
+    await waitFor(() => expect(mocks.fitPanelToContent).toHaveBeenCalledTimes(2));
+    expect(mocks.fitPanelToContent).toHaveBeenLastCalledWith(462);
+
+    chrome.remove();
+    controller.scheduleFit();
+    await waitFor(() => expect(mocks.fitPanelToContent).toHaveBeenCalledTimes(3));
+    expect(mocks.fitPanelToContent).toHaveBeenLastCalledWith(430);
+    controller.dispose();
+  });
+
   it('defers automatic fitting while refresh or reordering can move rows', async () => {
     let refreshing = true;
     const controller = createWindowController({

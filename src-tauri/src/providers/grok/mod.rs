@@ -210,6 +210,7 @@ impl GrokProvider {
         let usage = scan_or_cached_usage(
             &self.storage,
             "grok",
+            crate::providers::CacheIdentity::Unscoped,
             "Grok",
             || self.log_usage.scan(&self.storage, now, &pricing),
             &mut warnings,

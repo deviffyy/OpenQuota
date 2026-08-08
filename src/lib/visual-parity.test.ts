@@ -60,6 +60,13 @@ describe('native visual contract', () => {
     expect(zai.container.querySelector('path')).toHaveAttribute('fill', 'currentColor');
   });
 
+  it('reuses the Claude mark for Claude account cards', () => {
+    const claude = render(ProviderIcon, { providerId: 'claude' });
+    const account = render(ProviderIcon, { providerId: 'claude@1234abcd' });
+
+    expect(account.container.innerHTML).toBe(claude.container.innerHTML);
+  });
+
   it('uses the shared hover dwell and grace timing for Usage Trend details', async () => {
     vi.useFakeTimers();
     const today = new Date();

@@ -56,8 +56,8 @@ export function getAppSettings() {
   return invoke<SettingsViewState>('get_app_settings');
 }
 
-export function saveAppSettings(settings: AppSettings) {
-  return invoke<SettingsViewState>('save_app_settings', { settings });
+export function saveAppSettings(settings: AppSettings, expectedAccountRevision: number) {
+  return invoke<SettingsViewState>('save_app_settings', { settings, expectedAccountRevision });
 }
 
 export function resetCustomization() {
@@ -144,8 +144,8 @@ export function onOpenScreen(handler: PayloadHandler<string>) {
   return onEvent('open-screen', handler);
 }
 
-export function onPopupHidden(handler: PayloadHandler<void>) {
-  return onEvent('popup-hidden', handler);
+export function onMainWindowHidden(handler: PayloadHandler<void>) {
+  return onEvent('main-window-hidden', handler);
 }
 
 export function onUpdateProgress(handler: PayloadHandler<UpdateProgress>) {

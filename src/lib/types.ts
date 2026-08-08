@@ -204,9 +204,11 @@ export interface AppSettings {
   language: 'system' | 'en' | 'zh-CN' | 'zh-TW';
   providers: ProviderLayout[];
   knownProviderIds: string[];
+  providerNames: Record<string, string>;
   showTotalSpend: boolean;
   theme: 'system' | 'light' | 'dark';
   density: 'default' | 'compact';
+  windowMode: 'popup' | 'floating';
   menuBarStyle: 'text' | 'bars';
   usageDisplay: 'used' | 'left';
   resetDisplay: 'countdown' | 'exact';
@@ -249,9 +251,11 @@ export interface UpdateFailure {
 
 export interface SettingsViewState {
   settings: AppSettings;
+  accountRevision: number;
+  renamableProviderIds: string[];
   notificationPermission: 'granted' | 'denied' | 'prompt' | 'unavailable';
   integrationError: string | null;
-  standaloneWindow: boolean;
+  trayAvailable: boolean;
   platformSummary: string | null;
 }
 

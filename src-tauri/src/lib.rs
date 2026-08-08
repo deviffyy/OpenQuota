@@ -11,6 +11,7 @@ mod pacing;
 mod policy;
 mod popup;
 mod pricing;
+mod provider_environment;
 mod providers;
 mod refresh_loop;
 mod service;
@@ -46,15 +47,16 @@ use crate::{
     pacing::NotificationEvaluator,
     pricing::PricingStore,
     providers::{
-        antigravity::AntigravityProvider, claude::ClaudeProvider,
-        codex::reset_claim::CodexResetClaimService, codex::CodexProvider, copilot::CopilotProvider,
-        cursor::CursorProvider, detect_local_credentials, devin::DevinProvider, grok::GrokProvider,
+        antigravity::AntigravityProvider, claude, codex::reset_claim::CodexResetClaimService,
+        codex::CodexProvider, copilot::CopilotProvider, cursor::CursorProvider,
+        detect_local_credentials, devin::DevinProvider, grok::GrokProvider,
         opencode::OpenCodeProvider, openrouter::OpenRouterProvider, zai::ZaiProvider,
         ProviderRegistry, UsageProvider,
     },
     storage::Storage,
     window::{
-        handle_window_event, open_screen, show_popup, toggle_popup, PanelResizeSession, MAIN_WINDOW,
+        handle_window_event, open_screen, show_main_window, toggle_main_window, PanelResizeSession,
+        MAIN_WINDOW,
     },
 };
 
@@ -160,7 +162,7 @@ fn register_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), String> {
     app.global_shortcut()
         .on_shortcut(shortcut, |app, _, event| {
             if event.state == ShortcutState::Released {
-                toggle_popup(app);
+                toggle_main_window(app);
             }
         })
         .map_err(|_| {
@@ -252,36 +254,45 @@ pub fn run() {
             let desktop_integration = DesktopIntegration::detect();
             app_info!(
                 "lifecycle",
-                "desktop integration detected (standalone={})",
-                desktop_integration.standalone_window
+                "desktop integration detected (tray={})",
+                desktop_integration.tray_available()
             );
             app.manage(desktop_integration.clone());
 
             let app_data_dir = app.path().app_data_dir()?;
             let database_path = app_data_dir.join("openquota.db");
             let storage = Arc::new(Storage::open(&database_path)?);
+            provider_environment::initialize(storage.load_provider_environment()?);
+            provider_environment::refresh_for_next_launch(storage.clone());
             app.manage(Arc::new(PanelResizeSession::new(storage.clone())));
             app_debug!("cache", "application database opened");
             let pricing = Arc::new(PricingStore::new(app_data_dir.join("pricing"))?);
-            let providers: Vec<Arc<dyn UsageProvider>> = vec![
-                Arc::new(ClaudeProvider::new(storage.clone(), pricing.clone())?),
-                Arc::new(CodexProvider::new(storage.clone(), pricing.clone())?),
-                Arc::new(CursorProvider::new(pricing.clone())?),
+            let mut providers = claude::runtimes(storage.clone(), pricing.clone())?;
+            providers.extend(vec![
+                Arc::new(CodexProvider::new(storage.clone(), pricing.clone())?)
+                    as Arc<dyn UsageProvider>,
+                Arc::new(CursorProvider::new(pricing.clone())?) as Arc<dyn UsageProvider>,
                 Arc::new(AntigravityProvider::new(
                     app_data_dir.join("antigravity").join("auth.json"),
-                )?),
-                Arc::new(CopilotProvider::new()?),
-                Arc::new(DevinProvider::new()?),
-                Arc::new(GrokProvider::new(storage.clone(), pricing.clone())?),
-                Arc::new(OpenCodeProvider::new(pricing.clone())),
-                Arc::new(OpenRouterProvider::new()?),
-                Arc::new(ZaiProvider::new()?),
-            ];
+                )?) as Arc<dyn UsageProvider>,
+                Arc::new(CopilotProvider::new()?) as Arc<dyn UsageProvider>,
+                Arc::new(DevinProvider::new()?) as Arc<dyn UsageProvider>,
+                Arc::new(GrokProvider::new(storage.clone(), pricing.clone())?)
+                    as Arc<dyn UsageProvider>,
+                Arc::new(OpenCodeProvider::new(pricing.clone())) as Arc<dyn UsageProvider>,
+                Arc::new(OpenRouterProvider::new()?) as Arc<dyn UsageProvider>,
+                Arc::new(ZaiProvider::new()?) as Arc<dyn UsageProvider>,
+            ]);
             let registry = Arc::new(ProviderRegistry::new(providers)?);
-            let service = Arc::new(ProviderService::new(registry.clone(), storage.clone()));
             let (settings_service, credential_detection_plan) =
                 SettingsService::new_deferred(storage.clone(), registry.clone())?;
             let settings = Arc::new(settings_service);
+            let floating_window = desktop_integration.apply_window_mode(settings.get().window_mode);
+            let service = Arc::new(ProviderService::new_with_settings(
+                registry.clone(),
+                storage.clone(),
+                settings.clone(),
+            ));
             logging::set_level(settings.get().log_level);
             app_info!(
                 "config",
@@ -300,7 +311,7 @@ pub fn run() {
                 if window::apply_panel_surface(&window, settings.get().theme).is_err() {
                     app_warn!("window", "initial panel surface theme could not be applied");
                 }
-                if !desktop_integration.standalone_window {
+                if !floating_window {
                     webview_memory::set_inactive(&window, true);
                 }
             }
@@ -309,7 +320,7 @@ pub fn run() {
                 let _ = register_shortcut(app.handle(), &shortcut);
             }
 
-            if !desktop_integration.standalone_window {
+            if desktop_integration.tray_available() {
                 let menu = tray_menu(app.handle(), &settings.get().language)?;
 
                 let tray = TrayIconBuilder::with_id("openquota-tray")
@@ -325,7 +336,7 @@ pub fn run() {
                     "open" => {
                         app.state::<PopupDismissGuard>().cancel_pending();
                         if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
-                            show_popup(&window);
+                            show_main_window(&window);
                         }
                     }
                     "customize" => open_screen(app, "customize"),
@@ -350,19 +361,17 @@ pub fn run() {
                             ..
                         }
                     ) {
-                        toggle_popup(tray.app_handle());
+                        toggle_main_window(tray.app_handle());
                     }
                 });
                 tray.build(app)?;
                 app_info!("lifecycle", "system tray integration ready");
             }
 
-            if desktop_integration.standalone_window {
+            if floating_window {
                 if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
-                    let _ = window.set_skip_taskbar(false);
-                    let _ = window.set_always_on_top(false);
-                    let _ = window.set_decorations(true);
-                    show_popup(&window);
+                    window::apply_window_mode(&window, settings.get().window_mode, true)
+                        .map_err(std::io::Error::other)?;
                 }
             }
 

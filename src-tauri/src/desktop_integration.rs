@@ -1,3 +1,10 @@
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+
+use crate::models::WindowMode;
+
 #[cfg(any(target_os = "linux", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinuxSessionType {
@@ -16,7 +23,8 @@ pub enum LinuxDesktop {
 
 #[derive(Debug, Clone)]
 pub struct DesktopIntegration {
-    pub standalone_window: bool,
+    tray_available: bool,
+    floating_window: Arc<AtomicBool>,
     #[cfg(any(target_os = "linux", test))]
     platform_summary: Option<PlatformSummary>,
 }
@@ -41,11 +49,34 @@ impl DesktopIntegration {
         #[cfg(not(target_os = "linux"))]
         {
             Self {
-                standalone_window: false,
+                tray_available: true,
+                floating_window: Arc::new(AtomicBool::new(false)),
                 #[cfg(test)]
                 platform_summary: None,
             }
         }
+    }
+
+    pub fn tray_available(&self) -> bool {
+        self.tray_available
+    }
+
+    pub fn is_floating(&self) -> bool {
+        self.floating_window.load(Ordering::SeqCst)
+    }
+
+    pub fn exits_on_close(&self) -> bool {
+        self.is_floating() && !self.tray_available
+    }
+
+    pub fn apply_window_mode(&self, mode: WindowMode) -> bool {
+        let floating = !self.tray_available || mode == WindowMode::Floating;
+        self.set_floating(floating);
+        floating
+    }
+
+    pub(crate) fn set_floating(&self, floating: bool) {
+        self.floating_window.store(floating, Ordering::SeqCst);
     }
 
     pub fn platform_summary(&self, language: &str) -> Option<String> {
@@ -96,7 +127,8 @@ fn linux_integration(
     tray_available: bool,
 ) -> DesktopIntegration {
     DesktopIntegration {
-        standalone_window: !tray_available,
+        tray_available,
+        floating_window: Arc::new(AtomicBool::new(!tray_available)),
         platform_summary: Some(PlatformSummary {
             desktop,
             session,
@@ -157,6 +189,7 @@ fn status_notifier_host_available() -> bool {
 #[cfg(test)]
 mod tests {
     use super::{parse_desktop, parse_session_type, LinuxDesktop, LinuxSessionType};
+    use crate::models::WindowMode;
 
     #[test]
     fn recognizes_x11_and_wayland_sessions_case_insensitively() {
@@ -189,5 +222,21 @@ mod tests {
             integration.platform_summary("zh-CN").as_deref(),
             Some("GNOME · Wayland · 独立窗口")
         );
+    }
+
+    #[test]
+    fn window_mode_is_independent_from_tray_availability() {
+        let with_tray =
+            super::linux_integration(LinuxSessionType::Wayland, LinuxDesktop::Kde, true);
+        assert!(with_tray.tray_available());
+        assert!(!with_tray.apply_window_mode(WindowMode::Popup));
+        assert!(with_tray.apply_window_mode(WindowMode::Floating));
+        assert!(!with_tray.exits_on_close());
+
+        let without_tray =
+            super::linux_integration(LinuxSessionType::Wayland, LinuxDesktop::Gnome, false);
+        assert!(!without_tray.tray_available());
+        assert!(without_tray.apply_window_mode(WindowMode::Popup));
+        assert!(without_tray.exits_on_close());
     }
 }

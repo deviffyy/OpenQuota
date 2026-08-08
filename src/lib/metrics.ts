@@ -44,7 +44,9 @@ export class ProviderCatalogIndex {
     return metric ? { ...metric, label: localizedMetricLabel(metric) } : undefined;
   }
 
-  displayName(id: string) {
+  displayName(id: string, providerNames?: Record<string, string>) {
+    const customName = providerNames?.[id]?.trim();
+    if (customName) return customName;
     return this.provider(id)?.displayName ?? id;
   }
 

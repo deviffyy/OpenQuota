@@ -277,7 +277,7 @@ fn provider_path(provider_id: &str) -> Option<&'static Path> {
     static OPENCODE: OnceLock<Path> = OnceLock::new();
     static OPENROUTER: OnceLock<Path> = OnceLock::new();
     static ZAI: OnceLock<Path> = OnceLock::new();
-    match provider_id {
+    match crate::providers::provider_family(provider_id) {
         "claude" => Some(parsed(CLAUDE_ICON, &CLAUDE)),
         "codex" => Some(parsed(CODEX_ICON, &CODEX)),
         "copilot" => Some(parsed(COPILOT_ICON, &COPILOT)),
@@ -645,6 +645,14 @@ mod tests {
         let strip = render_text_strip(&[text_group("future-provider", &["42%"])])
             .expect("unknown provider should still render");
         assert!(strip.rgba.chunks_exact(4).any(|pixel| pixel[3] == 255));
+    }
+
+    #[test]
+    fn account_cards_reuse_their_provider_family_mark() {
+        assert!(std::ptr::eq(
+            provider_path("claude").unwrap(),
+            provider_path("claude@1234abcd").unwrap()
+        ));
     }
 
     #[test]

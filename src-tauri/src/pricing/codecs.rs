@@ -33,8 +33,9 @@ pub fn catalog_from_litellm(data: &[u8]) -> Result<PricingCatalog, PricingCodecE
         let mut rates = ModelRates::new(input * 1_000_000.0, output * 1_000_000.0);
         rates.cache_write_per_million =
             number(entry.get("cache_creation_input_token_cost")).unwrap_or(input) * 1_000_000.0;
-        rates.cache_read_per_million =
-            number(entry.get("cache_read_input_token_cost")).unwrap_or(input * 0.1) * 1_000_000.0;
+        let cache_read = number(entry.get("cache_read_input_token_cost"));
+        rates.cache_read_per_million = cache_read.unwrap_or(input * 0.1) * 1_000_000.0;
+        rates.cache_read_is_explicit = cache_read.is_some();
         rates.input_above_200k_per_million =
             number(entry.get("input_cost_per_token_above_200k_tokens"))
                 .map(|rate| rate * 1_000_000.0);
@@ -87,7 +88,9 @@ pub fn catalog_from_models_dev(data: &[u8]) -> Result<PricingCatalog, PricingCod
             };
             let mut rates = ModelRates::new(input, output);
             rates.cache_write_per_million = number(cost.get("cache_write")).unwrap_or(input);
-            rates.cache_read_per_million = number(cost.get("cache_read")).unwrap_or(input * 0.1);
+            let cache_read = number(cost.get("cache_read"));
+            rates.cache_read_per_million = cache_read.unwrap_or(input * 0.1);
+            rates.cache_read_is_explicit = cache_read.is_some();
             entries.insert(model_id.clone(), rates);
         }
     }
@@ -127,6 +130,8 @@ struct CompactModel {
     cra: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     fast: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    cre: Option<bool>,
 }
 
 pub fn catalog_from_compact(data: &[u8]) -> Result<PricingCatalog, PricingCodecError> {
@@ -146,6 +151,8 @@ pub fn catalog_from_compact(data: &[u8]) -> Result<PricingCatalog, PricingCodecE
                     output_above_200k_per_million: model.oa,
                     cache_write_above_200k_per_million: model.cwa,
                     cache_read_above_200k_per_million: model.cra,
+                    cache_read_is_explicit: model.cre.unwrap_or(true),
+                    long_context_threshold_tokens: 200_000,
                     fast_multiplier: model.fast.unwrap_or(1.0),
                 },
             )
@@ -174,6 +181,7 @@ pub fn compact_data(catalog: &PricingCatalog) -> Result<Vec<u8>, PricingCodecErr
                     cwa: rates.cache_write_above_200k_per_million,
                     cra: rates.cache_read_above_200k_per_million,
                     fast: (rates.fast_multiplier != 1.0).then_some(rates.fast_multiplier),
+                    cre: (!rates.cache_read_is_explicit).then_some(false),
                 },
             )
         })
@@ -196,6 +204,7 @@ mod tests {
         assert_eq!(rates.input_per_million, 3.0);
         assert_eq!(rates.cache_write_per_million, 3.0);
         assert!((rates.cache_read_per_million - 0.3).abs() < 0.000_001);
+        assert!(!rates.cache_read_is_explicit);
         assert_eq!(rates.fast_multiplier, 6.0);
         let compact = compact_data(&catalog).unwrap();
         assert_eq!(super::catalog_from_compact(&compact).unwrap(), catalog);
@@ -206,5 +215,14 @@ mod tests {
         let feed = br#"{"z":{"models":{"shared":{"cost":{"input":9,"output":9}}}},"a":{"models":{"shared":{"cost":{"input":1,"output":2}}}}}"#;
         let catalog = catalog_from_models_dev(feed).unwrap();
         assert_eq!(catalog.entries["shared"].input_per_million, 1.0);
+        assert!(!catalog.entries["shared"].cache_read_is_explicit);
+    }
+
+    #[test]
+    fn legacy_compact_catalog_treats_unmarked_cache_read_as_explicit() {
+        let legacy = br#"{"models":{"gpt-test":{"i":5,"o":30,"cw":5,"cr":0.5}}}"#;
+        let catalog = super::catalog_from_compact(legacy).unwrap();
+
+        assert!(catalog.entries["gpt-test"].cache_read_is_explicit);
     }
 }

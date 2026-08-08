@@ -4,20 +4,22 @@ use crate::{
     desktop_integration::DesktopIntegration,
     window::{
         finish_native_panel_resize, fit_panel_to_content as fit_native_panel_to_content,
-        hide_popup, lock_native_panel_resize_axis, panel_resize_edge, prepare_native_panel_resize,
-        set_manual_panel_height, PanelHeightMode, PanelResizeEdge, PanelResizeSession, MAIN_WINDOW,
+        hide_main_window, lock_native_panel_resize_axis, panel_resize_edge,
+        prepare_native_panel_resize, set_manual_panel_height, PanelHeightMode, PanelResizeEdge,
+        PanelResizeSession, MAIN_WINDOW,
     },
 };
 
 #[tauri::command]
 pub fn dismiss_main_window(app: AppHandle) {
-    if app.state::<DesktopIntegration>().standalone_window {
+    let integration = app.state::<DesktopIntegration>();
+    if integration.exits_on_close() {
         if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
             finish_native_panel_resize(&window);
         }
         app.exit(0);
     } else if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
-        hide_popup(&window);
+        hide_main_window(&window);
     }
 }
 

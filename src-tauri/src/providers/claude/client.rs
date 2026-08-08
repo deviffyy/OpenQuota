@@ -15,6 +15,7 @@ pub struct ClaudeRefreshResponse {
     pub expires_in: Option<f64>,
 }
 
+#[derive(Clone)]
 pub struct ClaudeClient {
     client: Client,
 }

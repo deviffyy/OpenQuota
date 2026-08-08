@@ -23,6 +23,68 @@ pub use registry::ProviderRegistry;
 
 use crate::models::{ApiKeyStatus, ProviderDefinition, ProviderErrorKind, ProviderSnapshot};
 
+pub fn provider_family(provider_id: &str) -> &str {
+    provider_id
+        .split_once('@')
+        .map(|(family, _)| family)
+        .unwrap_or(provider_id)
+}
+
+pub fn is_claude_account_provider_id(provider_id: &str) -> bool {
+    provider_id.strip_prefix("claude@").is_some_and(|suffix| {
+        suffix.len() == 8 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+    })
+}
+
+pub fn remember_default_account(
+    storage: &crate::storage::Storage,
+    family: &str,
+    identity: &str,
+) -> Result<(), crate::storage::StorageError> {
+    let records = storage.load_provider_account_records(family)?;
+    if records
+        .iter()
+        .any(|(known_identity, provider_id, _)| known_identity == identity && provider_id == family)
+    {
+        return Ok(());
+    }
+    if records
+        .iter()
+        .any(|(known_identity, provider_id, _)| known_identity == identity || provider_id == family)
+    {
+        return Ok(());
+    }
+    storage.save_provider_account_record(family, identity, family, "{}")
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CacheIdentity<'a> {
+    Unscoped,
+    Resolved(&'a str),
+    Unresolved,
+}
+
+pub struct AccountRefresh {
+    pub family: &'static str,
+    pub provider_id: &'static str,
+    pub identity: String,
+}
+
+pub struct ProviderRefresh {
+    pub snapshot: ProviderSnapshot,
+    pub cache_identity: Option<String>,
+    pub account: Option<AccountRefresh>,
+}
+
+impl<'a> CacheIdentity<'a> {
+    pub fn resolved_value(self) -> Option<&'a str> {
+        match self {
+            Self::Resolved(value) => Some(value),
+            Self::Unscoped | Self::Unresolved => None,
+        }
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 #[error("{message}")]
 pub struct ProviderError {
@@ -52,6 +114,27 @@ pub trait UsageProvider: Send + Sync {
     fn has_local_credentials(&self) -> bool;
     fn refresh(&self) -> Result<ProviderSnapshot, ProviderError>;
 
+    fn refresh_for_service(&self) -> Result<ProviderRefresh, ProviderError> {
+        let snapshot = self.refresh()?;
+        Ok(ProviderRefresh {
+            snapshot,
+            cache_identity: self.cache_identity().resolved_value().map(str::to_owned),
+            account: None,
+        })
+    }
+
+    fn cache_identity(&self) -> CacheIdentity<'_> {
+        CacheIdentity::Unscoped
+    }
+
+    fn supports_account_names(&self) -> bool {
+        false
+    }
+
+    fn account_identity(&self) -> Option<&str> {
+        None
+    }
+
     fn api_key_status(&self) -> Option<Result<ApiKeyStatus, ProviderError>> {
         None
     }
@@ -74,10 +157,26 @@ pub trait UsageProvider: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::{
-        antigravity, claude, codex, copilot, cursor, devin, grok, opencode, openrouter, zai,
-        ProviderError,
+        antigravity, claude, codex, copilot, cursor, devin, grok, opencode, openrouter,
+        remember_default_account, zai, ProviderError,
     };
     use crate::models::ProviderErrorKind;
+    use tempfile::tempdir;
+
+    #[test]
+    fn remembered_default_account_is_stable_across_identity_changes() {
+        let directory = tempdir().unwrap();
+        let storage =
+            crate::storage::Storage::open(&directory.path().join("openquota.db")).unwrap();
+
+        remember_default_account(&storage, "codex", "identity-a").unwrap();
+        remember_default_account(&storage, "codex", "identity-b").unwrap();
+
+        assert_eq!(
+            storage.load_provider_account_records("codex").unwrap(),
+            [("identity-a".into(), "codex".into(), "{}".into())]
+        );
+    }
 
     #[test]
     fn provider_errors_expose_only_the_safe_message() {

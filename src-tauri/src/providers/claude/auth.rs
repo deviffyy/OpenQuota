@@ -54,6 +54,16 @@ pub struct ClaudeCredentialGeneration {
     entries: Vec<ClaudeCredentialGenerationEntry>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub(super) enum ClaudeCredentialScope {
+    Standard,
+    ConfigDir {
+        path: PathBuf,
+        keychain_literal: String,
+    },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ClaudeCredentialGenerationEntry {
     source: CredentialSource,
@@ -130,13 +140,14 @@ impl ClaudeCredential {
         pair.finalize().into()
     }
 
-    pub fn update_and_save(
+    pub(super) fn update_and_save(
         &mut self,
         access_token: String,
         refresh_token: Option<String>,
         expires_in: Option<f64>,
         now_millis: i64,
         expected_generation: &ClaudeCredentialGeneration,
+        scope: &ClaudeCredentialScope,
     ) -> Result<bool, ClaudeError> {
         self.update_and_save_with_generation(
             access_token,
@@ -144,7 +155,7 @@ impl ClaudeCredential {
             expires_in,
             now_millis,
             expected_generation,
-            credential_generation,
+            || credential_generation(scope),
         )
     }
 
@@ -187,8 +198,8 @@ impl ClaudeCredential {
     }
 }
 
-pub fn credential_generation() -> ClaudeCredentialGeneration {
-    ClaudeCredentialGeneration::from_candidates(&load_candidates())
+pub(super) fn credential_generation(scope: &ClaudeCredentialScope) -> ClaudeCredentialGeneration {
+    ClaudeCredentialGeneration::from_candidates(&load_candidates(scope))
 }
 
 fn oauth_generation_fingerprint(oauth: &ClaudeOAuth) -> [u8; 32] {
@@ -265,8 +276,8 @@ pub struct ClaudeOAuthConfig {
     pub client_id: String,
 }
 
-pub fn has_local_credentials() -> bool {
-    !load_candidates().is_empty()
+pub(super) fn has_local_credentials(scope: &ClaudeCredentialScope) -> bool {
+    !load_candidates(scope).is_empty()
 }
 
 pub fn has_desktop_app_data() -> bool {
@@ -306,29 +317,59 @@ fn has_desktop_app_material_at(home: &Path) -> bool {
             .any(|path| path.is_file())
 }
 
-pub fn load_candidates() -> Vec<ClaudeCredential> {
-    let mut stored = Vec::new();
-    for (service, account) in keychain_candidates() {
-        let Ok(Some(bytes)) = read_generic_password(&service, &account) else {
-            continue;
-        };
-        if let Some(credential) = parse_candidate(
-            &bytes,
-            CredentialSource::Keychain { service, account },
-            false,
-        ) {
-            stored.push(credential);
-            break;
+pub(super) fn load_candidates(scope: &ClaudeCredentialScope) -> Vec<ClaudeCredential> {
+    load_candidates_with_environment(scope, env_text("CLAUDE_CODE_OAUTH_TOKEN"))
+}
+
+fn load_candidates_with_environment(
+    scope: &ClaudeCredentialScope,
+    environment_token: Option<String>,
+) -> Vec<ClaudeCredential> {
+    let file = {
+        let path = credential_path(scope);
+        fs::read(&path)
+            .ok()
+            .and_then(|bytes| parse_candidate(&bytes, CredentialSource::File(path), false))
+    };
+    let load_keychain = || {
+        let mut candidate = None;
+        for (service, account) in keychain_candidates(scope) {
+            let Ok(Some(bytes)) = read_generic_password(&service, &account) else {
+                continue;
+            };
+            if let Some(credential) = parse_candidate(
+                &bytes,
+                CredentialSource::Keychain { service, account },
+                false,
+            ) {
+                candidate = Some(credential);
+                break;
+            }
         }
+        candidate
+    };
+
+    let mut stored = Vec::new();
+    #[cfg(target_os = "macos")]
+    if let Some(credential) = load_keychain() {
+        stored.push(credential);
     }
-    let path = credential_path();
-    if let Ok(bytes) = fs::read(&path) {
-        if let Some(credential) = parse_candidate(&bytes, CredentialSource::File(path), false) {
+    #[cfg(not(target_os = "macos"))]
+    let needs_keychain_fallback = file.is_none();
+    if let Some(credential) = file {
+        stored.push(credential);
+    }
+    #[cfg(not(target_os = "macos"))]
+    if needs_keychain_fallback {
+        if let Some(credential) = load_keychain() {
             stored.push(credential);
         }
     }
 
-    let Some(environment_token) = env_text("CLAUDE_CODE_OAUTH_TOKEN") else {
+    if !matches!(scope, ClaudeCredentialScope::Standard) {
+        return stored;
+    }
+    let Some(environment_token) = environment_token else {
         return stored;
     };
     let base = stored.first().cloned().unwrap_or(ClaudeCredential {
@@ -437,8 +478,19 @@ fn parse_credentials(bytes: &[u8]) -> Option<ClaudeCredentialsFile> {
     })
 }
 
-fn credential_path() -> PathBuf {
-    claude_home().join(".credentials.json")
+pub(super) fn credentials_have_access_token(bytes: &[u8]) -> bool {
+    parse_credentials(bytes)
+        .and_then(|document| document.claude_ai_oauth)
+        .and_then(|oauth| oauth.access_token)
+        .is_some_and(|token| !token.trim().is_empty())
+}
+
+fn credential_path(scope: &ClaudeCredentialScope) -> PathBuf {
+    match scope {
+        ClaudeCredentialScope::Standard => claude_home(),
+        ClaudeCredentialScope::ConfigDir { path, .. } => path.clone(),
+    }
+    .join(".credentials.json")
 }
 
 pub fn claude_home() -> PathBuf {
@@ -447,32 +499,52 @@ pub fn claude_home() -> PathBuf {
         .unwrap_or_else(|| home_directory().join(".claude"))
 }
 
-fn keychain_candidates() -> Vec<(String, String)> {
+fn keychain_candidates(scope: &ClaudeCredentialScope) -> Vec<(String, String)> {
     let suffix = resolved_oauth_settings().3;
     let service = format!("Claude Code{suffix}-credentials");
-    let base = if let Some(config_dir) = env_text("CLAUDE_CONFIG_DIR") {
-        let normalized = config_dir.replace('\\', "/");
-        let hash = format!("{:x}", Sha256::digest(normalized.as_bytes()));
-        vec![format!("{service}-{}", &hash[..8]), service]
-    } else {
-        vec![service]
+    let services = match scope {
+        ClaudeCredentialScope::Standard => {
+            if let Some(config_dir) = env_text("CLAUDE_CONFIG_DIR") {
+                vec![scoped_keychain_service_name(&config_dir), service]
+            } else {
+                vec![service]
+            }
+        }
+        ClaudeCredentialScope::ConfigDir {
+            keychain_literal, ..
+        } => vec![scoped_keychain_service_name(keychain_literal)],
     };
-    let user = env_text("USER")
-        .or_else(|| env_text("USERNAME"))
-        .unwrap_or_default();
-    base.into_iter()
+    let accounts = keychain_accounts();
+    services
+        .into_iter()
         .flat_map(|service| {
-            let current = (service.clone(), user.clone());
-            [current, (service, String::new())]
+            accounts
+                .iter()
+                .cloned()
+                .map(move |account| (service.clone(), account))
         })
         .collect()
 }
 
+pub(super) fn scoped_keychain_service_name(config_dir_literal: &str) -> String {
+    let suffix = resolved_oauth_settings().3;
+    let service = format!("Claude Code{suffix}-credentials");
+    let normalized = config_dir_literal.replace('\\', "/");
+    let hash = format!("{:x}", Sha256::digest(normalized.as_bytes()));
+    format!("{service}-{}", &hash[..8])
+}
+
+pub(super) fn keychain_accounts() -> Vec<String> {
+    let user = env_text("USER")
+        .or_else(|| env_text("USERNAME"))
+        .unwrap_or_default();
+    let mut accounts = vec![user, String::new()];
+    accounts.dedup();
+    accounts
+}
+
 fn env_text(name: &str) -> Option<String> {
-    std::env::var(name)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
+    crate::provider_environment::value(name)
 }
 
 fn env_flag(name: &str) -> bool {
@@ -501,9 +573,9 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        has_desktop_app_material_at, parse_credentials, write_private_file_atomic,
-        ClaudeCredential, ClaudeCredentialGeneration, ClaudeCredentialsFile, ClaudeOAuth,
-        CredentialSource,
+        has_desktop_app_material_at, load_candidates_with_environment, parse_credentials,
+        write_private_file_atomic, ClaudeCredential, ClaudeCredentialGeneration,
+        ClaudeCredentialScope, ClaudeCredentialsFile, ClaudeOAuth, CredentialSource,
     };
     use crate::providers::claude::ClaudeError;
 
@@ -520,6 +592,36 @@ mod tests {
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
         let _: ClaudeCredentialsFile = parse_credentials(hex.as_bytes()).unwrap();
+    }
+
+    #[test]
+    fn config_dir_scope_reads_only_its_own_credentials() {
+        let directory = tempdir().unwrap();
+        let first = directory.path().join("first");
+        let second = directory.path().join("second");
+        fs::create_dir_all(&first).unwrap();
+        fs::create_dir_all(&second).unwrap();
+        fs::write(
+            first.join(".credentials.json"),
+            br#"{"claudeAiOauth":{"accessToken":"first-token"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            second.join(".credentials.json"),
+            br#"{"claudeAiOauth":{"accessToken":"second-token"}}"#,
+        )
+        .unwrap();
+
+        let candidates = load_candidates_with_environment(
+            &ClaudeCredentialScope::ConfigDir {
+                path: first.clone(),
+                keychain_literal: first.to_string_lossy().into_owned(),
+            },
+            Some("ambient-token".into()),
+        );
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].access_token(), Some("first-token"));
     }
 
     #[test]

@@ -7,7 +7,12 @@ import {
   totalSpendRingCenter,
 } from './metricFormat';
 import { formatLimit, formatReset, projectPace } from './pacing';
-import { providerIconColor, providerIconPath, providerIconViewBox } from './providerIconPaths';
+import {
+  providerFamily,
+  providerIconColor,
+  providerIconPath,
+  providerIconViewBox,
+} from './providerIconPaths';
 import { fillRingSector, spendRingArcs } from './spendRing';
 import type { SpendProjection } from './totalSpend';
 import type {
@@ -79,12 +84,14 @@ interface SharePalette {
 
 interface ProviderShareCardOptions {
   providerId: string;
+  providerNames?: Record<string, string>;
   plan: string | null;
   rows: ShareRow[];
 }
 
 interface TotalSpendShareCardOptions {
   projection: SpendProjection;
+  providerNames?: Record<string, string>;
   metric: AppSettings['totalSpendMetric'];
   period: AppSettings['totalSpendPeriod'];
 }
@@ -226,7 +233,14 @@ export function renderProviderShareCard(
   const palette = canvasPalette();
   fillBackground(context, palette, SHARE_CARD_WIDTH, height);
 
-  drawProviderHeader(context, palette, catalog, options.providerId, options.plan);
+  drawProviderHeader(
+    context,
+    palette,
+    catalog,
+    options.providerId,
+    options.providerNames,
+    options.plan,
+  );
   const cardTop = OUTER_PADDING + HEADER_HEIGHT + CONTENT_GAP;
   const cardHeight =
     CARD_GUTTER * 2 +
@@ -426,7 +440,7 @@ function canvasPalette(): SharePalette {
     fill: value('--meter-fill'),
     warning: value('--meter-warning'),
     critical: value('--meter-critical'),
-    provider: (id: string) => value(`--provider-${id}`) || value('--provider'),
+    provider: (id: string) => value(`--provider-${providerFamily(id)}`) || value('--provider'),
   };
 }
 
@@ -445,11 +459,12 @@ function drawProviderHeader(
   palette: SharePalette,
   catalog: ProviderCatalogIndex,
   providerId: string,
+  providerNames: Record<string, string> | undefined,
   plan: string | null,
 ) {
   const iconColor = providerIconColor(providerId) ?? palette.text;
   drawProviderMark(context, providerId, OUTER_PADDING, OUTER_PADDING, 22, iconColor);
-  const name = catalog.displayName(providerId);
+  const name = catalog.displayName(providerId, providerNames);
   context.fillStyle = palette.text;
   context.font = '600 15px system-ui';
   context.fillText(name, 48, 31);
@@ -662,7 +677,13 @@ function drawSpendBody(
     context.fill();
     context.fillStyle = palette.text;
     context.font = `${TOTAL_SPEND_GEOMETRY.legendFontSize}px system-ui`;
-    fitText(context, catalog.displayName(slice.id), legendLeft + 15, baseline, 62);
+    fitText(
+      context,
+      catalog.displayName(slice.id, options.providerNames),
+      legendLeft + 15,
+      baseline,
+      62,
+    );
     context.fillStyle = palette.secondary;
     context.font = `600 ${TOTAL_SPEND_GEOMETRY.legendFontSize}px system-ui`;
     context.textAlign = 'right';
