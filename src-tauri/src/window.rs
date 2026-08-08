@@ -24,7 +24,9 @@ use crate::{
 };
 
 pub const MAIN_WINDOW: &str = "main";
-pub const PANEL_WIDTH: f64 = 320.0;
+pub const PANEL_MIN_WIDTH: f64 = 320.0;
+pub const PANEL_MAX_WIDTH: f64 = 560.0;
+pub const PANEL_DEFAULT_WIDTH: f64 = 380.0;
 pub const PANEL_MIN_HEIGHT: u32 = 240;
 const PANEL_SCREEN_FRACTION: f64 = 0.85;
 const PANEL_RESIZE_SAVE_DELAY: Duration = Duration::from_millis(120);
@@ -177,6 +179,20 @@ impl PanelResizeSession {
     fn saved_height(&self) -> Option<u32> {
         self.storage.load_panel_height().ok().flatten()
     }
+
+    pub fn save_width(&self, width: u32) -> Result<(), String> {
+        let _guard = self
+            .persistence
+            .lock()
+            .map_err(|_| "OpenQuota panel state is unavailable.")?;
+        self.storage
+            .save_panel_width(width)
+            .map_err(|_| "OpenQuota panel state could not be saved.".to_owned())
+    }
+
+    fn saved_width(&self) -> Option<u32> {
+        self.storage.load_panel_width().ok().flatten()
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -266,10 +282,10 @@ pub fn show_main_window(window: &WebviewWindow) {
         .is_floating()
     {
         let _ = window.unminimize();
-        let _ = restore_manual_panel_height(window);
+        let _ = restore_manual_panel_size(window);
     } else {
         position_popup(window);
-        let _ = restore_manual_panel_height(window);
+        let _ = restore_manual_panel_size(window);
     }
     let _ = window.show();
     let _ = window.set_focus();
@@ -317,7 +333,7 @@ pub fn apply_window_mode(
         } else {
             position_popup(window);
         }
-        let _ = restore_manual_panel_height(window);
+        let _ = restore_manual_panel_size(window);
         window
             .show()
             .and_then(|_| window.set_focus())
@@ -496,35 +512,52 @@ fn panel_maximum_height(window: &WebviewWindow) -> Result<u32, String> {
 fn configure_panel_size_constraints(window: &WebviewWindow) -> Result<u32, String> {
     let maximum = panel_maximum_height(window)?;
     let minimum = PANEL_MIN_HEIGHT.min(maximum);
+    // The tray popup keeps the original fixed width; only the floating window may be widened.
+    let width_max = if panel_floating(window) {
+        PANEL_MAX_WIDTH
+    } else {
+        PANEL_MIN_WIDTH
+    };
     window
-        .set_max_size(Some(LogicalSize::new(PANEL_WIDTH, f64::from(maximum))))
-        .and_then(|_| window.set_min_size(Some(LogicalSize::new(PANEL_WIDTH, f64::from(minimum)))))
+        .set_max_size(Some(LogicalSize::new(width_max, f64::from(maximum))))
+        .and_then(|_| {
+            window.set_min_size(Some(LogicalSize::new(PANEL_MIN_WIDTH, f64::from(minimum))))
+        })
         .map_err(|_| "OpenQuota panel size limits could not be applied.".to_owned())?;
     Ok(maximum)
 }
 
-fn restore_manual_panel_height(window: &WebviewWindow) -> Result<(), String> {
+fn restore_manual_panel_size(window: &WebviewWindow) -> Result<(), String> {
     let maximum = panel_maximum_height(window)?;
     let minimum = PANEL_MIN_HEIGHT.min(maximum);
-    let saved = window
-        .app_handle()
-        .try_state::<Arc<PanelResizeSession>>()
-        .and_then(|session| session.saved_height());
-    if let Some(saved) = saved {
-        resize_panel_for_context(window, saved.clamp(minimum, maximum))?;
+    let session = window.app_handle().try_state::<Arc<PanelResizeSession>>();
+    let saved_height = session.as_ref().and_then(|session| session.saved_height());
+    if let Some(height) = saved_height {
+        resize_panel_for_context(window, height.clamp(minimum, maximum))?;
     }
+    // Floating restores the user's saved width (or the wider default); the popup is always the
+    // original fixed width.
+    let floating = panel_floating(window);
+    let width = if floating {
+        session
+            .as_ref()
+            .and_then(|session| session.saved_width())
+            .map(clamped_panel_width)
+            .unwrap_or(PANEL_DEFAULT_WIDTH)
+    } else {
+        PANEL_MIN_WIDTH
+    };
+    let height = current_logical_height(&window.as_ref().window()).unwrap_or(PANEL_MIN_HEIGHT);
+    let _ = window.set_size(LogicalSize::new(width, f64::from(height)));
     configure_panel_size_constraints(window)?;
     Ok(())
 }
 
 fn resize_panel_for_context(window: &WebviewWindow, height: u32) -> Result<(), String> {
-    if window
-        .app_handle()
-        .state::<DesktopIntegration>()
-        .is_floating()
-    {
+    if panel_floating(window) {
+        let width = effective_panel_width(window);
         return window
-            .set_size(LogicalSize::new(PANEL_WIDTH, f64::from(height)))
+            .set_size(LogicalSize::new(width, f64::from(height)))
             .map_err(|_| "OpenQuota window could not be resized.".to_owned());
     }
     resize_popup_anchored(window, height)
@@ -577,9 +610,9 @@ pub fn finish_native_panel_resize(window: &WebviewWindow) {
 }
 
 pub fn lock_native_panel_resize_axis(window: &WebviewWindow) -> Result<(), String> {
-    // Keep the system's invisible left/right resize borders disabled outside the explicit vertical
-    // gesture. Re-applying the logical width also repairs any transient WebView viewport change if a
-    // platform briefly reported a horizontal resize before the native constraint took effect.
+    // Keep the system's invisible resize borders disabled outside the explicit resize gesture.
+    // Floating windows keep the width the gesture reached (persisted); tray popups always settle
+    // back to the original fixed width.
     window
         .set_resizable(false)
         .map_err(|_| "OpenQuota panel resize could not be settled.".to_owned())?;
@@ -590,8 +623,19 @@ pub fn lock_native_panel_resize_axis(window: &WebviewWindow) -> Result<(), Strin
         .scale_factor()
         .map_err(|_| "OpenQuota display scale is unavailable.")?;
     let height = f64::from(size.height) / scale;
+    let width = if panel_floating(window) {
+        let resolved = clamped_panel_width(
+            current_logical_width(&window.as_ref().window()).unwrap_or(PANEL_DEFAULT_WIDTH as u32),
+        );
+        if let Some(session) = window.app_handle().try_state::<Arc<PanelResizeSession>>() {
+            let _ = session.save_width(resolved as u32);
+        }
+        resolved
+    } else {
+        PANEL_MIN_WIDTH
+    };
     window
-        .set_size(LogicalSize::new(PANEL_WIDTH, height))
+        .set_size(LogicalSize::new(width, height))
         .map_err(|_| "OpenQuota panel resize could not be settled.".to_owned())
 }
 
@@ -603,6 +647,60 @@ fn current_logical_height(window: &Window) -> Option<u32> {
             .round()
             .clamp(1.0, f64::from(u32::MAX)) as u32,
     )
+}
+
+fn current_logical_width(window: &Window) -> Option<u32> {
+    let size = window.inner_size().ok()?;
+    let scale = window.scale_factor().ok()?;
+    Some(
+        (f64::from(size.width) / scale)
+            .round()
+            .clamp(1.0, f64::from(u32::MAX)) as u32,
+    )
+}
+
+fn clamped_panel_width(raw: u32) -> f64 {
+    f64::from(raw).clamp(PANEL_MIN_WIDTH, PANEL_MAX_WIDTH)
+}
+
+fn panel_floating(window: &WebviewWindow) -> bool {
+    window
+        .app_handle()
+        .state::<DesktopIntegration>()
+        .is_floating()
+}
+
+/// Width to apply for the current mode: the user-chosen (clamped) width when floating, or the
+/// original fixed width when acting as a tray popup.
+fn effective_panel_width(window: &WebviewWindow) -> f64 {
+    if panel_floating(window) {
+        current_logical_width(&window.as_ref().window())
+            .map(clamped_panel_width)
+            .unwrap_or(PANEL_DEFAULT_WIDTH)
+    } else {
+        PANEL_MIN_WIDTH
+    }
+}
+
+/// Current logical panel width, clamped to the resizable range. Used to seed a manual resize drag.
+pub fn panel_logical_width(window: &WebviewWindow) -> f64 {
+    current_logical_width(&window.as_ref().window())
+        .map(clamped_panel_width)
+        .unwrap_or(PANEL_DEFAULT_WIDTH)
+}
+
+/// Programmatically set the panel width (height preserved). Works regardless of the resizable
+/// flag, so it drives a manual pointer-tracked resize even for the borderless window.
+pub fn apply_panel_width(window: &WebviewWindow, width: f64) -> Result<(), String> {
+    if !panel_floating(window) {
+        return Err("OpenQuota tray popups have a fixed width.".to_owned());
+    }
+    let width = width.clamp(PANEL_MIN_WIDTH, PANEL_MAX_WIDTH);
+    let height = current_logical_height(&window.as_ref().window())
+        .ok_or("OpenQuota content size is unavailable.")?;
+    window
+        .set_size(LogicalSize::new(width, f64::from(height)))
+        .map_err(|_| "OpenQuota window could not be resized.".to_owned())
 }
 
 #[cfg(target_os = "windows")]
@@ -694,8 +792,9 @@ pub fn resize_popup_anchored(window: &WebviewWindow, height: u32) -> Result<(), 
         },
         target_outer_height,
     );
+    let width = effective_panel_width(window);
     window
-        .set_size(tauri::LogicalSize::new(320.0, f64::from(height)))
+        .set_size(tauri::LogicalSize::new(width, f64::from(height)))
         .and_then(|_| {
             window.set_position(tauri::PhysicalPosition::new(outer_position.x, anchored.top))
         })
@@ -787,9 +886,9 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        anchored_vertical_frame, panel_resize_edge_for_context, panel_resize_edge_for_frames,
-        panel_surface_color, PanelHeightMode, PanelResizeEdge, PanelResizeSession, VerticalFrame,
-        DARK_PANEL_SURFACE, LIGHT_PANEL_SURFACE,
+        anchored_vertical_frame, clamped_panel_width, panel_resize_edge_for_context,
+        panel_resize_edge_for_frames, panel_surface_color, PanelHeightMode, PanelResizeEdge,
+        PanelResizeSession, VerticalFrame, DARK_PANEL_SURFACE, LIGHT_PANEL_SURFACE,
     };
     use crate::models::ThemePreference;
     use crate::storage::Storage;
@@ -824,6 +923,13 @@ mod tests {
         session.finish(Some(720));
         assert_eq!(session.mode(), PanelHeightMode::Automatic);
         assert_eq!(storage.load_panel_height().unwrap(), None);
+    }
+
+    #[test]
+    fn panel_width_is_bounded_to_the_floating_window_range() {
+        assert_eq!(clamped_panel_width(1), 320.0);
+        assert_eq!(clamped_panel_width(420), 420.0);
+        assert_eq!(clamped_panel_width(10_000), 560.0);
     }
 
     #[test]

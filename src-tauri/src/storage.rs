@@ -110,6 +110,9 @@ impl Storage {
                 [],
             )?;
         }
+        if !Self::has_column(&connection, "panel_state", "width")? {
+            connection.execute("ALTER TABLE panel_state ADD COLUMN width INTEGER", [])?;
+        }
         Ok(Self {
             connection: Mutex::new(connection),
         })
@@ -436,6 +439,29 @@ impl Storage {
         Ok(())
     }
 
+    pub fn load_panel_width(&self) -> Result<Option<u32>, StorageError> {
+        let connection = self.connection()?;
+        let width = connection
+            .query_row("SELECT width FROM panel_state WHERE id = 1", [], |row| {
+                row.get::<_, Option<i64>>(0)
+            })
+            .optional()?
+            .flatten();
+        Ok(width.and_then(|value| u32::try_from(value).ok()))
+    }
+
+    pub fn save_panel_width(&self, width: u32) -> Result<(), StorageError> {
+        // height is NOT NULL on panel_state, so preserve the stored height (or 0) when upserting the
+        // width on a row that does not exist yet.
+        let height = self.load_panel_height()?.unwrap_or(0) as i64;
+        self.connection()?.execute(
+            "INSERT INTO panel_state(id, height, width) VALUES (1, ?1, ?2)
+             ON CONFLICT(id) DO UPDATE SET width = excluded.width",
+            [height, i64::from(width)],
+        )?;
+        Ok(())
+    }
+
     fn insert_day(
         transaction: &rusqlite::Transaction<'_>,
         provider_id: &str,
@@ -733,6 +759,22 @@ mod tests {
 
         storage.clear_panel_height().unwrap();
         assert_eq!(storage.load_panel_height().unwrap(), None);
+    }
+
+    #[test]
+    fn panel_width_round_trip_preserves_height_and_is_independent_from_app_settings() {
+        let directory = tempdir().unwrap();
+        let storage = Storage::open(&directory.path().join("openquota.db")).unwrap();
+        let settings = AppSettings::default();
+        storage.save_settings(&settings).unwrap();
+
+        assert_eq!(storage.load_panel_width().unwrap(), None);
+        storage.save_panel_height(734).unwrap();
+        storage.save_panel_width(460).unwrap();
+
+        assert_eq!(storage.load_panel_width().unwrap(), Some(460));
+        assert_eq!(storage.load_panel_height().unwrap(), Some(734));
+        assert_eq!(storage.load_settings().unwrap(), Some(settings));
     }
 
     #[test]

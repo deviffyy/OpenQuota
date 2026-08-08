@@ -406,6 +406,8 @@ pub fn run() {
             commands::window::set_panel_height_manual,
             commands::window::begin_panel_resize,
             commands::window::lock_panel_resize_axis,
+            commands::window::current_panel_width,
+            commands::window::set_panel_width,
             commands::window::quit_app,
             updates::check_for_updates,
             updates::install_update,

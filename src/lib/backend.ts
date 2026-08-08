@@ -116,6 +116,14 @@ export function lockPanelResizeAxis() {
   return invoke<void>('lock_panel_resize_axis');
 }
 
+export function currentPanelWidth() {
+  return invoke<number>('current_panel_width');
+}
+
+export function setPanelWidth(width: number) {
+  return invoke<void>('set_panel_width', { width });
+}
+
 export function quitApplication() {
   return invoke<void>('quit_app');
 }
