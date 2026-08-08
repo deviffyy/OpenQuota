@@ -61,7 +61,7 @@ pub(crate) fn definition() -> ProviderDefinition {
 pub(super) enum KimiError {
     #[error("Add a Kimi API key in Customize or set KIMI_API_KEY.")]
     MissingKey,
-    #[error("The Kimi API key is invalid. Check it on platform.moonshot.ai.")]
+    #[error("The Kimi API key is invalid. Check it in the Kimi Code console.")]
     InvalidKey,
     #[error("Could not reach Kimi. Check your internet connection.")]
     ConnectionFailed,
@@ -80,6 +80,7 @@ impl From<KimiError> for ProviderError {
             KimiError::ConnectionFailed => ProviderErrorKind::Network,
             KimiError::RequestFailed(429) => ProviderErrorKind::RateLimited,
             KimiError::RequestFailed(401) => ProviderErrorKind::Authentication,
+            KimiError::RequestFailed(403) => ProviderErrorKind::Permission,
             KimiError::RequestFailed(_) | KimiError::InvalidResponse => {
                 ProviderErrorKind::InvalidResponse
             }
@@ -270,19 +271,17 @@ mod tests {
         .unwrap_err();
         assert_eq!(missing.kind(), ProviderErrorKind::Authentication);
 
-        for status in [401] {
-            let invalid = KimiProvider::with_dependencies(
-                auth(Some("bad-key")),
-                KimiClient::for_test(
-                    &test_http::serve_once(status, &[], "{}"),
-                    Duration::from_secs(1),
-                ),
-            )
-            .refresh()
-            .unwrap_err();
-            assert_eq!(invalid.kind(), ProviderErrorKind::Authentication);
-            assert!(!invalid.to_string().contains("bad-key"));
-        }
+        let invalid = KimiProvider::with_dependencies(
+            auth(Some("bad-key")),
+            KimiClient::for_test(
+                &test_http::serve_once(401, &[], "{}"),
+                Duration::from_secs(1),
+            ),
+        )
+        .refresh()
+        .unwrap_err();
+        assert_eq!(invalid.kind(), ProviderErrorKind::Authentication);
+        assert!(!invalid.to_string().contains("bad-key"));
 
         let forbidden = KimiProvider::with_dependencies(
             auth(Some("secret")),
@@ -293,7 +292,7 @@ mod tests {
         )
         .refresh()
         .unwrap_err();
-        assert_eq!(forbidden.kind(), ProviderErrorKind::InvalidResponse);
+        assert_eq!(forbidden.kind(), ProviderErrorKind::Permission);
 
         let rate_limited = KimiProvider::with_dependencies(
             auth(Some("secret")),
