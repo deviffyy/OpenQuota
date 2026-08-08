@@ -224,6 +224,8 @@ mod tests {
 
     #[test]
     fn explicit_preferences_have_localized_native_labels() {
+        assert_eq!(Labels::for_preference("en").open, "Open OpenQuota");
+        assert_eq!(Labels::for_preference("en").customize, "Customize…");
         assert_eq!(Labels::for_preference("en").settings, "Settings");
         assert_eq!(
             Labels::for_preference("en").settings_with_ellipsis,
@@ -233,7 +235,11 @@ mod tests {
             Labels::for_preference("en").notification_action,
             "Open OpenQuota"
         );
+        assert_eq!(Labels::for_preference("zh-CN").open, "打开 OpenQuota");
+        assert_eq!(Labels::for_preference("zh-CN").customize, "自定义…");
         assert_eq!(Labels::for_preference("zh-CN").settings, "设置");
+        assert_eq!(Labels::for_preference("zh-TW").open, "開啟 OpenQuota");
+        assert_eq!(Labels::for_preference("zh-TW").customize, "自訂…");
         assert_eq!(Labels::for_preference("zh-TW").settings, "設定");
         assert_eq!(Labels::for_preference("invalid").settings, "Settings");
     }

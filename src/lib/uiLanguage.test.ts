@@ -143,9 +143,11 @@ describe('native UI language contract', () => {
     expect(Object.keys(messages.en).sort()).toEqual(Object.keys(en).sort());
     expect(Object.keys(messages['zh-CN']).sort()).toEqual(Object.keys(en).sort());
     expect(Object.keys(messages['zh-TW']).sort()).toEqual(Object.keys(en).sort());
+    setUiLanguage('zh-CN');
     expect(t('settings')).toBe('设置');
     expect(t('settings')).not.toBeUndefined();
     expect(translateFromCatalog({}, 'settings')).toBe('Settings');
+    setUiLanguage('system');
   });
 
   it('normalizes Unix locale tags before resolving language', () => {
