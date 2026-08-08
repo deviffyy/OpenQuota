@@ -5,6 +5,8 @@ import copilot from '../assets/provider-icons/copilot.svg?raw';
 import cursor from '../assets/provider-icons/cursor.svg?raw';
 import devin from '../assets/provider-icons/devin.svg?raw';
 import grok from '../assets/provider-icons/grok.svg?raw';
+import kimi from '../assets/provider-icons/kimi.svg?raw';
+import minimax from '../assets/provider-icons/minimax.svg?raw';
 import opencode from '../assets/provider-icons/opencode.svg?raw';
 import openrouter from '../assets/provider-icons/openrouter.svg?raw';
 import zai from '../assets/provider-icons/zai.svg?raw';
@@ -17,6 +19,8 @@ const visuals: Record<string, { source: string; color: string | null }> = {
   cursor: { source: cursor, color: null },
   devin: { source: devin, color: null },
   grok: { source: grok, color: null },
+  kimi: { source: kimi, color: '#1783FF' },
+  minimax: { source: minimax, color: '#E2167E' },
   opencode: { source: opencode, color: null },
   openrouter: { source: openrouter, color: null },
   zai: { source: zai, color: null },
