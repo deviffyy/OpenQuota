@@ -34,7 +34,9 @@ impl KimiAuthStore {
     }
 
     pub fn status(&self) -> Result<ApiKeyStatus, KimiError> {
-        self.store.status().map_err(|_| KimiError::CredentialStorage)
+        self.store
+            .status()
+            .map_err(|_| KimiError::CredentialStorage)
     }
 
     pub fn save(&self, value: &str) -> Result<(), KimiError> {

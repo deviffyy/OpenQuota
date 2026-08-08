@@ -33,7 +33,9 @@ pub fn api_error_message(body: &Value) -> Option<String> {
 pub fn map_usage(body: &Value) -> Result<MiniMaxMappedUsage, MiniMaxError> {
     if let Some(message) = api_error_message(body) {
         let normalized = message.to_ascii_lowercase();
-        if normalized.contains("no plan") || normalized.contains("token plan") || normalized.contains("subscribe")
+        if normalized.contains("no plan")
+            || normalized.contains("token plan")
+            || normalized.contains("subscribe")
         {
             return Err(MiniMaxError::NoTokenPlan);
         }
@@ -47,14 +49,13 @@ pub fn map_usage(body: &Value) -> Result<MiniMaxMappedUsage, MiniMaxError> {
     let general = models
         .iter()
         .find(|model| model.get("model_name").and_then(Value::as_str) == Some("general"))
-        .or_else(|| models.first())
         .ok_or(MiniMaxError::InvalidResponse)?;
 
     let weekly = quota_from_model(general, Window::Weekly)?;
     let session = quota_from_model(general, Window::Interval)?;
     Ok(MiniMaxMappedUsage {
         plan: Some("Token Plan".into()),
-        quotas: vec![session, weekly],
+        quotas: [session, weekly].into_iter().flatten().collect(),
     })
 }
 
@@ -64,10 +65,11 @@ enum Window {
     Interval,
 }
 
-fn quota_from_model(model: &Value, window: Window) -> Result<QuotaWindow, MiniMaxError> {
-    let (remaining_key, end_key, start_key, id, label, default_period) = match window {
+fn quota_from_model(model: &Value, window: Window) -> Result<Option<QuotaWindow>, MiniMaxError> {
+    let (remaining_key, status_key, end_key, start_key, id, label, default_period) = match window {
         Window::Weekly => (
             "current_weekly_remaining_percent",
+            "current_weekly_status",
             "weekly_end_time",
             "weekly_start_time",
             "weekly",
@@ -76,6 +78,7 @@ fn quota_from_model(model: &Value, window: Window) -> Result<QuotaWindow, MiniMa
         ),
         Window::Interval => (
             "current_interval_remaining_percent",
+            "current_interval_status",
             "end_time",
             "start_time",
             "session",
@@ -83,10 +86,20 @@ fn quota_from_model(model: &Value, window: Window) -> Result<QuotaWindow, MiniMa
             DEFAULT_INTERVAL_PERIOD_SECONDS,
         ),
     };
+    let status = number(model.get(status_key)).ok_or(MiniMaxError::InvalidResponse)? as u16;
+    if status == 3 {
+        return Ok(None);
+    }
+    let allowance_percent = if matches!(window, Window::Weekly) {
+        100.0 + number(model.get("weekly_boost_permille")).unwrap_or(0.0) / 10.0
+    } else {
+        100.0
+    };
     let remaining = number(model.get(remaining_key))
-        .filter(|value| (0.0..=100.0).contains(value))
+        .filter(|value| (0.0..=allowance_percent).contains(value))
         .ok_or(MiniMaxError::InvalidResponse)?;
-    let used_percent = (100.0 - remaining).clamp(0.0, 100.0);
+    let used_percent =
+        ((allowance_percent - remaining) / allowance_percent * 100.0).clamp(0.0, 100.0);
 
     let end = number(model.get(end_key));
     let start = number(model.get(start_key));
@@ -96,7 +109,7 @@ fn quota_from_model(model: &Value, window: Window) -> Result<QuotaWindow, MiniMa
     };
     let resets_at = end.and_then(millis_time);
 
-    Ok(QuotaWindow {
+    Ok(Some(QuotaWindow {
         id: id.into(),
         label: label.into(),
         used_percent,
@@ -108,7 +121,7 @@ fn quota_from_model(model: &Value, window: Window) -> Result<QuotaWindow, MiniMa
         unit: None,
         estimated: false,
         source_note: None,
-    })
+    }))
 }
 
 fn millis_time(milliseconds: f64) -> Option<DateTime<Utc>> {
@@ -157,7 +170,7 @@ mod tests {
     }
 
     #[test]
-    fn captured_payload_maps_session_and_weekly_for_general() {
+    fn captured_payload_omits_an_unlimited_weekly_window() {
         let mapped = map_usage(&captured()).unwrap();
 
         assert_eq!(mapped.plan.as_deref(), Some("Token Plan"));
@@ -167,7 +180,7 @@ mod tests {
                 .iter()
                 .map(|quota| quota.id.as_str())
                 .collect::<Vec<_>>(),
-            ["session", "weekly"]
+            ["session"]
         );
 
         let session = &mapped.quotas[0];
@@ -177,31 +190,50 @@ mod tests {
             Utc.timestamp_millis_opt(1_786_078_800_000).single()
         );
         assert_eq!(session.period_seconds, 5 * 60 * 60);
-
-        let weekly = &mapped.quotas[1];
-        assert_eq!(weekly.used_percent, 0.0);
-        assert_eq!(
-            weekly.resets_at,
-            Utc.timestamp_millis_opt(1_786_320_000_000).single()
-        );
-        // weekly window: 1786320000000 - 1785715200000 = 604_800_000 ms = 7 days
-        assert_eq!(weekly.period_seconds, 7 * 24 * 60 * 60);
     }
 
     #[test]
-    fn falls_back_to_first_model_when_general_is_absent() {
-        let mapped = map_usage(&json!({
-            "model_remains":[{
-                "model_name":"video","current_weekly_remaining_percent":40,
-                "current_interval_remaining_percent":90,
-                "weekly_start_time":0,"weekly_end_time":604800000,
-                "start_time":0,"end_time":18000000
-            }],
-            "base_resp":{"status_code":0}
-        }))
-        .unwrap();
-        let weekly = mapped.quotas.iter().find(|q| q.id == "weekly").unwrap();
-        assert_eq!(weekly.used_percent, 60.0);
+    fn rejects_payloads_without_the_general_model() {
+        assert!(matches!(
+            map_usage(&json!({
+                "model_remains":[{
+                    "model_name":"video","current_weekly_remaining_percent":40,
+                    "current_interval_remaining_percent":90,
+                    "weekly_start_time":0,"weekly_end_time":604800000,
+                    "start_time":0,"end_time":18000000
+                }],
+                "base_resp":{"status_code":0}
+            })),
+            Err(MiniMaxError::InvalidResponse)
+        ));
+    }
+
+    #[test]
+    fn weekly_boost_extends_the_allowance() {
+        let mut body = captured();
+        body["model_remains"][0]["current_weekly_status"] = json!(2);
+        body["model_remains"][0]["weekly_boost_permille"] = json!(500);
+        body["model_remains"][0]["current_weekly_remaining_percent"] = json!(150);
+        let mapped = map_usage(&body).unwrap();
+        let weekly = mapped
+            .quotas
+            .iter()
+            .find(|quota| quota.id == "weekly")
+            .unwrap();
+        assert_eq!(weekly.used_percent, 0.0);
+    }
+
+    #[test]
+    fn unlimited_windows_are_omitted() {
+        let mapped = map_usage(&captured()).unwrap();
+        assert_eq!(
+            mapped
+                .quotas
+                .iter()
+                .map(|quota| quota.id.as_str())
+                .collect::<Vec<_>>(),
+            ["session"]
+        );
     }
 
     #[test]
@@ -211,13 +243,17 @@ mod tests {
             None
         );
         assert_eq!(
-            api_error_message(&json!({"base_resp":{"status_code":1001,"status_msg":"no token plan"}}))
-                .as_deref(),
+            api_error_message(
+                &json!({"base_resp":{"status_code":1001,"status_msg":"no token plan"}})
+            )
+            .as_deref(),
             Some("no token plan")
         );
 
         assert!(matches!(
-            map_usage(&json!({"base_resp":{"status_code":1001,"status_msg":"user has no token plan"}})),
+            map_usage(
+                &json!({"base_resp":{"status_code":1001,"status_msg":"user has no token plan"}})
+            ),
             Err(MiniMaxError::NoTokenPlan)
         ));
         assert!(matches!(

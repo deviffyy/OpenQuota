@@ -10,8 +10,8 @@ mod detection;
 pub mod devin;
 pub mod grok;
 pub mod kimi;
-pub mod minimax;
 mod log_usage;
+pub mod minimax;
 pub mod opencode;
 pub mod openrouter;
 mod pi_usage;
@@ -300,7 +300,6 @@ mod tests {
                     "API Keys".into(),
                     "https://platform.minimax.io/console/access".into()
                 ),
-            ]
             ]
         );
     }

@@ -58,11 +58,13 @@ OpenQuota checks for updates automatically. Installable updates are cryptographi
 - **[OpenRouter](docs/providers/openrouter.md)** — credit balance and daily, weekly and monthly spend
   (API key)
 - **[Z.ai](docs/providers/zai.md)** — GLM Coding Plan session, weekly, and web-search quotas (API key)
+- **[Kimi](docs/providers/kimi.md)** — Kimi Code session and weekly quotas (API key)
+- **[MiniMax](docs/providers/minimax.md)** — Token Plan session and weekly quotas (API key)
 
-Most providers use credentials already available on your computer. OpenRouter and Z.ai require API
-keys, which you can add in Customize; OpenQuota stores them securely in your operating system's
-credential store. Codex subscription limits require a ChatGPT login and are not available in
-API-key-only sessions.
+Most providers use credentials already available on your computer. OpenRouter, Z.ai, Kimi, and
+MiniMax require API keys, which you can add in Customize; OpenQuota stores them securely in your
+operating system's credential store. Codex subscription limits require a ChatGPT login and are not
+available in API-key-only sessions.
 
 ## Features
 

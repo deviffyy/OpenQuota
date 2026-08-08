@@ -29,8 +29,8 @@ pub(crate) fn definition() -> ProviderDefinition {
         fallback_enabled: false,
         local_usage_source_note: None,
         links: vec![
-            ProviderLink::new("Dashboard", "https://www.minimax.io/"),
-            ProviderLink::new("API Keys", "https://platform.minimaxi.com/"),
+            ProviderLink::new("Dashboard", "https://platform.minimax.io/console/plan"),
+            ProviderLink::new("API Keys", "https://platform.minimax.io/console/access"),
         ],
         metrics: vec![
             MetricDefinition::quota(
@@ -78,7 +78,9 @@ pub(super) enum MiniMaxError {
 impl From<MiniMaxError> for ProviderError {
     fn from(error: MiniMaxError) -> Self {
         let kind = match error {
-            MiniMaxError::MissingKey | MiniMaxError::InvalidKey => ProviderErrorKind::Authentication,
+            MiniMaxError::MissingKey | MiniMaxError::InvalidKey => {
+                ProviderErrorKind::Authentication
+            }
             MiniMaxError::ConnectionFailed => ProviderErrorKind::Network,
             MiniMaxError::RequestFailed(429) => ProviderErrorKind::RateLimited,
             MiniMaxError::RequestFailed(401 | 403) => ProviderErrorKind::Authentication,
@@ -263,7 +265,7 @@ mod tests {
                 .iter()
                 .map(|quota| quota.id.as_str())
                 .collect::<Vec<_>>(),
-            ["session", "weekly"]
+            ["session"]
         );
     }
 
@@ -271,7 +273,10 @@ mod tests {
     fn missing_invalid_and_rate_limited_keys_are_distinct() {
         let missing = MiniMaxProvider::with_dependencies(
             auth(None),
-            MiniMaxClient::for_test(&test_http::serve_once(200, &[], REMAINS_BODY), Duration::from_secs(1)),
+            MiniMaxClient::for_test(
+                &test_http::serve_once(200, &[], REMAINS_BODY),
+                Duration::from_secs(1),
+            ),
         )
         .refresh()
         .unwrap_err();
@@ -280,7 +285,10 @@ mod tests {
         for status in [401, 403] {
             let invalid = MiniMaxProvider::with_dependencies(
                 auth(Some("bad-key")),
-                MiniMaxClient::for_test(&test_http::serve_once(status, &[], "{}"), Duration::from_secs(1)),
+                MiniMaxClient::for_test(
+                    &test_http::serve_once(status, &[], "{}"),
+                    Duration::from_secs(1),
+                ),
             )
             .refresh()
             .unwrap_err();
@@ -290,7 +298,10 @@ mod tests {
 
         let rate_limited = MiniMaxProvider::with_dependencies(
             auth(Some("secret")),
-            MiniMaxClient::for_test(&test_http::serve_once(429, &[], "{}"), Duration::from_secs(1)),
+            MiniMaxClient::for_test(
+                &test_http::serve_once(429, &[], "{}"),
+                Duration::from_secs(1),
+            ),
         )
         .refresh()
         .unwrap_err();

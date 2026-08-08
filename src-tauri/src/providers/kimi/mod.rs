@@ -29,8 +29,8 @@ pub(crate) fn definition() -> ProviderDefinition {
         fallback_enabled: false,
         local_usage_source_note: None,
         links: vec![
-            ProviderLink::new("Dashboard", "https://platform.moonshot.ai/"),
-            ProviderLink::new("API Keys", "https://platform.moonshot.ai/console/api-keys"),
+            ProviderLink::new("Dashboard", "https://www.kimi.com/code/console"),
+            ProviderLink::new("API Keys", "https://www.kimi.com/code/console"),
         ],
         metrics: vec![
             MetricDefinition::quota(
@@ -79,7 +79,7 @@ impl From<KimiError> for ProviderError {
             KimiError::MissingKey | KimiError::InvalidKey => ProviderErrorKind::Authentication,
             KimiError::ConnectionFailed => ProviderErrorKind::Network,
             KimiError::RequestFailed(429) => ProviderErrorKind::RateLimited,
-            KimiError::RequestFailed(401 | 403) => ProviderErrorKind::Authentication,
+            KimiError::RequestFailed(401) => ProviderErrorKind::Authentication,
             KimiError::RequestFailed(_) | KimiError::InvalidResponse => {
                 ProviderErrorKind::InvalidResponse
             }
@@ -162,10 +162,7 @@ fn required_response(
     response: Result<EndpointResponse, KimiError>,
 ) -> Result<EndpointResponse, KimiError> {
     let response = response?;
-    if matches!(
-        response.status,
-        StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN
-    ) {
+    if matches!(response.status, StatusCode::UNAUTHORIZED) {
         return Err(KimiError::InvalidKey);
     }
     if !response.status.is_success() {
@@ -264,16 +261,22 @@ mod tests {
     fn missing_invalid_and_rate_limited_keys_are_distinct() {
         let missing = KimiProvider::with_dependencies(
             auth(None),
-            KimiClient::for_test(&test_http::serve_once(200, &[], QUOTA_BODY), Duration::from_secs(1)),
+            KimiClient::for_test(
+                &test_http::serve_once(200, &[], QUOTA_BODY),
+                Duration::from_secs(1),
+            ),
         )
         .refresh()
         .unwrap_err();
         assert_eq!(missing.kind(), ProviderErrorKind::Authentication);
 
-        for status in [401, 403] {
+        for status in [401] {
             let invalid = KimiProvider::with_dependencies(
                 auth(Some("bad-key")),
-                KimiClient::for_test(&test_http::serve_once(status, &[], "{}"), Duration::from_secs(1)),
+                KimiClient::for_test(
+                    &test_http::serve_once(status, &[], "{}"),
+                    Duration::from_secs(1),
+                ),
             )
             .refresh()
             .unwrap_err();
@@ -281,9 +284,23 @@ mod tests {
             assert!(!invalid.to_string().contains("bad-key"));
         }
 
+        let forbidden = KimiProvider::with_dependencies(
+            auth(Some("secret")),
+            KimiClient::for_test(
+                &test_http::serve_once(403, &[], "{}"),
+                Duration::from_secs(1),
+            ),
+        )
+        .refresh()
+        .unwrap_err();
+        assert_eq!(forbidden.kind(), ProviderErrorKind::InvalidResponse);
+
         let rate_limited = KimiProvider::with_dependencies(
             auth(Some("secret")),
-            KimiClient::for_test(&test_http::serve_once(429, &[], "{}"), Duration::from_secs(1)),
+            KimiClient::for_test(
+                &test_http::serve_once(429, &[], "{}"),
+                Duration::from_secs(1),
+            ),
         )
         .refresh()
         .unwrap_err();

@@ -26,7 +26,9 @@ impl MiniMaxAuthStore {
     }
 
     pub fn load(&self) -> Result<Option<SecretString>, MiniMaxError> {
-        self.store.load().map_err(|_| MiniMaxError::CredentialStorage)
+        self.store
+            .load()
+            .map_err(|_| MiniMaxError::CredentialStorage)
     }
 
     pub fn has_local_credentials(&self) -> bool {
@@ -34,7 +36,9 @@ impl MiniMaxAuthStore {
     }
 
     pub fn status(&self) -> Result<ApiKeyStatus, MiniMaxError> {
-        self.store.status().map_err(|_| MiniMaxError::CredentialStorage)
+        self.store
+            .status()
+            .map_err(|_| MiniMaxError::CredentialStorage)
     }
 
     pub fn save(&self, value: &str) -> Result<(), MiniMaxError> {

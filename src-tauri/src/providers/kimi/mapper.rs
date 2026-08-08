@@ -101,7 +101,11 @@ fn session_quota(body: &Value) -> Result<Option<QuotaWindow>, KimiError> {
     let Some(entry) = body
         .get("limits")
         .and_then(Value::as_array)
-        .and_then(|limits| limits.first())
+        .and_then(|limits| {
+            limits
+                .iter()
+                .find(|entry| window_period_seconds(entry) == Some(DEFAULT_WINDOW_PERIOD_SECONDS))
+        })
     else {
         return Ok(None);
     };
@@ -121,22 +125,7 @@ fn session_quota(body: &Value) -> Result<Option<QuotaWindow>, KimiError> {
     } else {
         0.0
     };
-    let period_seconds = entry
-        .get("window")
-        .and_then(|window| number(window.get("duration")).filter(|value| *value > 0.0))
-        .map(|duration| {
-            let time_unit = entry
-                .get("window")
-                .and_then(|window| window.get("timeUnit"))
-                .and_then(Value::as_str);
-            let factor = match time_unit {
-                Some("TIME_UNIT_HOUR") => 3600.0,
-                Some("TIME_UNIT_SECOND") => 1.0,
-                _ => 60.0,
-            };
-            (duration * factor) as u64
-        })
-        .unwrap_or(DEFAULT_WINDOW_PERIOD_SECONDS);
+    let period_seconds = window_period_seconds(entry).unwrap_or(DEFAULT_WINDOW_PERIOD_SECONDS);
 
     Ok(Some(QuotaWindow {
         id: "session".into(),
@@ -151,6 +140,18 @@ fn session_quota(body: &Value) -> Result<Option<QuotaWindow>, KimiError> {
         estimated: false,
         source_note: None,
     }))
+}
+
+fn window_period_seconds(entry: &Value) -> Option<u64> {
+    let window = entry.get("window")?;
+    let duration = number(window.get("duration")).filter(|value| *value > 0.0)?;
+    let factor = match window.get("timeUnit").and_then(Value::as_str) {
+        Some("TIME_UNIT_HOUR") => 3600.0,
+        Some("TIME_UNIT_SECOND") => 1.0,
+        Some("TIME_UNIT_MINUTE") => 60.0,
+        _ => return None,
+    };
+    Some((duration * factor) as u64)
 }
 
 fn number(value: Option<&Value>) -> Option<f64> {
@@ -175,13 +176,12 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use serde_json::{json, Value};
 
-    use super::{map_usage, plan_name};
+    use super::{map_usage, plan_name, DEFAULT_WINDOW_PERIOD_SECONDS};
     use crate::models::QuotaFormat;
 
     fn captured() -> Value {
         serde_json::json!({
-            "user": {"userId":"d63jf5am52tc032su6e0","region":"REGION_OVERSEA",
-                     "membership":{"level":"LEVEL_BASIC"},"businessId":""},
+            "user": {"membership":{"level":"LEVEL_BASIC"}},
             "usage": {"limit":"100","used":"25","resetTime":"2026-08-10T02:17:43.139020Z"},
             "limits": [{"window":{"duration":300,"timeUnit":"TIME_UNIT_MINUTE"},
                         "detail":{"limit":"100","remaining":"80",
@@ -244,9 +244,37 @@ mod tests {
     }
 
     #[test]
+    fn session_quota_selects_the_five_hour_window_regardless_of_order() {
+        let mapped = map_usage(&json!({
+            "user": {"membership": {"level": "LEVEL_PRO"}},
+            "usage": {"limit": "100", "used": "0"},
+            "limits": [
+                {"window": {"duration": 1, "timeUnit": "TIME_UNIT_HOUR"},
+                 "detail": {"limit": "100", "remaining": "0"}},
+                {"window": {"duration": 5, "timeUnit": "TIME_UNIT_HOUR"},
+                 "detail": {"limit": "100", "remaining": "75"}}
+            ]
+        }))
+        .unwrap();
+        let session = mapped
+            .quotas
+            .iter()
+            .find(|quota| quota.id == "session")
+            .unwrap();
+        assert_eq!(session.used_percent, 25.0);
+        assert_eq!(session.period_seconds, DEFAULT_WINDOW_PERIOD_SECONDS);
+    }
+
+    #[test]
     fn plan_level_is_optional_and_title_cased() {
-        assert_eq!(plan_name(&json!({"user":{"membership":{"level":"LEVEL_BASIC"}}})).as_deref(), Some("Basic"));
-        assert_eq!(plan_name(&json!({"user":{"membership":{"level":"LEVEL_YEARLY_PRO"}}})).as_deref(), Some("Yearly Pro"));
+        assert_eq!(
+            plan_name(&json!({"user":{"membership":{"level":"LEVEL_BASIC"}}})).as_deref(),
+            Some("Basic")
+        );
+        assert_eq!(
+            plan_name(&json!({"user":{"membership":{"level":"LEVEL_YEARLY_PRO"}}})).as_deref(),
+            Some("Yearly Pro")
+        );
         assert_eq!(plan_name(&json!({"user":{"membership":{}}})), None);
         assert_eq!(plan_name(&json!({})), None);
     }

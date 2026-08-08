@@ -56,9 +56,7 @@ impl MiniMaxClient {
             status.as_u16(),
             started.elapsed().as_millis()
         );
-        let text = response
-            .text()
-            .map_err(|_| MiniMaxError::InvalidResponse)?;
+        let text = response.text().map_err(|_| MiniMaxError::InvalidResponse)?;
         let body = serde_json::from_str(&text).unwrap_or(Value::Null);
         Ok(EndpointResponse { status, body })
     }
