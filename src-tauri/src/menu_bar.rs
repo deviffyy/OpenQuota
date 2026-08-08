@@ -32,8 +32,6 @@ const GROK_ICON: &str = include_str!("../../src/assets/provider-icons/grok.svg")
 const OPENCODE_ICON: &str = include_str!("../../src/assets/provider-icons/opencode.svg");
 const OPENROUTER_ICON: &str = include_str!("../../src/assets/provider-icons/openrouter.svg");
 const ZAI_ICON: &str = include_str!("../../src/assets/provider-icons/zai.svg");
-const KIMI_ICON: &str = include_str!("../../src/assets/provider-icons/kimi.svg");
-const MINIMAX_ICON: &str = include_str!("../../src/assets/provider-icons/minimax.svg");
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TextGroup {
@@ -279,8 +277,6 @@ fn provider_path(provider_id: &str) -> Option<&'static Path> {
     static OPENCODE: OnceLock<Path> = OnceLock::new();
     static OPENROUTER: OnceLock<Path> = OnceLock::new();
     static ZAI: OnceLock<Path> = OnceLock::new();
-    static KIMI: OnceLock<Path> = OnceLock::new();
-    static MINIMAX: OnceLock<Path> = OnceLock::new();
     match crate::providers::provider_family(provider_id) {
         "claude" => Some(parsed(CLAUDE_ICON, &CLAUDE)),
         "codex" => Some(parsed(CODEX_ICON, &CODEX)),
@@ -292,8 +288,6 @@ fn provider_path(provider_id: &str) -> Option<&'static Path> {
         "opencode" => Some(parsed(OPENCODE_ICON, &OPENCODE)),
         "openrouter" => Some(parsed(OPENROUTER_ICON, &OPENROUTER)),
         "zai" => Some(parsed(ZAI_ICON, &ZAI)),
-        "kimi" => Some(parsed(KIMI_ICON, &KIMI)),
-        "minimax" => Some(parsed(MINIMAX_ICON, &MINIMAX)),
         _ => None,
     }
 }
@@ -405,175 +399,11 @@ fn parse_svg_path(source: &str) -> Result<Path, String> {
                     current = subpath_start;
                     previous_cubic_control = None;
                 }
-                PathSegment::EllipticalArc {
-                    abs,
-                    rx,
-                    ry,
-                    x_axis_rotation,
-                    large_arc,
-                    sweep,
-                    x,
-                    y,
-                } => {
-                    let (current_x, current_y) =
-                        current.ok_or_else(|| "arc has no current point".to_owned())?;
-                    let end = if abs {
-                        (x as f32, y as f32)
-                    } else {
-                        (current_x + x as f32, current_y + y as f32)
-                    };
-                    for (control1, control2, endpoint) in arc_to_cubics(
-                        (current_x, current_y),
-                        (rx as f32, ry as f32),
-                        x_axis_rotation as f32,
-                        large_arc,
-                        sweep,
-                        end,
-                    ) {
-                        builder.cubic_to(
-                            control1.0,
-                            control1.1,
-                            control2.0,
-                            control2.1,
-                            endpoint.0,
-                            endpoint.1,
-                        );
-                    }
-                    current = Some(end);
-                    previous_cubic_control = None;
-                }
-                _ => {
-                    return Err(
-                        "only M, L, H, V, C, S, A and Z path commands are supported".into(),
-                    )
-                }
+                _ => return Err("only M, L, H, V, C, S and Z path commands are supported".into()),
             }
         }
     }
     builder.finish().ok_or_else(|| "path is empty".into())
-}
-
-type Point = (f32, f32);
-
-/// A cubic Bézier segment expressed as two control points and an endpoint.
-type BezierCubic = (Point, Point, Point);
-
-/// Convert an SVG elliptical arc into a sequence of cubic Bézier segments.
-///
-/// Implements the endpoint-to-center parameterization from the SVG spec
-/// (F.6.5) and subdivides the arc into sweeps of at most 90°, approximating
-/// each with the standard cubic Bézier whose control points sit at
-/// `4/3 * tan(angle / 4)` along the tangent. Falls back to a straight line
-/// for degenerate arcs (no extent, or zero radii).
-fn arc_to_cubics(
-    start: Point,
-    radii: Point,
-    x_axis_rotation: f32,
-    large_arc: bool,
-    sweep: bool,
-    end: Point,
-) -> Vec<BezierCubic> {
-    let (x1, y1) = start;
-    let (x2, y2) = end;
-    let (mut rx, mut ry) = radii;
-    let phi = x_axis_rotation.to_radians();
-    let cos_phi = phi.cos();
-    let sin_phi = phi.sin();
-
-    // Degenerate arc: start equals end → no segments to emit.
-    if (x1 - x2).abs() <= f32::EPSILON && (y1 - y2).abs() <= f32::EPSILON {
-        return Vec::new();
-    }
-    // Zero radii → the arc collapses to a straight line from start to end.
-    if rx.abs() <= f32::EPSILON || ry.abs() <= f32::EPSILON {
-        return vec![(start, end, end)];
-    }
-
-    rx = rx.abs();
-    ry = ry.abs();
-
-    // Step 1: compute (x1', y1') — start point in the arc's coordinate frame.
-    let dx = (x1 - x2) / 2.0;
-    let dy = (y1 - y2) / 2.0;
-    let x1p = cos_phi * dx + sin_phi * dy;
-    let y1p = -sin_phi * dx + cos_phi * dy;
-
-    // Correction of out-of-range radii (F.6.6.6).
-    let lambda = (x1p * x1p) / (rx * rx) + (y1p * y1p) / (ry * ry);
-    if lambda > 1.0 {
-        let sqrt_lambda = lambda.sqrt();
-        rx *= sqrt_lambda;
-        ry *= sqrt_lambda;
-    }
-
-    // Step 2: compute (cx', cy').
-    let rx_sq = rx * rx;
-    let ry_sq = ry * ry;
-    let x1p_sq = x1p * x1p;
-    let y1p_sq = y1p * y1p;
-    let denom = rx_sq * y1p_sq + ry_sq * x1p_sq;
-    let mut num = rx_sq * ry_sq - denom;
-    if num < 0.0 {
-        num = 0.0;
-    }
-    let factor = (num / denom).sqrt();
-    let sign = if large_arc == sweep { -1.0 } else { 1.0 };
-    let cxp = sign * factor * (rx * y1p) / ry;
-    let cyp = sign * factor * -(ry * x1p) / rx;
-
-    // Step 3: translate (cx', cy') back to the user frame.
-    let cx = cos_phi * cxp - sin_phi * cyp + (x1 + x2) / 2.0;
-    let cy = sin_phi * cxp + cos_phi * cyp + (y1 + y2) / 2.0;
-
-    // Step 4: compute the angular extent.
-    let theta = angle((1.0, 0.0), ((x1p - cxp) / rx, (y1p - cyp) / ry));
-    let delta_theta = angle(
-        ((x1p - cxp) / rx, (y1p - cyp) / ry),
-        ((-x1p - cxp) / rx, (-y1p - cyp) / ry),
-    );
-    let delta_theta = if !sweep && delta_theta > 0.0 {
-        delta_theta - 2.0 * std::f32::consts::PI
-    } else if sweep && delta_theta < 0.0 {
-        delta_theta + 2.0 * std::f32::consts::PI
-    } else {
-        delta_theta
-    };
-
-    // Subdivide into ≤90° segments and emit a cubic Bézier per segment.
-    let segments = ((delta_theta.abs() / std::f32::consts::FRAC_PI_2).ceil() as usize).max(1);
-    let segment_angle = delta_theta / segments as f32;
-    let alpha = (4.0 / 3.0) * (segment_angle / 4.0).tan();
-
-    // Map a point on the unit circle (in arc-local space) to user space.
-    let to_user = |unit_x: f32, unit_y: f32| -> Point {
-        (
-            cos_phi * (unit_x * rx) - sin_phi * (unit_y * ry) + cx,
-            sin_phi * (unit_x * rx) + cos_phi * (unit_y * ry) + cy,
-        )
-    };
-
-    let mut result = Vec::with_capacity(segments);
-    let mut current_theta = theta;
-    for _ in 0..segments {
-        let next_theta = current_theta + segment_angle;
-        let (cos_c, sin_c) = (current_theta.cos(), current_theta.sin());
-        let (cos_n, sin_n) = (next_theta.cos(), next_theta.sin());
-
-        result.push((
-            to_user(cos_c - alpha * sin_c, sin_c + alpha * cos_c),
-            to_user(cos_n + alpha * sin_n, sin_n - alpha * cos_c),
-            to_user(cos_n, sin_n),
-        ));
-        current_theta = next_theta;
-    }
-    result
-}
-
-/// Signed angle from `a` to `b`, in the range (-π, π].
-fn angle(a: Point, b: Point) -> f32 {
-    let dot = a.0 * b.0 + a.1 * b.1;
-    let cross = a.0 * b.1 - a.1 * b.0;
-    cross.atan2(dot)
 }
 
 fn render_bar_rgba(fractions: &[f64]) -> Vec<u8> {
@@ -737,9 +567,8 @@ fn fill_rounded_bar(
 #[cfg(test)]
 mod tests {
     use super::{
-        arc_to_cubics, bar_fill, bar_icon, parse_svg_path, provider_path, render_bar_rgba,
-        render_text_strip, text_icon, visual_bar_fraction, MINIMAX_ICON, TextGroup, ICON_SIZE,
-        MAX_BARS, TEXT_HEIGHT,
+        bar_fill, bar_icon, parse_svg_path, provider_path, render_bar_rgba, render_text_strip,
+        text_icon, visual_bar_fraction, TextGroup, ICON_SIZE, MAX_BARS, TEXT_HEIGHT,
     };
 
     fn text_group(provider_id: &str, values: &[&str]) -> TextGroup {
@@ -762,8 +591,6 @@ mod tests {
             "opencode",
             "openrouter",
             "zai",
-            "kimi",
-            "minimax",
         ] {
             let path = provider_path(provider).expect("known provider mark should exist");
             assert!(path.bounds().width() > 0.0);
@@ -891,36 +718,5 @@ mod tests {
     fn icon_uses_a_retina_density_square() {
         let icon = bar_icon(&[0.5]);
         assert_eq!((icon.width(), icon.height()), (36, 36));
-    }
-
-    #[test]
-    fn elliptical_arc_subdivides_into_visible_cubic_segments() {
-        // A semicircle from (0, 0) to (2, 0) must produce a non-empty chain of
-        // cubic segments whose last endpoint lands on (2, 0).
-        let segments = arc_to_cubics((0.0, 0.0), (1.0, 1.0), 0.0, false, true, (2.0, 0.0));
-        assert!(!segments.is_empty());
-        let (_, _, last) = segments.last().unwrap();
-        assert!((last.0 - 2.0).abs() < 1e-3);
-        assert!(last.1.abs() < 1e-3);
-    }
-
-    #[test]
-    fn degenerate_arcs_collapse_to_no_or_single_segments() {
-        // Identical endpoints emit nothing.
-        assert!(arc_to_cubics((1.0, 1.0), (5.0, 5.0), 0.0, true, true, (1.0, 1.0)).is_empty());
-        // Zero radii collapse to a single straight-line cubic.
-        let zero = arc_to_cubics((0.0, 0.0), (0.0, 0.0), 0.0, false, false, (3.0, 4.0));
-        assert_eq!(zero.len(), 1);
-        let (_, _, end) = zero[0];
-        assert_eq!(end, (3.0, 4.0));
-    }
-
-    #[test]
-    fn minimax_mark_parses_despite_arc_commands() {
-        // The bundled MiniMax logo uses elliptical-arc path data; it must parse
-        // to a real path with extent rather than panicking or returning empty.
-        let path = parse_svg_path(MINIMAX_ICON).expect("minimax SVG should parse");
-        assert!(path.bounds().width() > 0.0);
-        assert!(path.bounds().height() > 0.0);
     }
 }
