@@ -32,14 +32,21 @@ body:
     id: provider
     attributes:
       label: Provider
-      description: If this request concerns a provider, enter its name.
+      description: If this concerns a provider, enter its name and link to its official usage or quota documentation.
 
-  - type: input
+  - type: dropdown
     id: platforms
     attributes:
       label: Platforms
       description: Which platforms should this apply to?
-      placeholder: Windows, macOS, Linux, or all platforms
+      options:
+        - All supported platforms
+        - Windows
+        - macOS
+        - Linux
+        - Not platform-specific
+    validations:
+      required: true
 
   - type: textarea
     id: alternatives

@@ -238,6 +238,10 @@ jobs:
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Prepare Linux AppImage bundler
+        if: runner.os == 'Linux'
+        run: bash .github/scripts/setup-linuxdeploy.sh
+
       - name: Build and upload platform artifacts
         uses: tauri-apps/tauri-action@v1
         env:

@@ -34,16 +34,25 @@ body:
     id: system-details
     attributes:
       label: System details
-      description: Include the OS version, desktop environment when relevant, and x64 or ARM64.
-      placeholder: Windows 11 24H2, x64
+      description: Include the OS version, architecture, and desktop environment or display server when relevant.
+      placeholder: Fedora 44, KDE Plasma, Wayland, x64
     validations:
       required: true
 
   - type: input
     id: version
     attributes:
-      label: OpenQuota version
-      placeholder: '0.2.4'
+      label: OpenQuota version or commit
+      placeholder: Version shown in the footer or a commit SHA
+    validations:
+      required: true
+
+  - type: input
+    id: installation
+    attributes:
+      label: Installation method
+      description: Enter the package type or how OpenQuota was installed.
+      placeholder: AppImage, .deb, Windows installer, macOS DMG, or source build
     validations:
       required: true
 
@@ -57,6 +66,12 @@ body:
         - Codex
         - Cursor
         - Antigravity
+        - Copilot
+        - Devin
+        - Grok
+        - OpenCode
+        - OpenRouter
+        - Z.ai
         - Multiple providers
     validations:
       required: true
