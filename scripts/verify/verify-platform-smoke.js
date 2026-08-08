@@ -10,6 +10,7 @@ const macos = read('.github/actions/platform-smoke/scripts/macos.sh');
 const linuxX11 = read('.github/actions/platform-smoke/scripts/linux-x11.sh');
 const linuxWayland = read('.github/actions/platform-smoke/scripts/linux-wayland.sh');
 const linuxPackages = read('.github/actions/platform-smoke/scripts/linux-packages.sh');
+const linuxdeploySetup = read('.github/scripts/setup-linuxdeploy.sh');
 const releaseTagVerification = read('.github/scripts/verify-release-tag.sh');
 
 const ciContracts = [
@@ -17,6 +18,7 @@ const ciContracts = [
   'Test Windows Credential Manager integration',
   'Test macOS Keychain integration',
   'Test Linux Secret Service integration',
+  'Prepare Linux AppImage bundler',
   'Build Windows installer',
   'Build macOS DMG',
   'Build Linux packages',
@@ -39,6 +41,7 @@ const releaseContracts = [
   'Build and smoke Linux x64',
   'Build and smoke Linux ARM64',
   'Build and smoke macOS Universal',
+  'Prepare Linux AppImage bundler',
   'Validate updater signing configuration',
   'Validate trusted release tag',
   'ref: ${{ github.sha }}',
@@ -111,12 +114,24 @@ for (const [source, content, contracts] of [
     linuxPackages,
     [
       'APPIMAGE_EXTRACT_AND_RUN=1',
+      '--appimage-extract',
+      "-name 'libwayland-client.so*'",
       'dpkg-deb --field',
       'test "${package_name}" = \'open-quota\'',
       'sudo apt-get install --yes',
       'sudo apt-get remove --yes',
       'linux-x11.sh',
       'linux-wayland.sh',
+    ],
+  ],
+  [
+    'Linux AppImage bundler',
+    linuxdeploySetup,
+    [
+      "linuxdeploy_release='1-alpha-20251107-1'",
+      'c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d',
+      '620095110d693282b8ebeb244a95b5e911cf8f65f76c88b4b47d16ae6346fcff',
+      'sha256sum --check --strict',
     ],
   ],
   ['Linux X11', linuxX11, ['xvfb-run', 'openbox', 'xdotool search --name "^OpenQuota$"']],

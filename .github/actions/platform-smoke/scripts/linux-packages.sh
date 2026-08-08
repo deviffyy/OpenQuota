@@ -20,6 +20,27 @@ appimage="${appimages[0]}"
 deb="${debs[0]}"
 chmod +x "${appimage}"
 
+extraction_directory="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/openquota-appimage.XXXXXX")"
+installed=false
+cleanup() {
+  rm -rf "${extraction_directory}"
+  if test "${installed}" = true; then
+    sudo apt-get remove --yes "${package_name}" >/dev/null
+  fi
+}
+trap cleanup EXIT
+
+(
+  cd "${extraction_directory}"
+  "${appimage}" --appimage-extract >/dev/null
+)
+if find "${extraction_directory}/squashfs-root" -name 'libwayland-client.so*' -print -quit \
+  | grep -q .; then
+  echo 'AppImage must not bundle libwayland-client:' >&2
+  find "${extraction_directory}/squashfs-root" -name 'libwayland-client.so*' -print >&2
+  exit 1
+fi
+
 # Running with the AppImage runtime's extraction mode exercises the published
 # container without depending on FUSE being enabled on hosted runners.
 export APPIMAGE_EXTRACT_AND_RUN=1
@@ -42,14 +63,6 @@ if dpkg-query --show --showformat='${db:Status-Status}' "${package_name}" 2>/dev
   echo "Refusing to replace an existing ${package_name} installation on the runner." >&2
   exit 1
 fi
-
-installed=false
-cleanup() {
-  if test "${installed}" = true; then
-    sudo apt-get remove --yes "${package_name}" >/dev/null
-  fi
-}
-trap cleanup EXIT
 
 sudo apt-get install --yes "${deb}"
 installed=true
