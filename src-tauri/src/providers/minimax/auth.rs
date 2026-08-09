@@ -6,7 +6,7 @@ use crate::{
 use super::MiniMaxError;
 
 const CONFIG_PATHS: &[&str] = &["~/.config/openquota/minimax.json"];
-const ENVIRONMENT_NAMES: &[&str] = &["MINIMAX_API_KEY", "MINIMAXI_API_KEY"];
+const ENVIRONMENT_NAMES: &[&str] = &["MINIMAX_API_KEY"];
 
 #[derive(Clone)]
 pub struct MiniMaxAuthStore {

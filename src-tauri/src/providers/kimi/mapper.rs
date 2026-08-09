@@ -57,13 +57,16 @@ fn title_case(value: &str) -> String {
 fn map_quotas(body: &Value) -> Result<Vec<QuotaWindow>, KimiError> {
     // Convention: the short rolling window is the Session quota and the main usage quota is the
     // Weekly quota. Session is shown first.
-    let weekly = weekly_quota(body)?;
     let mut quotas = Vec::new();
-    if let Some(session) = session_quota(body)? {
+    if let Ok(Some(session)) = session_quota(body) {
         quotas.push(session);
     }
-    quotas.push(weekly);
-    Ok(quotas)
+    if let Ok(weekly) = weekly_quota(body) {
+        quotas.push(weekly);
+    }
+    (!quotas.is_empty())
+        .then_some(quotas)
+        .ok_or(KimiError::InvalidResponse)
 }
 
 fn weekly_quota(body: &Value) -> Result<QuotaWindow, KimiError> {
@@ -263,6 +266,38 @@ mod tests {
             .unwrap();
         assert_eq!(session.used_percent, 25.0);
         assert_eq!(session.period_seconds, DEFAULT_WINDOW_PERIOD_SECONDS);
+    }
+
+    #[test]
+    fn an_invalid_weekly_section_keeps_a_valid_session_quota() {
+        let mut body = captured();
+        body["usage"]["used"] = json!("not-a-number");
+
+        let mapped = map_usage(&body).unwrap();
+        assert_eq!(
+            mapped
+                .quotas
+                .iter()
+                .map(|quota| quota.id.as_str())
+                .collect::<Vec<_>>(),
+            ["session"]
+        );
+    }
+
+    #[test]
+    fn an_invalid_session_section_keeps_a_valid_weekly_quota() {
+        let mut body = captured();
+        body["limits"][0]["detail"]["remaining"] = json!("not-a-number");
+
+        let mapped = map_usage(&body).unwrap();
+        assert_eq!(
+            mapped
+                .quotas
+                .iter()
+                .map(|quota| quota.id.as_str())
+                .collect::<Vec<_>>(),
+            ["weekly"]
+        );
     }
 
     #[test]
