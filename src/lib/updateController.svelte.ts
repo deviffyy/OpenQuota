@@ -1,9 +1,33 @@
 import { checkForApplicationUpdates, installApplicationUpdate, openUpdatePage } from './backend';
 import { SvelteDate } from 'svelte/reactivity';
-import { t } from './i18n';
+import { t, type TranslationKey } from './i18n';
 import type { UpdateFailure, UpdateProgress, UpdateStatus } from './types';
 
 const USAGE_REFRESH_INTERVAL_MS = 5 * 60_000;
+
+const UPDATE_FAILURE_MESSAGE_KEYS: Record<string, TranslationKey> = {
+  download_forbidden: 'updateDownloadForbidden',
+  rate_limited: 'updateRateLimited',
+  signature_invalid: 'updateSignatureInvalid',
+  network: 'updateNetworkFailed',
+  update_failed: 'updateOperationFailed',
+  busy: 'updateBusy',
+  not_configured: 'updateNotConfigured',
+  manual_install_required: 'updateManualInstallRequired',
+  up_to_date: 'updateAlreadyUpToDate',
+};
+
+const UPDATE_FAILURE_ACTION_KEYS: Record<string, TranslationKey> = {
+  download_forbidden: 'tryAgainOrDownload',
+  rate_limited: 'tryAgainLater',
+  signature_invalid: 'tryAgainOrDownload',
+  network: 'tryAgainLater',
+  update_failed: 'tryAgainOrDownload',
+  busy: 'tryAgainLater',
+  not_configured: 'tryAgainOrDownload',
+  manual_install_required: 'tryAgainOrDownload',
+  up_to_date: 'noActionNeeded',
+};
 
 export class UpdateController {
   status = $state<UpdateStatus | null>(null);
@@ -76,9 +100,20 @@ export function nextUpdateLabel(value: string | undefined, now: number) {
 export function updateFailure(error: unknown, fallback: string): UpdateFailure {
   if (error && typeof error === 'object') {
     const candidate = error as Partial<UpdateFailure>;
+    const code = typeof candidate.code === 'string' ? candidate.code : 'update_failed';
+    const messageKey = UPDATE_FAILURE_MESSAGE_KEYS[code];
+    const actionKey = UPDATE_FAILURE_ACTION_KEYS[code];
+    if (messageKey) {
+      return {
+        code,
+        message: t(messageKey),
+        action: t(actionKey ?? 'tryAgainLater'),
+        retryable: candidate.retryable !== false,
+      };
+    }
     if (typeof candidate.message === 'string') {
       return {
-        code: typeof candidate.code === 'string' ? candidate.code : 'update_failed',
+        code,
         message: candidate.message,
         action: typeof candidate.action === 'string' ? candidate.action : t('tryAgainLater'),
         retryable: candidate.retryable !== false,

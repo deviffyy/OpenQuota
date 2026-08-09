@@ -6,12 +6,13 @@
   interface Props {
     title: string;
     breakdown: ModelUsageBreakdown;
+    sourceNote: string;
     top: number;
     onEnter: () => void;
     onLeave: () => void;
   }
 
-  let { title, breakdown, top, onEnter, onLeave }: Props = $props();
+  let { title, breakdown, sourceNote, top, onEnter, onLeave }: Props = $props();
 
   const shares = $derived.by(() => {
     const allPriced = breakdown.models.every((model) => model.costUsd !== null);
@@ -75,7 +76,7 @@
       </div>
     {/each}
   </div>
-  <p>{breakdown.sourceNote}</p>
+  <p>{sourceNote}</p>
 </div>
 
 <style>

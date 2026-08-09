@@ -255,6 +255,22 @@ describe('pointer reorder integrations', () => {
     ).toEqual(['claude', 'codex', 'antigravity']);
   });
 
+  it('uses custom provider names in list control labels', () => {
+    render(CustomizeProviderList, {
+      settings: { ...settings, providerNames: { codex: 'Work' } },
+      catalog: providerCatalogIndex,
+      onOpen: vi.fn(),
+      onChange: vi.fn(),
+      onReorderStart: vi.fn(),
+      onReorderEnd: vi.fn(),
+      onSettings: vi.fn(),
+      reducedMotion: false,
+    });
+
+    expect(screen.getByRole('checkbox', { name: 'Enable Work' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Customize Work' })).toBeInTheDocument();
+  });
+
   it('moves a metric across Customize sections through the same pointer engine', async () => {
     const onChange = vi.fn();
     render(CustomizeProviderDetail, {

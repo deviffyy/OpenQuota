@@ -154,7 +154,17 @@ impl DailyUsageAccumulator {
 
     /// Builds the three spend periods. Idle or unknown-only periods stay unbacked (`None`), while
     /// the trend receives only active days and fills calendar gaps in the UI layer.
+    #[cfg(test)]
     pub fn build(self, now: DateTime<Utc>, source_note: &str) -> UsageHistory {
+        self.build_with_source_key(now, source_note, None)
+    }
+
+    pub fn build_with_source_key(
+        self,
+        now: DateTime<Utc>,
+        source_note: &str,
+        source_key: Option<&str>,
+    ) -> UsageHistory {
         let today = now.with_timezone(&Local).date_naive();
         let yesterday = today.checked_sub_days(Days::new(1));
         let daily = self
@@ -173,9 +183,9 @@ impl DailyUsageAccumulator {
             })
             .collect();
 
-        let today_period = self.period_for_days(&[today], source_note);
+        let today_period = self.period_for_days(&[today], source_note, source_key);
         let yesterday_period =
-            yesterday.and_then(|date| self.period_for_days(&[date], source_note));
+            yesterday.and_then(|date| self.period_for_days(&[date], source_note, source_key));
         let active_days = self
             .days
             .iter()
@@ -191,7 +201,7 @@ impl DailyUsageAccumulator {
             .collect::<Vec<_>>();
         unknown_models.sort();
         let last_30_days = self
-            .period_for_days(&active_days, source_note)
+            .period_for_days(&active_days, source_note, source_key)
             .map(|mut period| {
                 period.estimate_complete = unknown_models.is_empty();
                 period.unknown_models.clone_from(&unknown_models);
@@ -207,7 +217,12 @@ impl DailyUsageAccumulator {
         }
     }
 
-    fn period_for_days(&self, dates: &[NaiveDate], source_note: &str) -> Option<UsagePeriod> {
+    fn period_for_days(
+        &self,
+        dates: &[NaiveDate],
+        source_note: &str,
+        source_key: Option<&str>,
+    ) -> Option<UsagePeriod> {
         let mut total = DayAccumulator::default();
         let mut unknown_models = HashSet::new();
         for date in dates {
@@ -233,7 +248,7 @@ impl DailyUsageAccumulator {
             estimated_cost_usd: Some(total.cost),
             cost_estimated: total.cost_estimated,
             estimate_complete: unknown_models.is_empty(),
-            model_breakdown: model_breakdown(&total, source_note),
+            model_breakdown: model_breakdown(&total, source_note, source_key),
             unknown_models,
         })
     }
@@ -252,7 +267,11 @@ fn has_usage(day: &DayAccumulator) -> bool {
     day.tokens > 0 || day.cost > 0.0
 }
 
-fn model_breakdown(day: &DayAccumulator, source_note: &str) -> Option<ModelUsageBreakdown> {
+fn model_breakdown(
+    day: &DayAccumulator,
+    source_note: &str,
+    source_key: Option<&str>,
+) -> Option<ModelUsageBreakdown> {
     let mut entries = day
         .models
         .values()
@@ -340,6 +359,7 @@ fn model_breakdown(day: &DayAccumulator, source_note: &str) -> Option<ModelUsage
     Some(ModelUsageBreakdown {
         models: visible,
         source_note: source_note.to_owned(),
+        source_key: source_key.map(str::to_owned),
     })
 }
 

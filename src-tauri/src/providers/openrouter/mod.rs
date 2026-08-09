@@ -48,7 +48,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 true,
                 "C",
-            ),
+            )
+            .with_label_key("credits"),
             MetricDefinition::value(
                 "openrouter.balance",
                 "Balance",
@@ -58,7 +59,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "B",
                 None,
-            ),
+            )
+            .with_label_key("balance"),
             MetricDefinition::value(
                 "openrouter.today",
                 "Today",
@@ -68,7 +70,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "T",
                 None,
-            ),
+            )
+            .with_label_key("today"),
             MetricDefinition::value(
                 "openrouter.week",
                 "This Week",
@@ -78,7 +81,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "W",
                 None,
-            ),
+            )
+            .with_label_key("thisWeek"),
             MetricDefinition::value(
                 "openrouter.month",
                 "This Month",
@@ -88,7 +92,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "M",
                 None,
-            ),
+            )
+            .with_label_key("thisMonth"),
             MetricDefinition::quota(
                 "openrouter.keyLimit",
                 "Key Limit",
@@ -98,7 +103,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 false,
                 "K",
-            ),
+            )
+            .with_label_key("keyLimit"),
         ],
     }
 }

@@ -2,13 +2,52 @@ import type {
   MetricDefinition,
   ProviderCatalog,
   ProviderDefinition,
+  ProviderNotice,
   ProviderSnapshot,
+  StatusMetric,
 } from './types';
-import { t } from './i18n';
+import { messages, t, type TranslationKey } from './i18n';
+
+function localizedKey(key: string | null | undefined, values: Record<string, string | number>) {
+  if (!key || !(key in messages.en)) return undefined;
+  return t(key as TranslationKey, values);
+}
 
 function localizedMetricLabel(definition: MetricDefinition) {
-  const key = definition.labelKey as Parameters<typeof t>[0] | null | undefined;
-  return key ? t(key) : definition.label;
+  return localizedKey(definition.labelKey, {}) ?? definition.label;
+}
+
+export function localizedStatusText(metric: StatusMetric) {
+  if (metric.id !== 'payAsYouGo') return metric.text;
+  if (metric.tone === 'neutral') return t('disabled');
+  if (metric.tone === 'positive' && metric.unit === 'cap' && Number.isFinite(metric.value)) {
+    return t('payAsYouGoCap', { value: String(metric.value) });
+  }
+  return metric.text;
+}
+
+export function localizedNoticeTitle(notice: ProviderNotice) {
+  return notice.id === 'rateLimited' && notice.tone === 'warning'
+    ? t('liveUsagePaused')
+    : notice.title;
+}
+
+function localizedRetryMessage(seconds: number) {
+  const count = Math.ceil(Math.max(0, seconds) / 60);
+  if (count === 0) return t('rateLimitReadyToRetry');
+  return count === 1 ? t('rateLimitRetryingMinute') : t('rateLimitRetryingMinutes', { count });
+}
+
+export function localizedNoticeMessage(notice: ProviderNotice) {
+  if (
+    notice.id !== 'rateLimited' ||
+    notice.tone !== 'warning' ||
+    !Number.isFinite(notice.retrySeconds)
+  ) {
+    return notice.message;
+  }
+  const retry = localizedRetryMessage(notice.retrySeconds!);
+  return notice.showingStaleLimits === true ? t('rateLimitStaleLimits', { retry }) : retry;
 }
 
 export class ProviderCatalogIndex {
@@ -57,24 +96,23 @@ export class ProviderCatalogIndex {
   localUsageSourceNote(id: string) {
     const provider = this.provider(id);
     const name = provider?.displayName ?? id;
-    const key = provider?.localUsageSourceKey as Parameters<typeof t>[0] | null | undefined;
-    return key
-      ? t(key, { provider: name })
-      : (provider?.localUsageSourceNote ?? t('usageHistorySource', { provider: name }));
+    return (
+      localizedKey(provider?.localUsageSourceKey, { provider: name }) ??
+      provider?.localUsageSourceNote ??
+      t('usageHistorySource', { provider: name })
+    );
   }
 }
 
 export function usageSourceNote(catalog: ProviderCatalogIndex, snapshot: ProviderSnapshot) {
-  const source =
-    snapshot.usage.last30Days?.modelBreakdown?.sourceNote ??
-    snapshot.usage.today?.modelBreakdown?.sourceNote ??
-    snapshot.usage.yesterday?.modelBreakdown?.sourceNote;
-  const name = catalog.displayName(snapshot.providerId);
-  if (source?.includes(' and pi ')) {
-    const key = catalog.provider(snapshot.providerId)?.piUsageSourceKey as
-      Parameters<typeof t>[0] | null | undefined;
-    return t(key ?? 'estimatedLogsWithPiSource', { provider: name });
-  }
+  const breakdown =
+    snapshot.usage.last30Days?.modelBreakdown ??
+    snapshot.usage.today?.modelBreakdown ??
+    snapshot.usage.yesterday?.modelBreakdown;
+  const source = localizedKey(breakdown?.sourceKey, {
+    provider: catalog.displayName(snapshot.providerId),
+  });
+  if (source) return source;
   return catalog.localUsageSourceNote(snapshot.providerId);
 }
 

@@ -532,8 +532,12 @@ impl SettingsService {
                 }
             }
         }
+        let resolved_language = crate::native_i18n::Locale::for_preference(&settings.language)
+            .language_tag()
+            .to_owned();
         SettingsViewState {
             settings,
+            resolved_language,
             account_revision,
             renamable_provider_ids,
             notification_permission: notification_permission.into(),

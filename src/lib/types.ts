@@ -32,6 +32,8 @@ export interface StatusMetric {
   text: string;
   tone: 'neutral' | 'positive' | 'warning' | 'danger';
   subtitle?: string | null;
+  value?: number | null;
+  unit?: 'cap' | null;
 }
 
 export type ResetClaimOutcome = 'success' | 'nothingToReset' | 'noCredit' | 'failed';
@@ -41,6 +43,8 @@ export interface ProviderNotice {
   title: string;
   message: string;
   tone: 'info' | 'warning';
+  retrySeconds?: number | null;
+  showingStaleLimits?: boolean | null;
 }
 
 export interface UsagePeriod {
@@ -68,6 +72,7 @@ export interface ModelUsageVariant {
 export interface ModelUsageBreakdown {
   models: ModelUsageEntry[];
   sourceNote: string;
+  sourceKey?: string | null;
 }
 
 export interface DailyUsage {
@@ -251,6 +256,7 @@ export interface UpdateFailure {
 
 export interface SettingsViewState {
   settings: AppSettings;
+  resolvedLanguage: 'en' | 'zh-CN' | 'zh-TW';
   accountRevision: number;
   renamableProviderIds: string[];
   notificationPermission: 'granted' | 'denied' | 'prompt' | 'unavailable';

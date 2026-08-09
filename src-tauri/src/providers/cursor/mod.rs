@@ -35,7 +35,7 @@ pub(crate) fn definition() -> ProviderDefinition {
         short_name: "Cu".into(),
         fallback_enabled: true,
         local_usage_source_note: Some("From your Cursor usage export".into()),
-        local_usage_source_key: None,
+        local_usage_source_key: Some("cursorExportSource".into()),
         pi_usage_source_key: None,
         links: vec![
             ProviderLink::new("Status", "https://status.cursor.com/"),
@@ -51,7 +51,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 false,
                 "U",
-            ),
+            )
+            .with_label_key("totalUsage"),
             MetricDefinition::quota(
                 "cursor.auto",
                 "Auto Usage",
@@ -61,7 +62,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 true,
                 "A",
-            ),
+            )
+            .with_label_key("autoUsage"),
             MetricDefinition::quota(
                 "cursor.api",
                 "API Usage",
@@ -71,7 +73,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 true,
                 "AP",
-            ),
+            )
+            .with_label_key("apiUsage"),
             MetricDefinition::quota_or_value(
                 "cursor.onDemand",
                 "Extra Usage",
@@ -80,7 +83,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 false,
                 "E",
-            ),
+            )
+            .with_label_key("extraUsage"),
             MetricDefinition::quota(
                 "cursor.requests",
                 "Requests",
@@ -90,7 +94,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 false,
                 "R",
-            ),
+            )
+            .with_label_key("requestsLabel"),
             MetricDefinition::value(
                 "cursor.credits",
                 "Credits",
@@ -100,29 +105,33 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "C",
                 None,
-            ),
-            MetricDefinition::trend("cursor.trend"),
+            )
+            .with_label_key("credits"),
+            MetricDefinition::trend("cursor.trend").with_label_key("usageTrend"),
             MetricDefinition::usage(
                 "cursor.today",
                 "Today",
                 UsagePeriodSelection::Today,
                 MetricSection::OnDemand,
                 "T",
-            ),
+            )
+            .with_label_key("today"),
             MetricDefinition::usage(
                 "cursor.yesterday",
                 "Yesterday",
                 UsagePeriodSelection::Yesterday,
                 MetricSection::OnDemand,
                 "Y",
-            ),
+            )
+            .with_label_key("yesterday"),
             MetricDefinition::usage(
                 "cursor.last30",
                 "Last 30 Days",
                 UsagePeriodSelection::Last30Days,
                 MetricSection::OnDemand,
                 "M",
-            ),
+            )
+            .with_label_key("last30Days"),
         ],
     }
 }

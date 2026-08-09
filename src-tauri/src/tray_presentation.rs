@@ -251,8 +251,11 @@ fn tray_metric(
     locale: crate::native_i18n::Locale,
 ) -> Option<TrayMetric> {
     let tray = definition.tray.as_ref()?;
-    let localized_label =
-        crate::native_i18n::metric_label(locale, &definition.id, &definition.label);
+    let localized_label = crate::native_i18n::metric_label(
+        locale,
+        definition.label_key.as_deref(),
+        &definition.label,
+    );
     let quota = |id: &str| {
         snapshot
             .quotas
@@ -320,7 +323,9 @@ fn tray_metric(
             tray.suffix.as_deref(),
             &localized_label,
         ),
-        MetricSource::Status { source_id } => status_metric(snapshot, source_id, &localized_label),
+        MetricSource::Status { source_id } => {
+            status_metric(snapshot, source_id, &localized_label, locale)
+        }
         MetricSource::Usage { period } => {
             usage_metric(&localized_label, usage_period(snapshot, *period))
         }
@@ -340,14 +345,23 @@ fn status_metric(
     snapshot: &ProviderSnapshot,
     source_id: &str,
     localized_label: &str,
+    locale: crate::native_i18n::Locale,
 ) -> Option<TrayMetric> {
     let metric = snapshot
         .status_metrics
         .iter()
         .find(|metric| metric.id == source_id)?;
+    let value = crate::native_i18n::status_metric_text(
+        locale,
+        &metric.id,
+        metric.tone,
+        metric.value,
+        metric.unit,
+        &metric.text,
+    );
     Some(TrayMetric {
-        value: metric.text.clone(),
-        detail: format!("{localized_label} {}", metric.text),
+        value: value.clone(),
+        detail: format!("{localized_label} {value}"),
         gauge: None,
     })
 }
@@ -862,9 +876,11 @@ mod tests {
             status_metrics: vec![StatusMetric {
                 id: "payAsYouGo".into(),
                 label: "Extra Usage".into(),
-                text: "2500 cap".into(),
+                text: String::new(),
                 tone: StatusTone::Positive,
                 subtitle: None,
+                value: Some(2500.0),
+                unit: Some(crate::models::StatusMetricUnit::Cap),
             }],
             notices: Vec::new(),
             usage: UsageHistory::default(),

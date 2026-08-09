@@ -13,6 +13,7 @@
 
   interface Props {
     quota: QuotaWindow;
+    providerId?: string;
     label?: string;
     now: number;
     usageDisplay: 'used' | 'left';
@@ -26,6 +27,7 @@
 
   let {
     quota,
+    providerId = '',
     label,
     now,
     usageDisplay,
@@ -47,7 +49,7 @@
   );
   const localizedLabel = $derived(label ?? quota.label);
   const estimateNote = $derived(
-    quota.id.startsWith('opencode.')
+    providerId === 'opencode'
       ? t('openCodeQuotaEstimate')
       : quota.sourceNote?.trim() || t('estimatedLocally'),
   );

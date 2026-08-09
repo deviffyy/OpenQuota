@@ -1,3 +1,5 @@
+use crate::models::{StatusMetricUnit, StatusTone};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Locale {
     En,
@@ -30,6 +32,14 @@ impl Locale {
             Self::ZhCn
         } else {
             Self::En
+        }
+    }
+
+    pub fn language_tag(self) -> &'static str {
+        match self {
+            Self::En => "en",
+            Self::ZhCn => "zh-CN",
+            Self::ZhTw => "zh-TW",
         }
     }
 }
@@ -120,38 +130,37 @@ impl Labels {
     }
 }
 
-pub fn metric_label(locale: Locale, id: &str, fallback: &str) -> String {
-    let common = if id.ends_with(".session") {
-        Some(("Session", "会话", "對話"))
-    } else if id.ends_with(".weekly") {
-        Some(("Weekly", "每周", "每週"))
-    } else if id.ends_with(".today") {
-        Some(("Today", "今天", "今天"))
-    } else if id.ends_with(".yesterday") {
-        Some(("Yesterday", "昨天", "昨天"))
-    } else if id.ends_with(".last30") {
-        Some(("30 Days", "30 天", "30 天"))
-    } else {
-        match id {
-            "claude.extra" | "codex.credits" | "cursor.onDemand" | "copilot.extra"
-            | "grok.payAsYouGo" => Some(("Extra Usage", "额外用量", "額外用量")),
-            "codex.rateLimitResets" => Some(("Rate Limit Resets", "限额重置", "限額重設")),
-            "cursor.credits" | "copilot.premium" | "openrouter.credits" => {
-                Some(("Credits", "额度", "額度"))
-            }
-            "cursor.usage" => Some(("Total Usage", "总用量", "總用量")),
-            "cursor.auto" => Some(("Auto Usage", "自动用量", "自動用量")),
-            "cursor.api" => Some(("API Usage", "API 用量", "API 用量")),
-            "cursor.requests" => Some(("Requests", "请求", "要求")),
-            "openrouter.balance" => Some(("Balance", "余额", "餘額")),
-            "openrouter.week" => Some(("This Week", "本周", "本週")),
-            "openrouter.month" => Some(("This Month", "本月", "本月")),
-            "openrouter.keyLimit" => Some(("Key Limit", "密钥限额", "金鑰限額")),
-            "zai.webSearches" => Some(("Web Searches", "网页搜索", "網頁搜尋")),
-            "codex.sparkWeekly" => Some(("Spark Weekly", "Spark 每周", "Spark 每週")),
-            "antigravity.claudeWeekly" => Some(("Claude Weekly", "Claude 每周", "Claude 每週")),
-            _ => None,
-        }
+pub fn metric_label(locale: Locale, key: Option<&str>, fallback: &str) -> String {
+    let common = match key {
+        Some("session") => Some(("Session", "会话", "工作階段")),
+        Some("weekly") => Some(("Weekly", "每周", "每週")),
+        Some("today") => Some(("Today", "今天", "今天")),
+        Some("yesterday") => Some(("Yesterday", "昨天", "昨天")),
+        Some("last30Days") => Some(("30 Days", "30 天", "30 天")),
+        Some("daily") => Some(("Daily", "每日", "每日")),
+        Some("monthly") => Some(("Monthly", "每月", "每月")),
+        Some("usageTrend") => Some(("Usage Trend", "用量趋势", "用量趨勢")),
+        Some("extraUsage") => Some(("Extra Usage", "额外用量", "額外用量")),
+        Some("extraBalance") => Some(("Extra Balance", "额外余额", "額外餘額")),
+        Some("disabled") => Some(("Disabled", "已禁用", "已停用")),
+        Some("rateLimitResets") => Some(("Rate Limit Resets", "限额重置", "限額重設")),
+        Some("credits") => Some(("Credits", "额度", "額度")),
+        Some("totalUsage") => Some(("Total Usage", "总用量", "總用量")),
+        Some("autoUsage") => Some(("Auto Usage", "自动用量", "自動用量")),
+        Some("apiUsage") => Some(("API Usage", "API 用量", "API 用量")),
+        Some("requestsLabel") => Some(("Requests", "请求", "要求")),
+        Some("balance") => Some(("Balance", "余额", "餘額")),
+        Some("thisWeek") => Some(("This Week", "本周", "本週")),
+        Some("thisMonth") => Some(("This Month", "本月", "本月")),
+        Some("keyLimit") => Some(("Key Limit", "密钥限额", "金鑰限額")),
+        Some("webSearches") => Some(("Web Searches", "网页搜索", "網頁搜尋")),
+        Some("sparkWeekly") => Some(("Spark Weekly", "Spark 每周", "Spark 每週")),
+        Some("claudeWeekly") => Some(("Claude Weekly", "Claude 每周", "Claude 每週")),
+        Some("orgCredits") => Some(("Org Credits", "组织额度", "組織額度")),
+        Some("orgSpend") => Some(("Org Spend", "组织消费", "組織消費")),
+        Some("chat") => Some(("Chat", "聊天", "聊天")),
+        Some("completions") => Some(("Completions", "代码补全", "程式碼補全")),
+        _ => None,
     };
     common
         .map(|labels| match locale {
@@ -161,6 +170,36 @@ pub fn metric_label(locale: Locale, id: &str, fallback: &str) -> String {
         })
         .unwrap_or(fallback)
         .to_owned()
+}
+
+pub fn status_metric_text(
+    locale: Locale,
+    id: &str,
+    tone: StatusTone,
+    value: Option<f64>,
+    unit: Option<StatusMetricUnit>,
+    fallback: &str,
+) -> String {
+    if id == "payAsYouGo" && tone == StatusTone::Neutral {
+        return metric_label(locale, Some("disabled"), fallback);
+    }
+    if id == "payAsYouGo"
+        && tone == StatusTone::Positive
+        && unit == Some(StatusMetricUnit::Cap)
+        && value.is_some_and(f64::is_finite)
+    {
+        let number = value.unwrap();
+        let number = if number.fract() == 0.0 {
+            format!("{number:.0}")
+        } else {
+            number.to_string()
+        };
+        return match locale {
+            Locale::En => format!("{number} cap"),
+            Locale::ZhCn | Locale::ZhTw => format!("上限 {number}"),
+        };
+    }
+    fallback.to_owned()
 }
 
 pub fn usage_word(locale: Locale, used: bool) -> &'static str {
@@ -220,6 +259,9 @@ mod tests {
         assert_eq!(Locale::from_language_tag("fr-FR"), Locale::En);
         assert_eq!(Locale::from_language_tag("C"), Locale::En);
         assert_eq!(Locale::from_language_tag("POSIX"), Locale::En);
+        assert_eq!(Locale::En.language_tag(), "en");
+        assert_eq!(Locale::ZhCn.language_tag(), "zh-CN");
+        assert_eq!(Locale::ZhTw.language_tag(), "zh-TW");
     }
 
     #[test]
@@ -247,18 +289,15 @@ mod tests {
     #[test]
     fn native_metric_labels_and_units_follow_the_resolved_locale() {
         assert_eq!(
-            super::metric_label(Locale::ZhCn, "codex.weekly", "Weekly"),
+            super::metric_label(Locale::ZhCn, Some("weekly"), "Weekly"),
             "每周"
         );
         assert_eq!(
-            super::metric_label(Locale::ZhTw, "cursor.requests", "Requests"),
+            super::metric_label(Locale::ZhTw, Some("requestsLabel"), "Requests"),
             "要求"
         );
         assert_eq!(super::count_unit(Locale::ZhTw, "searches"), "次搜尋");
         assert_eq!(super::usage_word(Locale::ZhCn, false), "剩余");
-        assert_eq!(
-            super::metric_label(Locale::En, "unknown", "Custom"),
-            "Custom"
-        );
+        assert_eq!(super::metric_label(Locale::En, None, "Custom"), "Custom");
     }
 }

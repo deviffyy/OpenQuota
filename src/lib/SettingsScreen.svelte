@@ -378,7 +378,6 @@
         label={t('logLevel')}
         value={settings.logLevel}
         options={[
-          { value: 'system', label: t('systemLanguage') },
           { value: 'error', label: t('error') },
           { value: 'warn', label: t('warning') },
           { value: 'info', label: t('info') },

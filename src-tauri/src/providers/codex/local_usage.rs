@@ -64,12 +64,15 @@ pub fn scan_local_usage(
             false
         }
     };
-    let source_note = if includes_pi {
-        "From your Codex logs and pi (estimated)"
+    let (source_note, source_key) = if includes_pi {
+        (
+            "From your Codex logs and pi (estimated)",
+            "estimatedLogsWithPiSource",
+        )
     } else {
-        "From your Codex logs (estimated)"
+        ("From your Codex logs (estimated)", "estimatedLogsSource")
     };
-    Ok(accumulator.build(now, source_note))
+    Ok(accumulator.build_with_source_key(now, source_note, Some(source_key)))
 }
 
 fn scan_codex_events(
@@ -489,7 +492,11 @@ fn auto_review_fallback(timestamp: &str) -> &'static str {
 fn aggregate(events: Vec<TokenEvent>, now: DateTime<Utc>, pricing: &ModelPricing) -> UsageHistory {
     let mut accumulator = DailyUsageAccumulator::default();
     aggregate_into(events, now, pricing, &mut accumulator);
-    accumulator.build(now, "From your Codex logs (estimated)")
+    accumulator.build_with_source_key(
+        now,
+        "From your Codex logs (estimated)",
+        Some("estimatedLogsSource"),
+    )
 }
 
 fn aggregate_into(

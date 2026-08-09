@@ -334,6 +334,7 @@ export const antigravityState: ProviderViewState = {
 };
 
 export const settingsState: SettingsViewState = {
+  resolvedLanguage: 'en',
   accountRevision: 0,
   renamableProviderIds: ['claude', 'codex'],
   notificationPermission: 'prompt',

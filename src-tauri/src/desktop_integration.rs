@@ -104,7 +104,7 @@ impl DesktopIntegration {
                 LinuxSessionType::Unknown => match locale {
                     crate::native_i18n::Locale::En => "unknown session",
                     crate::native_i18n::Locale::ZhCn => "未知会话",
-                    crate::native_i18n::Locale::ZhTw => "未知對話",
+                    crate::native_i18n::Locale::ZhTw => "未知工作階段",
                 },
             };
             let mode = match (locale, summary.tray_available) {

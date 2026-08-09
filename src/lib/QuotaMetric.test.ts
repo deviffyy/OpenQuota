@@ -22,11 +22,17 @@ function quota(usedPercent: number, elapsedFraction = 0.5): QuotaWindow {
   };
 }
 
-function show(value: QuotaWindow, onToggleReset = vi.fn(), isSessionWindow = false) {
+function show(
+  value: QuotaWindow,
+  onToggleReset = vi.fn(),
+  isSessionWindow = false,
+  providerId?: string,
+) {
   return {
     onToggleReset,
     ...render(QuotaMetric, {
       quota: value,
+      providerId,
       now,
       usageDisplay: 'left',
       resetDisplay: 'countdown',
@@ -119,6 +125,25 @@ describe('quota pacing presentation', () => {
     expect(screen.getByLabelText('Estimated quota')).toHaveAttribute(
       'data-tooltip',
       'Estimated from local records.',
+    );
+  });
+
+  it('uses the OpenCode catalog note for its unprefixed quota ids', () => {
+    show(
+      {
+        ...quota(24),
+        id: 'weekly',
+        estimated: true,
+        sourceNote: 'UNLOCALIZED OPEN CODE NOTE',
+      },
+      vi.fn(),
+      false,
+      'opencode',
+    );
+
+    expect(screen.getByLabelText('Estimated quota')).toHaveAttribute(
+      'data-tooltip',
+      'Estimated from OpenCode Go activity recorded on this device; activity elsewhere may be missing.',
     );
   });
 });

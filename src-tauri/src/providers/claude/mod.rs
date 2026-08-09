@@ -33,8 +33,8 @@ fn definition_for(id: &str, display_name: &str, fallback_enabled: bool) -> Provi
         short_name: "Cl".into(),
         fallback_enabled,
         local_usage_source_note: Some("From your Claude usage history (estimated)".into()),
-        local_usage_source_key: None,
-        pi_usage_source_key: None,
+        local_usage_source_key: Some("estimatedUsageHistorySource".into()),
+        pi_usage_source_key: Some("estimatedHistoryWithPiSource".into()),
         links: vec![
             ProviderLink::new("Status", "https://status.anthropic.com/"),
             ProviderLink::new("Dashboard", "https://claude.ai/settings/usage"),
@@ -49,7 +49,8 @@ fn definition_for(id: &str, display_name: &str, fallback_enabled: bool) -> Provi
                 MetricSection::AlwaysVisible,
                 true,
                 "S",
-            ),
+            )
+            .with_label_key("session"),
             MetricDefinition::quota(
                 "claude.weekly",
                 "Weekly",
@@ -59,7 +60,8 @@ fn definition_for(id: &str, display_name: &str, fallback_enabled: bool) -> Provi
                 MetricSection::AlwaysVisible,
                 true,
                 "W",
-            ),
+            )
+            .with_label_key("weekly"),
             MetricDefinition::quota(
                 "claude.sonnet",
                 "Sonnet",
@@ -88,29 +90,33 @@ fn definition_for(id: &str, display_name: &str, fallback_enabled: bool) -> Provi
                 MetricSection::AlwaysVisible,
                 false,
                 "E",
-            ),
-            MetricDefinition::trend("claude.trend"),
+            )
+            .with_label_key("extraUsage"),
+            MetricDefinition::trend("claude.trend").with_label_key("usageTrend"),
             MetricDefinition::usage(
                 "claude.today",
                 "Today",
                 UsagePeriodSelection::Today,
                 MetricSection::OnDemand,
                 "T",
-            ),
+            )
+            .with_label_key("today"),
             MetricDefinition::usage(
                 "claude.yesterday",
                 "Yesterday",
                 UsagePeriodSelection::Yesterday,
                 MetricSection::OnDemand,
                 "Y",
-            ),
+            )
+            .with_label_key("yesterday"),
             MetricDefinition::usage(
                 "claude.last30",
                 "Last 30 Days",
                 UsagePeriodSelection::Last30Days,
                 MetricSection::OnDemand,
                 "M",
-            ),
+            )
+            .with_label_key("last30Days"),
         ],
     };
     if id != "claude" {
@@ -460,17 +466,10 @@ impl ClaudeProvider {
             let retry = until.signed_duration_since(now).num_seconds().max(0) as u64;
             if let Some(mut snapshot) = self.last_good.lock().ok().and_then(|value| value.clone()) {
                 snapshot.usage = usage;
-                snapshot.warnings.push(
-                    "Claude live usage is rate limited; showing the last successful limits.".into(),
-                );
                 snapshot.notices = vec![rate_limit_notice(retry, true)];
                 snapshot.refreshed_at = now;
                 return Ok(snapshot);
             }
-            warnings.push(format!(
-                "Claude live usage is rate limited; retrying in about {}.",
-                retry_minutes(retry)
-            ));
             return Ok(ProviderSnapshot {
                 provider_id: self.provider_id().into(),
                 plan: plan_name(credential),
@@ -511,18 +510,10 @@ impl ClaudeProvider {
             }
             if let Some(mut snapshot) = self.last_good.lock().ok().and_then(|value| value.clone()) {
                 snapshot.usage = usage;
-                snapshot.warnings.push(format!(
-                    "Claude live usage is rate limited; retrying in about {}.",
-                    retry_minutes(retry)
-                ));
                 snapshot.notices = vec![rate_limit_notice(retry, true)];
                 snapshot.refreshed_at = now;
                 return Ok(snapshot);
             }
-            warnings.push(format!(
-                "Claude live usage is rate limited; retrying in about {}.",
-                retry_minutes(retry)
-            ));
             return Ok(ProviderSnapshot {
                 provider_id: self.provider_id().into(),
                 plan: plan_name(credential),
@@ -602,29 +593,14 @@ impl ClaudeProvider {
 }
 
 fn rate_limit_notice(retry_seconds: u64, showing_stale_limits: bool) -> ProviderNotice {
-    let retry = if retry_seconds == 0 {
-        "Ready to retry".to_owned()
-    } else {
-        format!("Retrying in about {}", retry_minutes(retry_seconds))
-    };
     ProviderNotice {
         id: "rateLimited".into(),
         title: "Live usage paused".into(),
-        message: if showing_stale_limits {
-            format!("Showing the last successful limits · {retry}")
-        } else {
-            retry
-        },
+        message: String::new(),
         tone: ProviderNoticeTone::Warning,
+        retry_seconds: Some(retry_seconds),
+        showing_stale_limits: Some(showing_stale_limits),
     }
-}
-
-fn retry_minutes(retry_seconds: u64) -> String {
-    let minutes = retry_seconds.div_ceil(60);
-    format!(
-        "{minutes} {}",
-        if minutes == 1 { "minute" } else { "minutes" }
-    )
 }
 
 fn refresh_credential(
@@ -753,7 +729,7 @@ mod tests {
 
     use super::{
         accounts::{self, ClaudeAccount, ClaudeAccountDiscovery},
-        auth::{ClaudeCredentialScope, ClaudeOAuthConfig},
+        auth::{self, ClaudeCredentialGeneration, ClaudeCredentialScope, ClaudeOAuthConfig},
         client::ClaudeClient,
         definition, definition_for, rate_limit_notice, runtime_configs, ClaudeError,
         ClaudeProvider, ClaudeRuntimeConfig,
@@ -866,14 +842,79 @@ mod tests {
     fn rate_limit_notice_distinguishes_empty_and_stale_live_usage() {
         let empty = rate_limit_notice(301, false);
         assert_eq!(empty.title, "Live usage paused");
-        assert_eq!(empty.message, "Retrying in about 6 minutes");
+        assert_eq!(empty.message, "");
+        assert_eq!(empty.retry_seconds, Some(301));
+        assert_eq!(empty.showing_stale_limits, Some(false));
         assert_eq!(empty.tone, ProviderNoticeTone::Warning);
 
         let stale = rate_limit_notice(60, true);
-        assert_eq!(
-            stale.message,
-            "Showing the last successful limits · Retrying in about 1 minute"
+        assert_eq!(stale.message, "");
+        assert_eq!(stale.retry_seconds, Some(60));
+        assert_eq!(stale.showing_stale_limits, Some(true));
+    }
+
+    #[test]
+    fn cooldown_rate_limit_keeps_only_typed_notice_dynamic_content() {
+        let directory = tempdir().unwrap();
+        let account_root = directory.path().join("account");
+        fs::create_dir_all(&account_root).unwrap();
+        fs::write(
+            account_root.join(".credentials.json"),
+            credential_json("access", "refresh", "pro"),
+        )
+        .unwrap();
+        let scope = ClaudeCredentialScope::ConfigDir {
+            path: account_root,
+            keychain_literal: "test".into(),
+        };
+        let mut candidate = auth::load_candidates(&scope).pop().unwrap();
+        let provider = ClaudeProvider::new_scoped(
+            ClaudeRuntimeConfig {
+                definition: definition(),
+                credential_scope: scope,
+                account_identity: None,
+                log_roots: Vec::new(),
+                include_standard_logs: false,
+                include_pi: false,
+            },
+            Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap()),
+            Arc::new(PricingStore::new(directory.path().join("pricing")).unwrap()),
+            ClaudeClient::new().unwrap(),
         );
+        let now = Utc::now();
+        provider.activate_live_usage_cache(candidate.fingerprint());
+        *provider.last_good.lock().unwrap() = Some(ProviderSnapshot {
+            provider_id: "claude".into(),
+            plan: Some("pro".into()),
+            quotas: Vec::new(),
+            value_metrics: Vec::new(),
+            status_metrics: Vec::new(),
+            notices: Vec::new(),
+            usage: UsageHistory::default(),
+            warnings: vec!["keep this warning".into()],
+            refreshed_at: now,
+        });
+        *provider.rate_limited_until.lock().unwrap() = Some(now + Duration::minutes(5));
+        let mut generation = ClaudeCredentialGeneration::from_candidates(&[candidate.clone()]);
+        let config = ClaudeOAuthConfig {
+            usage_url: "https://example.test/usage".into(),
+            refresh_url: "https://example.test/refresh".into(),
+            client_id: "test".into(),
+        };
+
+        let snapshot = provider
+            .refresh_candidate(
+                &mut candidate,
+                &config,
+                now,
+                &crate::pricing::test_bundled_pricing(),
+                &mut generation,
+            )
+            .unwrap();
+        assert_eq!(snapshot.warnings, ["keep this warning"]);
+        assert_eq!(snapshot.notices.len(), 1);
+        assert_eq!(snapshot.notices[0].retry_seconds, Some(300));
+        assert_eq!(snapshot.notices[0].showing_stale_limits, Some(true));
     }
 
     #[test]

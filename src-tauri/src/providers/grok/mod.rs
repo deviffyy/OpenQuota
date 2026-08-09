@@ -35,7 +35,7 @@ pub(crate) fn definition() -> ProviderDefinition {
         short_name: "G".into(),
         fallback_enabled: false,
         local_usage_source_note: Some("From your Grok logs (estimated)".into()),
-        local_usage_source_key: None,
+        local_usage_source_key: Some("estimatedLogsSource".into()),
         pi_usage_source_key: None,
         links: vec![ProviderLink::new("Usage", "https://grok.com/?_s=usage")],
         metrics: vec![
@@ -48,7 +48,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 false,
                 "W",
-            ),
+            )
+            .with_label_key("weekly"),
             MetricDefinition::status(
                 "grok.payAsYouGo",
                 "Extra Usage",
@@ -57,29 +58,33 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 false,
                 "E",
-            ),
-            MetricDefinition::trend("grok.trend"),
+            )
+            .with_label_key("extraUsage"),
+            MetricDefinition::trend("grok.trend").with_label_key("usageTrend"),
             MetricDefinition::usage(
                 "grok.today",
                 "Today",
                 UsagePeriodSelection::Today,
                 MetricSection::OnDemand,
                 "T",
-            ),
+            )
+            .with_label_key("today"),
             MetricDefinition::usage(
                 "grok.yesterday",
                 "Yesterday",
                 UsagePeriodSelection::Yesterday,
                 MetricSection::OnDemand,
                 "Y",
-            ),
+            )
+            .with_label_key("yesterday"),
             MetricDefinition::usage(
                 "grok.last30",
                 "Last 30 Days",
                 UsagePeriodSelection::Last30Days,
                 MetricSection::OnDemand,
                 "M",
-            ),
+            )
+            .with_label_key("last30Days"),
         ],
     }
 }

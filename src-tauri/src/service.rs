@@ -9,6 +9,7 @@ use chrono::Utc;
 use crate::{
     models::{
         MetricSource, ProviderErrorKind, ProviderSnapshot, ProviderViewState, SnapshotSource,
+        StatusMetric, StatusMetricUnit, StatusTone,
     },
     policy::{FAILURE_RETRY_BACKOFF, REFRESH_INTERVAL, STALE_AFTER},
     providers::{ProviderError, ProviderRefresh, ProviderRegistry},
@@ -611,11 +612,25 @@ fn validate_snapshot(
         || snapshot
             .status_metrics
             .iter()
-            .any(|metric| metric.text.trim().is_empty() || metric.label.trim().is_empty())
+            .any(|metric| metric.label.trim().is_empty() || !status_metric_has_content(metric))
     {
         return Err(snapshot_contract_error());
     }
     Ok(snapshot)
+}
+
+fn status_metric_has_content(metric: &StatusMetric) -> bool {
+    if !metric.text.trim().is_empty() {
+        return true;
+    }
+
+    match (metric.id.as_str(), metric.tone, metric.value, metric.unit) {
+        ("payAsYouGo", StatusTone::Positive, Some(value), Some(StatusMetricUnit::Cap)) => {
+            value.is_finite() && value > 0.0
+        }
+        ("payAsYouGo", StatusTone::Neutral, None, None) => true,
+        _ => false,
+    }
 }
 
 fn has_duplicate_ids<'a>(mut ids: impl Iterator<Item = &'a str>) -> bool {
@@ -674,8 +689,8 @@ mod tests {
     use crate::{
         models::{
             MetricDefinition, MetricSection, MetricSource, ProviderDefinition, ProviderErrorKind,
-            ProviderSnapshot, ProviderViewState, QuotaFormat, QuotaWindow, SnapshotSource,
-            StatusMetric, StatusTone, UsageHistory,
+            ProviderNotice, ProviderNoticeTone, ProviderSnapshot, ProviderViewState, QuotaFormat,
+            QuotaWindow, SnapshotSource, StatusMetric, StatusMetricUnit, StatusTone, UsageHistory,
         },
         policy::{FAILURE_RETRY_BACKOFF, STALE_AFTER},
         providers::{
@@ -1029,9 +1044,9 @@ mod tests {
                     "S",
                 ),
                 MetricDefinition::status(
-                    "dynamic.extra",
+                    "dynamic.payAsYouGo",
                     "Extra Usage",
-                    "extra",
+                    "payAsYouGo",
                     true,
                     MetricSection::OnDemand,
                     false,
@@ -1055,14 +1070,54 @@ mod tests {
             source_note: None,
         });
         snapshot.status_metrics.push(StatusMetric {
-            id: "extra".into(),
+            id: "payAsYouGo".into(),
             label: "Extra Usage".into(),
             text: "2500 cap".into(),
             tone: StatusTone::Positive,
             subtitle: None,
+            value: None,
+            unit: None,
         });
 
         assert!(validate_snapshot(&registry, "dynamic", snapshot.clone()).is_ok());
+
+        let mut typed_cap = snapshot.clone();
+        typed_cap.status_metrics[0].text.clear();
+        typed_cap.status_metrics[0].value = Some(2500.0);
+        typed_cap.status_metrics[0].unit = Some(StatusMetricUnit::Cap);
+        assert!(validate_snapshot(&registry, "dynamic", typed_cap.clone()).is_ok());
+
+        let mut disabled = typed_cap.clone();
+        disabled.status_metrics[0].tone = StatusTone::Neutral;
+        disabled.status_metrics[0].value = None;
+        disabled.status_metrics[0].unit = None;
+        assert!(validate_snapshot(&registry, "dynamic", disabled).is_ok());
+
+        let mut missing_value = typed_cap.clone();
+        missing_value.status_metrics[0].value = None;
+        assert!(validate_snapshot(&registry, "dynamic", missing_value).is_err());
+
+        let mut nan_value = typed_cap.clone();
+        nan_value.status_metrics[0].value = Some(f64::NAN);
+        assert!(validate_snapshot(&registry, "dynamic", nan_value).is_err());
+
+        let mut unknown_empty = typed_cap.clone();
+        unknown_empty.status_metrics[0].id = "unknown".into();
+        unknown_empty.status_metrics[0].text.clear();
+        unknown_empty.status_metrics[0].value = None;
+        unknown_empty.status_metrics[0].unit = None;
+        assert!(validate_snapshot(&registry, "dynamic", unknown_empty).is_err());
+
+        let mut typed_notice = test_snapshot("dynamic");
+        typed_notice.notices.push(ProviderNotice {
+            id: "rateLimited".into(),
+            title: "Live usage paused".into(),
+            message: String::new(),
+            tone: ProviderNoticeTone::Warning,
+            retry_seconds: Some(60),
+            showing_stale_limits: Some(false),
+        });
+        assert!(validate_snapshot(&registry, "dynamic", typed_notice).is_ok());
 
         let mut missing_unit = snapshot.clone();
         missing_unit.quotas[0].unit = Some(" ".into());

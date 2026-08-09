@@ -80,7 +80,7 @@ pub enum StatusTone {
     Danger,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusMetric {
     pub id: String,
@@ -90,6 +90,16 @@ pub struct StatusMetric {
     pub tone: StatusTone,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtitle: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<StatusMetricUnit>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum StatusMetricUnit {
+    Cap,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -106,6 +116,10 @@ pub struct ProviderNotice {
     pub title: String,
     pub message: String,
     pub tone: ProviderNoticeTone,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub showing_stale_limits: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -158,6 +172,9 @@ pub struct ModelUsageVariant {
 pub struct ModelUsageBreakdown {
     pub models: Vec<ModelUsageEntry>,
     pub source_note: String,
+    /// Stable localization key for the source note. Older snapshots only have `sourceNote`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -327,6 +344,7 @@ pub struct TrayMetricDefinition {
 pub struct MetricDefinition {
     pub id: String,
     pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label_key: Option<String>,
     pub source: MetricSource,
     pub pinnable: bool,
@@ -337,6 +355,11 @@ pub struct MetricDefinition {
 }
 
 impl MetricDefinition {
+    pub fn with_label_key(mut self, key: &str) -> Self {
+        self.label_key = Some(key.to_owned());
+        self
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: impl Into<String>,
@@ -539,8 +562,11 @@ pub struct ProviderDefinition {
     pub display_name: String,
     pub short_name: String,
     pub fallback_enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_usage_source_note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_usage_source_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pi_usage_source_key: Option<String>,
     #[serde(default)]
     pub links: Vec<ProviderLink>,
@@ -770,6 +796,7 @@ impl AppSettings {
 #[serde(rename_all = "camelCase")]
 pub struct SettingsViewState {
     pub settings: AppSettings,
+    pub resolved_language: String,
     pub account_revision: u64,
     pub renamable_provider_ids: Vec<String>,
     pub notification_permission: String,
@@ -781,8 +808,10 @@ pub struct SettingsViewState {
 #[cfg(test)]
 mod tests {
     use super::{
-        ApiKeyStatus, AppSettings, LogLevel, ProviderApiKeyState, ProviderErrorKind, ProviderLink,
-        ProviderSnapshot, ProviderViewState, UsagePeriod, WindowMode,
+        ApiKeyStatus, AppSettings, LogLevel, MetricDefinition, ModelUsageBreakdown,
+        ProviderApiKeyState, ProviderErrorKind, ProviderLink, ProviderNotice, ProviderNoticeTone,
+        ProviderSnapshot, ProviderViewState, StatusMetric, StatusMetricUnit, StatusTone,
+        UsagePeriod, WindowMode,
     };
 
     #[test]
@@ -870,6 +899,82 @@ mod tests {
         )
         .unwrap();
         assert!(period.cost_estimated);
+    }
+
+    #[test]
+    fn older_metric_and_usage_payloads_default_new_semantic_fields() {
+        let metric: MetricDefinition = serde_json::from_value(serde_json::json!({
+            "id": "custom.session",
+            "label": "Custom Session",
+            "source": {
+                "kind": "quota",
+                "sourceId": "session",
+                "sessionWindow": false
+            },
+            "pinnable": true,
+            "defaultEnabled": true,
+            "defaultSection": "alwaysVisible",
+            "defaultPinned": false,
+            "tray": null
+        }))
+        .unwrap();
+        assert_eq!(metric.label_key, None);
+
+        let breakdown: ModelUsageBreakdown = serde_json::from_value(serde_json::json!({
+            "models": [],
+            "sourceNote": "From a custom source"
+        }))
+        .unwrap();
+        assert_eq!(breakdown.source_key, None);
+    }
+
+    #[test]
+    fn older_status_payloads_default_typed_presentation_fields() {
+        let metric: StatusMetric = serde_json::from_value(serde_json::json!({
+            "id": "payAsYouGo",
+            "label": "Extra Usage",
+            "text": "2500 cap",
+            "tone": "positive"
+        }))
+        .unwrap();
+        assert_eq!(metric.value, None);
+        assert_eq!(metric.unit, None);
+
+        let notice: ProviderNotice = serde_json::from_value(serde_json::json!({
+            "id": "rateLimited",
+            "title": "Live usage paused",
+            "message": "Retrying in about 5 minutes",
+            "tone": "warning"
+        }))
+        .unwrap();
+        assert_eq!(notice.retry_seconds, None);
+        assert_eq!(notice.showing_stale_limits, None);
+
+        let status = StatusMetric {
+            id: "payAsYouGo".into(),
+            label: "Extra Usage".into(),
+            text: String::new(),
+            tone: StatusTone::Positive,
+            subtitle: None,
+            value: Some(2500.0),
+            unit: Some(StatusMetricUnit::Cap),
+        };
+        assert_eq!(
+            serde_json::to_value(status).unwrap()["unit"],
+            serde_json::json!("cap")
+        );
+
+        let notice = ProviderNotice {
+            id: "rateLimited".into(),
+            title: "Live usage paused".into(),
+            message: String::new(),
+            tone: ProviderNoticeTone::Warning,
+            retry_seconds: Some(60),
+            showing_stale_limits: Some(true),
+        };
+        let value = serde_json::to_value(notice).unwrap();
+        assert_eq!(value["retrySeconds"], serde_json::json!(60));
+        assert_eq!(value["showingStaleLimits"], serde_json::json!(true));
     }
 
     #[test]

@@ -49,6 +49,7 @@
 {#if (definition?.source.kind === 'quota' || definition?.source.kind === 'quotaOrValue') && quota}
   <QuotaMetric
     {quota}
+    providerId={snapshot.providerId}
     label={definition.label}
     {now}
     usageDisplay={settings.usageDisplay}
@@ -97,7 +98,7 @@
 {:else if definition?.source.kind === 'status'}
   <StatusMetric label={definition.label} metric={statusMetric} />
 {:else if definition?.source.kind === 'usage'}
-  <UsageMetric label={definition.label} {period} />
+  <UsageMetric label={definition.label} {period} sourceNote={resolvedUsageSourceNote} />
 {:else if definition?.source.kind === 'value'}
   <ValueMetric
     label={definition.label}

@@ -52,7 +52,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 true,
                 "C",
-            ),
+            )
+            .with_label_key("credits"),
             MetricDefinition::value(
                 "copilot.extra",
                 "Extra Usage",
@@ -62,7 +63,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "E",
                 None,
-            ),
+            )
+            .with_label_key("extraUsage"),
             MetricDefinition::value(
                 "copilot.orgCredits",
                 "Org Credits",
@@ -72,7 +74,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "OC",
                 None,
-            ),
+            )
+            .with_label_key("orgCredits"),
             MetricDefinition::value(
                 "copilot.orgSpend",
                 "Org Spend",
@@ -82,7 +85,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "OS",
                 None,
-            ),
+            )
+            .with_label_key("orgSpend"),
             MetricDefinition::quota(
                 "copilot.chat",
                 "Chat",
@@ -92,7 +96,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 false,
                 "Ch",
-            ),
+            )
+            .with_label_key("chat"),
             MetricDefinition::quota(
                 "copilot.completions",
                 "Completions",
@@ -102,7 +107,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 false,
                 "Cm",
-            ),
+            )
+            .with_label_key("completions"),
         ],
     }
 }

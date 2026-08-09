@@ -48,7 +48,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 true,
                 "S",
-            ),
+            )
+            .with_label_key("session"),
             MetricDefinition::quota(
                 "antigravity.geminiWeekly",
                 "Weekly",
@@ -58,7 +59,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 true,
                 "W",
-            ),
+            )
+            .with_label_key("weekly"),
             MetricDefinition::quota(
                 "antigravity.claude",
                 "Claude",
@@ -78,7 +80,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 false,
                 "CW",
-            ),
+            )
+            .with_label_key("claudeWeekly"),
         ],
     }
 }

@@ -38,12 +38,6 @@ impl ProviderRegistry {
 
         for provider in providers {
             let mut definition = provider.definition();
-            let (source_key, pi_source_key) = usage_source_keys(&definition.id);
-            definition.local_usage_source_key = source_key.map(str::to_owned);
-            definition.pi_usage_source_key = pi_source_key.map(str::to_owned);
-            for metric in &mut definition.metrics {
-                metric.label_key = metric_label_key(&metric.id).map(str::to_owned);
-            }
             definition.links = definition
                 .links
                 .iter()
@@ -143,57 +137,6 @@ impl ProviderRegistry {
                 })
                 .collect(),
         )
-    }
-}
-
-fn metric_label_key(id: &str) -> Option<&'static str> {
-    let suffix = id.rsplit_once('.').map(|(_, suffix)| suffix).unwrap_or(id);
-    match suffix {
-        "session" => Some("session"),
-        "weekly" => Some("weekly"),
-        "trend" => Some("usageTrend"),
-        "today" => Some("today"),
-        "yesterday" => Some("yesterday"),
-        "last30" => Some("last30Days"),
-        "rateLimitResets" => Some("rateLimitResets"),
-        "onDemand" | "extra" | "payAsYouGo" => Some("extraUsage"),
-        "usage" => Some("totalUsage"),
-        "auto" => Some("autoUsage"),
-        "api" => Some("apiUsage"),
-        "requests" => Some("requestsLabel"),
-        "premium" => Some("credits"),
-        "orgCredits" => Some("orgCredits"),
-        "orgSpend" => Some("orgSpend"),
-        "chat" => Some("chat"),
-        "completions" => Some("completions"),
-        "balance" => Some("balance"),
-        "week" => Some("thisWeek"),
-        "month" => Some("thisMonth"),
-        "keyLimit" => Some("keyLimit"),
-        "webSearches" => Some("webSearches"),
-        "sparkWeekly" => Some("sparkWeekly"),
-        "claudeWeekly" => Some("claudeWeekly"),
-        "credits" => match id {
-            "codex.credits" => Some("extraUsage"),
-            _ => Some("credits"),
-        },
-        _ => None,
-    }
-}
-
-fn usage_source_keys(id: &str) -> (Option<&'static str>, Option<&'static str>) {
-    match id {
-        "claude" => (
-            Some("estimatedUsageHistorySource"),
-            Some("estimatedHistoryWithPiSource"),
-        ),
-        "codex" | "grok" => (
-            Some("estimatedLogsSource"),
-            Some("estimatedLogsWithPiSource"),
-        ),
-        "cursor" => (Some("cursorExportSource"), None),
-        "opencode" => (Some("openCodeDatabaseSource"), None),
-        _ => (Some("usageHistorySource"), None),
     }
 }
 
@@ -407,6 +350,28 @@ mod tests {
         assert!(registry.runtime("second").is_some());
         assert!(registry.definition("first").is_some());
         assert!(registry.metric("first.session").is_some());
+    }
+
+    #[test]
+    fn metric_labels_use_explicit_keys_without_id_suffix_inference() {
+        let mut custom = definition("custom");
+        custom.metrics[0].label = "Custom Session".into();
+        let custom_registry = ProviderRegistry::new(vec![runtime(custom)]).unwrap();
+        assert_eq!(
+            custom_registry.metric("custom.session").unwrap().label_key,
+            None
+        );
+
+        let builtin =
+            ProviderRegistry::new(vec![runtime(crate::providers::codex::definition())]).unwrap();
+        assert_eq!(
+            builtin
+                .metric("codex.session")
+                .unwrap()
+                .label_key
+                .as_deref(),
+            Some("session")
+        );
     }
 
     #[test]

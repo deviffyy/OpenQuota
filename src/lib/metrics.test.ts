@@ -1,6 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { codexState, providerCatalog } from '../test/appFixtures';
-import { ProviderCatalogIndex, usageSourceNote } from './metrics';
+import { setUiLanguage } from './i18n';
+import {
+  localizedNoticeMessage,
+  localizedNoticeTitle,
+  localizedStatusText,
+  ProviderCatalogIndex,
+  usageSourceNote,
+} from './metrics';
+import type { ProviderNotice, StatusMetric } from './types';
+
+afterEach(() => setUiLanguage('en'));
 
 describe('provider catalog index', () => {
   it('indexes provider identity and metric metadata from bootstrap data', () => {
@@ -41,9 +51,12 @@ describe('provider catalog index', () => {
     snapshot.usage.last30Days!.modelBreakdown = {
       models: [],
       sourceNote: 'From your Codex logs and pi (estimated)',
+      sourceKey: 'estimatedLogsWithPiSource',
     };
 
     expect(usageSourceNote(catalog, snapshot)).toBe('From your Codex logs and pi (estimated)');
+    snapshot.usage.last30Days!.modelBreakdown!.sourceKey = null;
+    expect(usageSourceNote(catalog, snapshot)).toBe('From your Codex logs (estimated)');
     snapshot.usage.last30Days!.modelBreakdown = null;
     snapshot.usage.today!.modelBreakdown = null;
     snapshot.usage.yesterday!.modelBreakdown = null;
@@ -61,5 +74,60 @@ describe('provider catalog index', () => {
     expect(() => new ProviderCatalogIndex({ providers: [duplicateMetric] })).toThrow(
       'Duplicate metric definition: codex.session',
     );
+  });
+
+  it('localizes typed Grok caps and Claude retry notices in all shipped languages', () => {
+    const cap: StatusMetric = {
+      id: 'payAsYouGo',
+      label: 'Extra Usage',
+      text: '',
+      tone: 'positive',
+      value: 12.5,
+      unit: 'cap',
+    };
+    const notice: ProviderNotice = {
+      id: 'rateLimited',
+      title: 'Live usage paused',
+      message: '',
+      tone: 'warning',
+      retrySeconds: 60,
+      showingStaleLimits: true,
+    };
+
+    setUiLanguage('en');
+    expect(localizedStatusText(cap)).toBe('12.5 cap');
+    expect(localizedNoticeTitle(notice)).toBe('Live usage paused');
+    expect(localizedNoticeMessage(notice)).toBe(
+      'Showing the last successful limits · Retrying in about 1 minute',
+    );
+
+    setUiLanguage('zh-CN');
+    expect(localizedStatusText(cap)).toBe('上限 12.5');
+    expect(localizedNoticeTitle(notice)).toBe('实时用量已暂停');
+    expect(localizedNoticeMessage(notice)).toBe('显示上次成功获取的限额 · 约 1 分钟后重试');
+
+    setUiLanguage('zh-TW');
+    expect(localizedStatusText(cap)).toBe('上限 12.5');
+    expect(localizedNoticeTitle(notice)).toBe('即時用量已暫停');
+    expect(localizedNoticeMessage(notice)).toBe('顯示上次成功取得的限額 · 大約 1 分鐘後重試');
+  });
+
+  it('keeps untyped and unknown status text untouched', () => {
+    const status: StatusMetric = {
+      id: 'custom.status',
+      label: 'Custom',
+      text: 'Provider text',
+      tone: 'positive',
+    };
+    const notice: ProviderNotice = {
+      id: 'customNotice',
+      title: 'Provider title',
+      message: 'Provider message',
+      tone: 'info',
+    };
+    setUiLanguage('zh-TW');
+    expect(localizedStatusText(status)).toBe('Provider text');
+    expect(localizedNoticeTitle(notice)).toBe('Provider title');
+    expect(localizedNoticeMessage(notice)).toBe('Provider message');
   });
 });

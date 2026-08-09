@@ -22,6 +22,7 @@ use super::GrokError;
 
 const LOG_CACHE_SCHEMA_VERSION: u8 = 1;
 const SOURCE_NOTE: &str = "From your Grok logs (estimated)";
+const SOURCE_KEY: &str = "estimatedLogsSource";
 
 #[derive(Debug, Clone)]
 pub struct GrokLogUsageScanner {
@@ -224,7 +225,7 @@ fn aggregate(events: Vec<TokenEvent>, now: DateTime<Utc>, pricing: &ModelPricing
             accumulator.add_unknown_model(date, model);
         }
     }
-    accumulator.build(now, SOURCE_NOTE)
+    accumulator.build_with_source_key(now, SOURCE_NOTE, Some(SOURCE_KEY))
 }
 
 fn integer_u64(value: &Value) -> Option<u64> {

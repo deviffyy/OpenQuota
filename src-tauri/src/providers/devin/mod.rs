@@ -42,7 +42,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 false,
                 "D",
-            ),
+            )
+            .with_label_key("daily"),
             MetricDefinition::quota(
                 "devin.weekly",
                 "Weekly",
@@ -52,7 +53,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 false,
                 "W",
-            ),
+            )
+            .with_label_key("weekly"),
             MetricDefinition::value(
                 "devin.extra",
                 "Extra Balance",
@@ -62,7 +64,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "E",
                 None,
-            ),
+            )
+            .with_label_key("extraBalance"),
         ],
     }
 }

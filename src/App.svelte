@@ -116,7 +116,7 @@
     if (settingsState.settings.theme === 'system') delete root.dataset.theme;
     else root.dataset.theme = settingsState.settings.theme;
     root.dataset.density = settingsState.settings.density;
-    setUiLanguage(settingsState.settings.language);
+    setUiLanguage(settingsState.settings.language, settingsState.resolvedLanguage);
     root.lang = getUiLanguage();
   });
 
@@ -520,7 +520,7 @@
     event.preventDefault();
     void getCurrentWindow()
       .startDragging()
-      .catch(() => (settingsError = 'OpenQuota window could not be moved.'));
+      .catch(() => (settingsError = t('windowMoveFailed')));
   }
   async function changePanelHeightMode(mode: PanelHeightMode) {
     if (!('__TAURI_INTERNALS__' in window)) return;

@@ -92,7 +92,7 @@
         >
         <label class="switch"
           ><input
-            aria-label={t('enable', { label: provider.id })}
+            aria-label={t('enable', { label: providerDisplayName(provider.id) })}
             type="checkbox"
             checked={provider.enabled}
             onchange={(event) =>
@@ -102,7 +102,7 @@
         <button
           class="chevron"
           type="button"
-          aria-label={t('customizeProvider', { label: provider.id })}
+          aria-label={t('customizeProvider', { label: providerDisplayName(provider.id) })}
           onclick={() => onOpen(provider.id)}
           ><Icon name="chevron-right" size={13} strokeWidth={2.2} /></button
         >

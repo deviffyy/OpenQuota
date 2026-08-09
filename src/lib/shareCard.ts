@@ -1,4 +1,9 @@
-import type { ProviderCatalogIndex } from './metrics';
+import {
+  localizedNoticeMessage,
+  localizedNoticeTitle,
+  localizedStatusText,
+  type ProviderCatalogIndex,
+} from './metrics';
 import { t } from './i18n';
 import {
   formatMetricNumber,
@@ -116,7 +121,12 @@ export function buildProviderShareRows(
   let previousTextSection: ProviderLayout['metrics'][number]['section'] | null = null;
 
   for (const notice of snapshot.notices) {
-    rows.push({ kind: 'text', label: notice.title, value: notice.message, condensed: false });
+    rows.push({
+      kind: 'text',
+      label: localizedNoticeTitle(notice),
+      value: localizedNoticeMessage(notice),
+      condensed: false,
+    });
   }
 
   for (const metric of visible) {
@@ -168,7 +178,7 @@ export function buildProviderShareRows(
       rows.push({
         kind: 'text',
         label: definition.label,
-        value: statusMetric?.text ?? t('noData'),
+        value: statusMetric ? localizedStatusText(statusMetric) : t('noData'),
         condensed: previousTextSection === metric.section,
       });
       previousTextSection = metric.section;
@@ -331,13 +341,19 @@ function quotaShareRow(
   });
   let fillPercent = settings.usageDisplay === 'used' ? used : remaining;
   if (quota.format === 'count' && quota.usedValue !== null && quota.limitValue !== null) {
+    const unit = quota.unit?.trim();
     const displayed =
       settings.usageDisplay === 'left'
         ? Math.max(0, quota.limitValue - quota.usedValue)
         : quota.usedValue;
     reading = t(settings.usageDisplay === 'left' ? 'countLeft' : 'countUsed', {
       count: formatMetricNumber(displayed, 'count', 'full'),
-      unit: quota.unit?.trim() || t('requests'),
+      unit:
+        unit === 'searches'
+          ? t('searches')
+          : unit === 'requests'
+            ? t('requests')
+            : unit || t('requests'),
     });
   }
   if (quota.format === 'dollars' && quota.usedValue !== null) {

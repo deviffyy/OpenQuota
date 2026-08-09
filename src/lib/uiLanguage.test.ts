@@ -140,6 +140,17 @@ describe('native UI language contract', () => {
     expect(normalizeLanguagePreference('broken')).toBe('en');
   });
 
+  it('uses the native resolved language for the system preference', () => {
+    setUiLanguage('system', 'zh-TW');
+    expect(getUiLanguage()).toBe('zh-TW');
+    expect(getLanguagePreference()).toBe('system');
+    setUiLanguage('en', 'zh-TW');
+    expect(getUiLanguage()).toBe('en');
+    setUiLanguage('zh-CN', 'en');
+    expect(getUiLanguage()).toBe('zh-CN');
+    setUiLanguage('system', 'not-a-language');
+  });
+
   it('uses English as the complete catalog and falls back for partial catalogs', () => {
     expect(Object.keys(en).length).toBeGreaterThan(0);
     expect(Object.keys(messages.en).sort()).toEqual(Object.keys(en).sort());

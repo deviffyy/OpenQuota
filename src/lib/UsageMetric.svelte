@@ -9,8 +9,9 @@
   interface Props {
     label: string;
     period: UsagePeriod | null;
+    sourceNote?: string;
   }
-  let { label, period }: Props = $props();
+  let { label, period, sourceNote }: Props = $props();
   let open = $state(false);
   let detailTop = $state(8);
   let showTimer: ReturnType<typeof setTimeout> | undefined;
@@ -101,6 +102,7 @@
   <ModelUsageDetail
     title={label}
     breakdown={period.modelBreakdown}
+    sourceNote={sourceNote ?? t('estimatedLocallyShort')}
     top={detailTop}
     onEnter={keepOpen}
     onLeave={scheduleHide}

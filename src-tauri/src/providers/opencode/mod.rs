@@ -19,7 +19,7 @@ use crate::{
 
 use self::{
     paths::OpenCodePaths,
-    scanner::{OpenCodeUsageScanner, USAGE_SOURCE_NOTE},
+    scanner::{OpenCodeUsageScanner, USAGE_SOURCE_KEY, USAGE_SOURCE_NOTE},
     windows::OpenCodeWindows,
 };
 
@@ -32,7 +32,7 @@ pub(crate) fn definition() -> ProviderDefinition {
         short_name: "OC".into(),
         fallback_enabled: false,
         local_usage_source_note: Some(USAGE_SOURCE_NOTE.into()),
-        local_usage_source_key: None,
+        local_usage_source_key: Some(USAGE_SOURCE_KEY.into()),
         pi_usage_source_key: None,
         links: vec![ProviderLink::new("Dashboard", "https://opencode.ai/auth")],
         metrics: vec![
@@ -45,7 +45,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 false,
                 "S",
-            ),
+            )
+            .with_label_key("session"),
             MetricDefinition::quota(
                 "opencode.weekly",
                 "Weekly",
@@ -55,7 +56,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 false,
                 "W",
-            ),
+            )
+            .with_label_key("weekly"),
             MetricDefinition::quota(
                 "opencode.monthly",
                 "Monthly",
@@ -65,29 +67,33 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 false,
                 "M",
-            ),
-            MetricDefinition::trend("opencode.trend"),
+            )
+            .with_label_key("monthly"),
+            MetricDefinition::trend("opencode.trend").with_label_key("usageTrend"),
             MetricDefinition::usage(
                 "opencode.today",
                 "Today",
                 UsagePeriodSelection::Today,
                 MetricSection::OnDemand,
                 "T",
-            ),
+            )
+            .with_label_key("today"),
             MetricDefinition::usage(
                 "opencode.yesterday",
                 "Yesterday",
                 UsagePeriodSelection::Yesterday,
                 MetricSection::OnDemand,
                 "Y",
-            ),
+            )
+            .with_label_key("yesterday"),
             MetricDefinition::usage(
                 "opencode.last30",
                 "Last 30 Days",
                 UsagePeriodSelection::Last30Days,
                 MetricSection::OnDemand,
                 "30",
-            ),
+            )
+            .with_label_key("last30Days"),
         ],
     }
 }

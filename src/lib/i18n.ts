@@ -22,6 +22,10 @@ export function normalizeLanguagePreference(value: unknown): LanguagePreference 
   return 'en';
 }
 
+function normalizeUiLanguage(value: unknown): UiLanguage | undefined {
+  return value === 'en' || value === 'zh-CN' || value === 'zh-TW' ? value : undefined;
+}
+
 export function normalizeLocaleTag(language: string): string {
   return language.trim().split(/[.@]/, 1)[0].replace(/_/g, '-').toLowerCase();
 }
@@ -46,9 +50,12 @@ let currentLanguage: UiLanguage = resolveSystemLanguage();
 export const uiLanguage = writable<UiLanguage>(currentLanguage);
 const reactiveUiLanguage = fromStore(uiLanguage);
 
-export function setUiLanguage(value: unknown) {
+export function setUiLanguage(value: unknown, resolvedLanguage?: unknown) {
   preference = normalizeLanguagePreference(value);
-  currentLanguage = preference === 'system' ? resolveSystemLanguage() : preference;
+  currentLanguage =
+    preference === 'system'
+      ? (normalizeUiLanguage(resolvedLanguage) ?? resolveSystemLanguage())
+      : preference;
   uiLanguage.set(currentLanguage);
 }
 export function getUiLanguage() {

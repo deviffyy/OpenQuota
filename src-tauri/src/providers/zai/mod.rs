@@ -47,7 +47,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 true,
                 "S",
-            ),
+            )
+            .with_label_key("session"),
             MetricDefinition::quota(
                 "zai.weekly",
                 "Weekly",
@@ -57,7 +58,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 true,
                 "W",
-            ),
+            )
+            .with_label_key("weekly"),
             MetricDefinition::quota(
                 "zai.webSearches",
                 "Web Searches",
@@ -67,7 +69,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 false,
                 "Search",
-            ),
+            )
+            .with_label_key("webSearches"),
         ],
     }
 }

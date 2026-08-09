@@ -42,9 +42,9 @@ export class SettingsController {
         const saved = await saveAppSettings(next, expectedAccountRevision);
         if (revision === this.#revision) this.setState(saved);
       })
-      .catch(async (error: unknown) => {
+      .catch(async () => {
         if (revision !== this.#revision) return;
-        this.onError(typeof error === 'string' ? error : t('settingsSaveFailed'));
+        this.onError(t('settingsSaveFailed'));
         try {
           this.setState(await getAppSettings());
         } catch {

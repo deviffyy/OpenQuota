@@ -7,6 +7,7 @@ use crate::{
     models::{ProviderSnapshot, ProviderViewState},
     pacing::{NotificationEvaluator, PaceAlert},
     popup::PopupDismissGuard,
+    providers::ProviderRegistry,
     service::UsageViewState,
     settings::SettingsService,
     tray_presentation,
@@ -38,7 +39,7 @@ pub fn finish_refresh(
             settings.registry(),
             chrono::Utc::now(),
         );
-        let failed = deliver(app, &alerts, &preferences.language);
+        let failed = deliver(app, &alerts, &preferences.language, settings.registry());
         if !failed.is_empty() {
             notifications.rollback(&failed);
         }
@@ -51,7 +52,12 @@ fn notification_snapshot(state: &ProviderViewState) -> Option<&ProviderSnapshot>
     state.snapshot.as_ref()
 }
 
-fn deliver(app: &AppHandle, alerts: &[PaceAlert], language: &str) -> Vec<PaceAlert> {
+fn deliver(
+    app: &AppHandle,
+    alerts: &[PaceAlert],
+    language: &str,
+    registry: &ProviderRegistry,
+) -> Vec<PaceAlert> {
     if permission(app) != "granted" {
         if !alerts.is_empty() {
             crate::app_debug!(
@@ -66,7 +72,10 @@ fn deliver(app: &AppHandle, alerts: &[PaceAlert], language: &str) -> Vec<PaceAle
     alerts
         .iter()
         .filter_map(|alert| {
-            let metric = crate::native_i18n::metric_label(locale, &alert.metric_id, &alert.metric);
+            let metric_key = registry
+                .metric(&alert.metric_id)
+                .and_then(|definition| definition.label_key.as_deref());
+            let metric = crate::native_i18n::metric_label(locale, metric_key, &alert.metric);
             let result = show(
                 app,
                 alert.milestone.title(locale),

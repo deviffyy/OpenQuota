@@ -115,7 +115,7 @@ export function formatResetDetail(
     minute: '2-digit',
     hour12: timeFormat === 'system' ? undefined : timeFormat === 'twelveHour',
   });
-  const dayDifference = Math.floor(timestamp / 86_400_000) - Math.floor(now / 86_400_000);
+  const dayDifference = calendarDayDifference(timestamp, now);
   if (dayDifference <= 0) return t('todayAt', { time });
   if (dayDifference === 1) return t('tomorrowAt', { time });
   const day = new Intl.DateTimeFormat(getFormatLocale(), {
@@ -141,7 +141,7 @@ function formatDeadline(
   }
 
   const date = new Date(value);
-  const dayDifference = Math.floor(value / 86_400_000) - Math.floor(now / 86_400_000);
+  const dayDifference = calendarDayDifference(value, now);
   const time = date.toLocaleTimeString(getFormatLocale(), {
     hour: 'numeric',
     minute: '2-digit',
@@ -168,6 +168,14 @@ function formatDuration(milliseconds: number) {
       ? t('durationHoursMinutes', { hours, minutes: remainder })
       : t('durationHours', { hours });
   return t('durationMinutes', { minutes: remainder });
+}
+
+function calendarDayDifference(value: number, now: number) {
+  const date = new Date(value);
+  const current = new Date(now);
+  const dateDay = Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  const currentDay = Date.UTC(current.getFullYear(), current.getMonth(), current.getDate());
+  return Math.round((dateDay - currentDay) / 86_400_000);
 }
 
 function level(): PaceProjection {

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { formatLimit, formatReset, paceTooltip, projectPace } from './pacing';
+import { formatLimit, formatReset, formatResetDetail, paceTooltip, projectPace } from './pacing';
 import type { QuotaWindow } from './types';
 
-const now = new Date('2026-07-10T12:00:00Z').getTime();
+const now = new Date(2026, 6, 10, 12).getTime();
 function quota(
   usedPercent: number,
   elapsedFraction: number,
@@ -99,8 +99,20 @@ describe('quota pacing', () => {
     );
   });
 
+  it('uses local calendar days when exact deadlines cross local midnight', () => {
+    const midnight = new Date(2026, 6, 11).getTime();
+    const beforeMidnight = midnight - 30 * 60_000;
+    const afterMidnight = midnight + 30 * 60_000;
+    const reset = new Date(midnight + 60 * 60_000).toISOString();
+
+    expect(formatReset(reset, beforeMidnight, 'exact')).toContain('Resets tomorrow at');
+    expect(formatReset(reset, afterMidnight, 'exact')).toContain('Resets today at');
+    expect(formatResetDetail(reset, beforeMidnight, 'exact')).toContain('Tomorrow at');
+    expect(formatResetDetail(reset, afterMidnight, 'exact')).toContain('Today at');
+  });
+
   it('honors explicit 12-hour and 24-hour clock preferences', () => {
-    const reset = new Date('2026-07-10T18:30:00Z').toISOString();
+    const reset = new Date(2026, 6, 10, 18, 30).toISOString();
     const twelveHour = formatReset(reset, now, 'exact', 'twelveHour');
     const twentyFourHour = formatReset(reset, now, 'exact', 'twentyFourHour');
     const dayPeriod = new Intl.DateTimeFormat('en', { hour: '2-digit', hour12: true })
