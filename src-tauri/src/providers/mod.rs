@@ -160,8 +160,7 @@ pub trait UsageProvider: Send + Sync {
 mod tests {
     use super::{
         antigravity, claude, codex, copilot, cursor, devin, grok, kimi, minimax, opencode,
-        openrouter,
-        remember_default_account, zai, ProviderError,
+        openrouter, remember_default_account, zai, ProviderError,
     };
     use crate::models::ProviderErrorKind;
     use tempfile::tempdir;
@@ -285,8 +284,14 @@ mod tests {
         assert_eq!(
             links(kimi::definition()),
             [
-                ("Dashboard".into(), "https://www.kimi.com/code/console".into()),
-                ("API Keys".into(), "https://www.kimi.com/code/console".into()),
+                (
+                    "Dashboard".into(),
+                    "https://www.kimi.com/code/console".into()
+                ),
+                (
+                    "API Keys".into(),
+                    "https://www.kimi.com/code/console".into()
+                ),
             ]
         );
         assert_eq!(

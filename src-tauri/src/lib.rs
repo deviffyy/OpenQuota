@@ -48,9 +48,8 @@ use crate::{
     providers::{
         antigravity::AntigravityProvider, claude, codex::reset_claim::CodexResetClaimService,
         codex::CodexProvider, copilot::CopilotProvider, cursor::CursorProvider,
-        detect_local_credentials, devin::DevinProvider, grok::GrokProvider,
-        kimi::KimiProvider, minimax::MiniMaxProvider, opencode::OpenCodeProvider,
-        openrouter::OpenRouterProvider,
+        detect_local_credentials, devin::DevinProvider, grok::GrokProvider, kimi::KimiProvider,
+        minimax::MiniMaxProvider, opencode::OpenCodeProvider, openrouter::OpenRouterProvider,
         zai::ZaiProvider, ProviderRegistry, UsageProvider,
     },
     storage::Storage,

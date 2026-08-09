@@ -265,8 +265,9 @@ mod tests {
                 .iter()
                 .map(|quota| quota.id.as_str())
                 .collect::<Vec<_>>(),
-            ["session"]
+            ["session", "weekly"]
         );
+        assert_eq!(snapshot.quotas[1].label, "Weekly (Unlimited)");
     }
 
     #[test]
