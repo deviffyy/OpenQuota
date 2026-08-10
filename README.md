@@ -43,6 +43,8 @@ OpenQuota checks for updates automatically. Installable updates are cryptographi
 
 - **[Claude Code](docs/providers/claude.md)** — multiple accounts, session and weekly limits,
   model-specific usage, token history, and estimated spend
+- **[Command Code](docs/providers/commandcode.md)** — session and weekly credit limits, monthly
+  subscription credits, and extra-credit balance
 - **[Codex](docs/providers/codex.md)** — session and weekly limits, credits, token history, model
   breakdown, and estimated spend
 - **[Cursor](docs/providers/cursor.md)** — total, Auto and API usage, credits, token history, and
@@ -61,10 +63,11 @@ OpenQuota checks for updates automatically. Installable updates are cryptographi
 - **[Kimi](docs/providers/kimi.md)** — Kimi Code session and weekly quotas (API key)
 - **[MiniMax](docs/providers/minimax.md)** — Token Plan session and weekly quotas (API key)
 
-Most providers use credentials already available on your computer. OpenRouter, Z.ai, Kimi, and
-MiniMax require API keys, which you can add in Customize; OpenQuota stores them securely in your
-operating system's credential store. Codex subscription limits require a ChatGPT login and are not
-available in API-key-only sessions.
+Most providers use credentials already available on your computer. Command Code reads the local
+session created by `command-code login`. OpenRouter, Z.ai, Kimi, and MiniMax require API keys,
+which you can add in Customize; OpenQuota stores them securely in your operating system's credential
+store. Codex subscription limits require a ChatGPT login and are not available in API-key-only
+sessions.
 
 ## Features
 

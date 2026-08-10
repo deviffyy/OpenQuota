@@ -23,6 +23,7 @@ const STACKED_BASELINES: [f32; 2] = [15.0, 32.0];
 const FONT_SOURCE: &[u8] = include_bytes!("../assets/fonts/Poppins-SemiBold.ttf");
 
 const CLAUDE_ICON: &str = include_str!("../../src/assets/provider-icons/claude.svg");
+const COMMANDCODE_ICON: &str = include_str!("../../src/assets/provider-icons/commandcode.svg");
 const CODEX_ICON: &str = include_str!("../../src/assets/provider-icons/codex.svg");
 const COPILOT_ICON: &str = include_str!("../../src/assets/provider-icons/copilot.svg");
 const CURSOR_ICON: &str = include_str!("../../src/assets/provider-icons/cursor.svg");
@@ -270,6 +271,7 @@ fn provider_path(provider_id: &str) -> Option<&'static Path> {
     }
 
     static CLAUDE: OnceLock<Path> = OnceLock::new();
+    static COMMANDCODE: OnceLock<Path> = OnceLock::new();
     static CODEX: OnceLock<Path> = OnceLock::new();
     static COPILOT: OnceLock<Path> = OnceLock::new();
     static CURSOR: OnceLock<Path> = OnceLock::new();
@@ -283,6 +285,7 @@ fn provider_path(provider_id: &str) -> Option<&'static Path> {
     static MINIMAX: OnceLock<Path> = OnceLock::new();
     match crate::providers::provider_family(provider_id) {
         "claude" => Some(parsed(CLAUDE_ICON, &CLAUDE)),
+        "commandcode" => Some(parsed(COMMANDCODE_ICON, &COMMANDCODE)),
         "codex" => Some(parsed(CODEX_ICON, &CODEX)),
         "copilot" => Some(parsed(COPILOT_ICON, &COPILOT)),
         "cursor" => Some(parsed(CURSOR_ICON, &CURSOR)),
@@ -588,6 +591,7 @@ mod tests {
     fn bundled_provider_marks_and_font_render_into_a_retina_text_strip() {
         for provider in [
             "claude",
+            "commandcode",
             "codex",
             "copilot",
             "cursor",
