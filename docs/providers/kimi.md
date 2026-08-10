@@ -2,6 +2,13 @@
 
 OpenQuota tracks the Session (rolling five-hour) and Weekly quotas of a Kimi Code membership.
 
+## What it tracks
+
+| Metric  | Meaning                                      |
+| ------- | -------------------------------------------- |
+| Session | Usage remaining in the rolling 5-hour window |
+| Weekly  | Usage remaining in the rolling 7-day window  |
+
 ## Setup
 
 Create a Kimi Code API key in the [Kimi Code Console](https://www.kimi.com/code/console), then add
