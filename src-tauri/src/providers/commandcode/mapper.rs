@@ -34,14 +34,28 @@ pub fn map_usage(
         .get("credits")
         .and_then(Value::as_object)
         .ok_or(CommandCodeError::InvalidResponse)?;
+    let monthly_reset = subscription
+        .body
+        .pointer("/data/currentPeriodEnd")
+        .and_then(timestamp);
     let mut values = Vec::new();
     if let Some(monthly) = number(credits_body.get("monthlyCredits")) {
-        values.push(dollars_metric("monthlyCredits", "Monthly Credits", monthly));
+        values.push(dollars_metric(
+            "monthlyCredits",
+            "Monthly Credits",
+            monthly,
+            monthly_reset.into_iter().collect(),
+        ));
     }
     if let Some(purchased) =
         number(credits_body.get("purchasedCredits")).filter(|value| *value > 0.0)
     {
-        values.push(dollars_metric("extraCredits", "Extra Credits", purchased));
+        values.push(dollars_metric(
+            "extraCredits",
+            "Extra Credits",
+            purchased,
+            Vec::new(),
+        ));
     }
     Ok(CommandCodeMappedUsage {
         plan: subscription
@@ -84,7 +98,7 @@ fn quota(
         id: id.into(),
         label: label.into(),
         used_percent: (used / cap * 100.0).clamp(0.0, 100.0),
-        resets_at: value.get("resetAt").and_then(iso_time),
+        resets_at: value.get("resetAt").and_then(timestamp),
         period_seconds,
         format: QuotaFormat::Dollars,
         used_value: Some(used.min(cap)),
@@ -95,7 +109,12 @@ fn quota(
     })
 }
 
-fn dollars_metric(id: &str, label: &str, amount: f64) -> ValueMetric {
+fn dollars_metric(
+    id: &str,
+    label: &str,
+    amount: f64,
+    expiries_at: Vec<DateTime<Utc>>,
+) -> ValueMetric {
     ValueMetric {
         id: id.into(),
         label: label.into(),
@@ -105,7 +124,7 @@ fn dollars_metric(id: &str, label: &str, amount: f64) -> ValueMetric {
             label: Some("remaining".into()),
             estimated: false,
         }],
-        expiries_at: Vec::new(),
+        expiries_at,
     }
 }
 
@@ -137,15 +156,23 @@ fn number(value: Option<&Value>) -> Option<f64> {
         .filter(|value| value.is_finite())
 }
 
-fn iso_time(value: &Value) -> Option<DateTime<Utc>> {
-    value
-        .as_str()
-        .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
-        .map(|value| value.with_timezone(&Utc))
+fn timestamp(value: &Value) -> Option<DateTime<Utc>> {
+    if let Some(value) = value.as_str() {
+        return DateTime::parse_from_rfc3339(value)
+            .ok()
+            .map(|value| value.with_timezone(&Utc));
+    }
+    let value = value.as_i64()?;
+    if value.unsigned_abs() >= 100_000_000_000 {
+        DateTime::from_timestamp_millis(value)
+    } else {
+        DateTime::from_timestamp(value, 0)
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use chrono::{DateTime, Utc};
     use reqwest::StatusCode;
     use serde_json::json;
 
@@ -165,7 +192,13 @@ mod tests {
         };
         let subscription = EndpointResponse {
             status: StatusCode::OK,
-            body: json!({"success": true, "data": {"planId": "individual-goat"}}),
+            body: json!({
+                "success": true,
+                "data": {
+                    "planId": "individual-goat",
+                    "currentPeriodEnd": "2026-09-01T12:00:00Z"
+                }
+            }),
         };
 
         let mapped = map_usage(&credits, &subscription).unwrap();
@@ -175,5 +208,40 @@ mod tests {
         assert_eq!(mapped.value_metrics.len(), 2);
         assert_eq!(mapped.value_metrics[0].id, "monthlyCredits");
         assert_eq!(mapped.value_metrics[0].values[0].number, 7.5);
+        assert_eq!(
+            mapped.value_metrics[0].expiries_at,
+            vec![DateTime::parse_from_rfc3339("2026-09-01T12:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc)]
+        );
+    }
+
+    #[test]
+    fn parses_epoch_seconds_and_milliseconds_for_window_resets() {
+        let credits = EndpointResponse {
+            status: StatusCode::OK,
+            body: json!({
+                "credits": {"monthlyCredits": 7.5},
+                "windowLimits": {
+                    "fiveHour": {"cap": 3, "used": 0, "resetAt": 1_800_000_000},
+                    "weekly": {"cap": 6, "used": 0, "resetAt": 1_800_000_000_000i64}
+                }
+            }),
+        };
+        let subscription = EndpointResponse {
+            status: StatusCode::OK,
+            body: json!({"data": {"planId": "individual-go"}}),
+        };
+
+        let mapped = map_usage(&credits, &subscription).unwrap();
+        assert_eq!(
+            mapped.quotas[0].resets_at,
+            Some(
+                DateTime::parse_from_rfc3339("2027-01-15T08:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc)
+            )
+        );
+        assert_eq!(mapped.quotas[1].resets_at, mapped.quotas[0].resets_at);
     }
 }
