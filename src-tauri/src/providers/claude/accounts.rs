@@ -6,10 +6,10 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use super::auth::{self, ClaudeCredentialScope};
 use crate::{
+    hashing::sha256_hex,
     providers::credential_store::generic_password_service_exists,
     storage::{Storage, StorageError},
 };
@@ -209,10 +209,7 @@ fn allocate_account_id(identity_stamp: &str, occupied: &HashSet<String>) -> Stri
         let stamp = if salt == 0 {
             identity_stamp.to_owned()
         } else {
-            format!(
-                "{:x}",
-                Sha256::digest(format!("{identity_stamp}:{salt}").as_bytes())
-            )
+            sha256_hex(format!("{identity_stamp}:{salt}").as_bytes())
         };
         let candidate = format!("claude@{}", &stamp[..8]);
         if !occupied.contains(&candidate) {
@@ -438,10 +435,7 @@ fn account_display_name_for_id(label: Option<&str>, id: &str) -> String {
 }
 
 fn identity_stamp(identity: &str) -> String {
-    format!(
-        "{:x}",
-        Sha256::digest(identity.to_ascii_lowercase().as_bytes())
-    )
+    sha256_hex(identity.to_ascii_lowercase().as_bytes())
 }
 
 fn candidate_directories(home: &Path) -> Vec<PathBuf> {

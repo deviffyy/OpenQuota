@@ -8,10 +8,10 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use reqwest::StatusCode;
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 use crate::{
+    hashing::sha256_hex,
     models::{
         MetricDefinition, MetricSection, ProviderDefinition, ProviderLink, ProviderSnapshot,
         UsagePeriodSelection,
@@ -346,7 +346,7 @@ impl CodexProvider {
 }
 
 fn account_identity_key(identity: &str) -> String {
-    format!("{:x}", Sha256::digest(identity.as_bytes()))
+    sha256_hex(identity.as_bytes())
 }
 
 fn validate_account_identity(

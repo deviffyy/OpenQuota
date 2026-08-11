@@ -7,9 +7,9 @@ use std::{
 };
 
 use serde_json::{Map, Value};
-use sha2::{Digest, Sha256};
 
 use crate::{
+    hashing::sha256_hex,
     models::{
         AppSettings, MetricDefinition, MetricLayout, MetricSection, ProviderCatalog,
         ProviderDefinition, ProviderLayout, SettingsViewState,
@@ -753,11 +753,7 @@ fn allocate_account_provider_id(
         {
             identity[..8].to_ascii_lowercase()
         } else {
-            format!(
-                "{:x}",
-                Sha256::digest(format!("{identity}:{salt}").as_bytes())
-            )[..8]
-                .to_owned()
+            sha256_hex(format!("{identity}:{salt}").as_bytes())[..8].to_owned()
         };
         let candidate = format!("{family}@{suffix}");
         if !occupied.contains(candidate.as_str()) {

@@ -8,7 +8,10 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tempfile::NamedTempFile;
 
-use crate::providers::credential_store::{read_generic_password, write_generic_password};
+use crate::{
+    hashing::sha256_hex,
+    providers::credential_store::{read_generic_password, write_generic_password},
+};
 
 use super::ClaudeError;
 
@@ -530,7 +533,7 @@ pub(super) fn scoped_keychain_service_name(config_dir_literal: &str) -> String {
     let suffix = resolved_oauth_settings().3;
     let service = format!("Claude Code{suffix}-credentials");
     let normalized = config_dir_literal.replace('\\', "/");
-    let hash = format!("{:x}", Sha256::digest(normalized.as_bytes()));
+    let hash = sha256_hex(normalized.as_bytes());
     format!("{service}-{}", &hash[..8])
 }
 

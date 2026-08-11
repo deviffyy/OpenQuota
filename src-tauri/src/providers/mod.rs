@@ -9,7 +9,9 @@ mod daily_usage;
 mod detection;
 pub mod devin;
 pub mod grok;
+pub mod kimi;
 mod log_usage;
+pub mod minimax;
 pub mod opencode;
 pub mod openrouter;
 mod pi_usage;
@@ -157,8 +159,8 @@ pub trait UsageProvider: Send + Sync {
 #[cfg(test)]
 mod tests {
     use super::{
-        antigravity, claude, codex, copilot, cursor, devin, grok, opencode, openrouter,
-        remember_default_account, zai, ProviderError,
+        antigravity, claude, codex, copilot, cursor, devin, grok, kimi, minimax, opencode,
+        openrouter, remember_default_account, zai, ProviderError,
     };
     use crate::models::ProviderErrorKind;
     use tempfile::tempdir;
@@ -276,6 +278,32 @@ mod tests {
                 (
                     "API Keys".into(),
                     "https://z.ai/manage-apikey/apikey-list".into()
+                ),
+            ]
+        );
+        assert_eq!(
+            links(kimi::definition()),
+            [
+                (
+                    "Dashboard".into(),
+                    "https://www.kimi.com/code/console".into()
+                ),
+                (
+                    "API Keys".into(),
+                    "https://www.kimi.com/code/console".into()
+                ),
+            ]
+        );
+        assert_eq!(
+            links(minimax::definition()),
+            [
+                (
+                    "Dashboard".into(),
+                    "https://platform.minimax.io/console/plan".into()
+                ),
+                (
+                    "API Keys".into(),
+                    "https://platform.minimax.io/console/access".into()
                 ),
             ]
         );
