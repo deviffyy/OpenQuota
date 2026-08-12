@@ -1,8 +1,9 @@
+mod client;
 mod database;
+mod mapper;
 mod paths;
 mod record;
 mod scanner;
-mod windows;
 
 use std::sync::Arc;
 
@@ -18,9 +19,10 @@ use crate::{
 };
 
 use self::{
+    client::OpenCodeClient,
+    mapper::map_go_usage,
     paths::OpenCodePaths,
     scanner::{OpenCodeUsageScanner, USAGE_SOURCE_NOTE},
-    windows::OpenCodeWindows,
 };
 
 use super::{ProviderError, UsageProvider};
@@ -100,15 +102,30 @@ pub(crate) enum OpenCodeError {
     DataDirectoryUnreadable,
     #[error("OpenCode local usage data is temporarily unavailable.")]
     DatabaseUnreadable,
+    #[error("OpenCode Go login data is invalid or expired. Sign in to OpenCode Go again.")]
+    InvalidAuth,
+    #[error("Could not reach OpenCode Go. Check your internet connection.")]
+    ConnectionFailed,
+    #[error("OpenCode Go returned an invalid usage response.")]
+    InvalidResponse,
+    #[error("OpenCode Go usage request failed (HTTP {0}).")]
+    RequestFailed(u16),
 }
 
 impl From<OpenCodeError> for ProviderError {
     fn from(error: OpenCodeError) -> Self {
         let kind = match error {
-            OpenCodeError::NotDetected => ProviderErrorKind::Authentication,
+            OpenCodeError::NotDetected | OpenCodeError::InvalidAuth => {
+                ProviderErrorKind::Authentication
+            }
             OpenCodeError::CredentialsUnreadable => ProviderErrorKind::CredentialStorage,
             OpenCodeError::DataDirectoryUnreadable | OpenCodeError::DatabaseUnreadable => {
                 ProviderErrorKind::LocalData
+            }
+            OpenCodeError::ConnectionFailed => ProviderErrorKind::Network,
+            OpenCodeError::RequestFailed(429) => ProviderErrorKind::RateLimited,
+            OpenCodeError::InvalidResponse | OpenCodeError::RequestFailed(_) => {
+                ProviderErrorKind::InvalidResponse
             }
         };
         ProviderError::new(kind, error.to_string())
@@ -118,6 +135,7 @@ impl From<OpenCodeError> for ProviderError {
 pub struct OpenCodeProvider {
     paths: OpenCodePaths,
     scanner: OpenCodeUsageScanner,
+    client: OpenCodeClient,
     pricing: Arc<PricingStore>,
     now: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
 }
@@ -128,6 +146,7 @@ impl OpenCodeProvider {
         Self {
             scanner: OpenCodeUsageScanner::new(paths.clone()),
             paths,
+            client: OpenCodeClient::new().expect("OpenCode Go client configuration is valid"),
             pricing,
             now: Arc::new(Utc::now),
         }
@@ -142,6 +161,7 @@ impl OpenCodeProvider {
         Self {
             scanner: OpenCodeUsageScanner::new(paths.clone()),
             paths,
+            client: OpenCodeClient::new().expect("OpenCode Go client configuration is valid"),
             pricing,
             now: Arc::new(move || now),
         }
@@ -149,27 +169,46 @@ impl OpenCodeProvider {
 
     fn refresh_snapshot(&self) -> Result<ProviderSnapshot, OpenCodeError> {
         let now = (self.now)();
-        let (has_go_key, go_key_error) = match self.paths.go_api_key() {
-            Ok(Some(_)) => (true, None),
-            Ok(None) => (false, None),
-            Err(error) => (false, Some(error)),
+        let (go_api_key, go_key_error) = match self.paths.go_api_key() {
+            Ok(key) => (key, None),
+            Err(error) => (None, Some(error)),
         };
+        let go_usage = go_api_key
+            .as_deref()
+            .map(|key| self.client.fetch_go_usage(key).and_then(map_go_usage))
+            .transpose();
         let pricing = self.pricing.current();
-        let scan = self.scanner.scan(now, has_go_key, &pricing)?;
+        let scan = self.scanner.scan(now, &pricing);
+
+        let scan = match scan {
+            Ok(scan) => scan,
+            Err(error) => match go_usage {
+                Ok(Some(quotas)) => {
+                    return Ok(snapshot(
+                        Some("Go".into()),
+                        quotas,
+                        UsageHistory::default(),
+                        vec!["OpenCode local usage data is temporarily unavailable.".into()],
+                        now,
+                    ));
+                }
+                _ => return Err(error),
+            },
+        };
 
         let Some(scan) = scan else {
-            if has_go_key {
-                return Ok(snapshot(
+            return match go_usage {
+                Ok(Some(quotas)) => Ok(snapshot(
                     Some("Go".into()),
-                    OpenCodeWindows::compute(&[], None, now).quotas(),
+                    quotas,
                     UsageHistory::default(),
                     Vec::new(),
                     now,
-                ));
-            }
-            return Err(go_key_error.unwrap_or(OpenCodeError::NotDetected));
+                )),
+                Ok(None) => Err(go_key_error.unwrap_or(OpenCodeError::NotDetected)),
+                Err(error) => Err(error),
+            };
         };
-
         let mut warnings = scan.warnings;
         if go_key_error.is_some() {
             warnings.push(
@@ -177,10 +216,17 @@ impl OpenCodeProvider {
                     .into(),
             );
         }
-        let (plan, quotas) = scan.go_windows.map_or_else(
-            || (None, Vec::new()),
-            |windows| (Some("Go".into()), windows.quotas()),
-        );
+        let (plan, quotas) = match go_usage {
+            Ok(Some(quotas)) => (Some("Go".into()), quotas),
+            Ok(None) => (None, Vec::new()),
+            Err(_) => {
+                warnings.push(
+                    "OpenCode Go quota data is temporarily unavailable; local usage is still shown."
+                        .into(),
+                );
+                (None, Vec::new())
+            }
+        };
         Ok(snapshot(plan, quotas, scan.usage, warnings, now))
     }
 }

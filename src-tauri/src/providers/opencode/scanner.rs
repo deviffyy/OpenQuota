@@ -9,8 +9,7 @@ use crate::{
 use super::{
     database::{has_hosted_usage, read_database, DatabaseRead},
     paths::OpenCodePaths,
-    record::{CostProvenance, UsageRecord, GO_PROVIDER_ID},
-    windows::OpenCodeWindows,
+    record::{CostProvenance, UsageRecord},
     OpenCodeError,
 };
 
@@ -21,7 +20,6 @@ pub(crate) const USAGE_SOURCE_NOTE: &str =
 #[derive(Debug)]
 pub(crate) struct OpenCodeUsageScan {
     pub(crate) usage: UsageHistory,
-    pub(crate) go_windows: Option<OpenCodeWindows>,
     pub(crate) warnings: Vec<String>,
 }
 
@@ -48,30 +46,27 @@ impl OpenCodeUsageScanner {
     pub(crate) fn scan(
         &self,
         now: DateTime<Utc>,
-        has_go_key: bool,
         pricing: &ModelPricing,
     ) -> Result<Option<OpenCodeUsageScan>, OpenCodeError> {
         let paths = self.paths.database_files()?;
-        self.scan_paths(paths, now, has_go_key, pricing)
+        self.scan_paths(paths, now, pricing)
     }
 
     pub(crate) fn scan_paths(
         &self,
         mut paths: Vec<PathBuf>,
         now: DateTime<Utc>,
-        has_go_key: bool,
         pricing: &ModelPricing,
     ) -> Result<Option<OpenCodeUsageScan>, OpenCodeError> {
         paths.sort();
         paths.dedup();
-        self.scan_sorted_paths(paths, now, has_go_key, pricing)
+        self.scan_sorted_paths(paths, now, pricing)
     }
 
     fn scan_sorted_paths(
         &self,
         paths: Vec<PathBuf>,
         now: DateTime<Utc>,
-        has_go_key: bool,
         pricing: &ModelPricing,
     ) -> Result<Option<OpenCodeUsageScan>, OpenCodeError> {
         if paths.is_empty() {
@@ -80,7 +75,6 @@ impl OpenCodeUsageScanner {
 
         let cutoff_ms = (now - chrono::Duration::days(SCAN_DAYS)).timestamp_millis();
         let mut records = Vec::new();
-        let mut go_anchor = None;
         let mut usable_databases = 0_usize;
         let mut failed_databases = 0_usize;
         for path in paths {
@@ -89,12 +83,6 @@ impl OpenCodeUsageScanner {
                 Ok(DatabaseRead::Usable(database)) => {
                     usable_databases += 1;
                     records.extend(database.records);
-                    if let Some(candidate) = database.go_anchor {
-                        go_anchor =
-                            Some(go_anchor.map_or(candidate, |current: DateTime<Utc>| {
-                                current.min(candidate)
-                            }));
-                    }
                 }
                 Err(()) => failed_databases += 1,
             }
@@ -108,26 +96,6 @@ impl OpenCodeUsageScanner {
         }
 
         let records = deduplicate(records);
-        let current_records = records
-            .iter()
-            .filter(|record| record.timestamp <= now)
-            .collect::<Vec<_>>();
-        let go_activity = current_records.iter().any(|record| {
-            record.provider_id == GO_PROVIDER_ID
-                && record.cost_provenance == CostProvenance::Exact
-                && record.cost.is_some()
-        });
-        let go_costs = current_records
-            .iter()
-            .filter(|record| {
-                record.provider_id == GO_PROVIDER_ID
-                    && record.cost_provenance == CostProvenance::Exact
-            })
-            .filter_map(|record| record.cost.map(|cost| (record.timestamp, cost)))
-            .collect::<Vec<_>>();
-        let go_windows = (has_go_key || go_activity)
-            .then(|| OpenCodeWindows::compute(&go_costs, go_anchor, now));
-
         let mut warnings = Vec::new();
         if failed_databases > 0 {
             crate::app_warn!(
@@ -141,7 +109,6 @@ impl OpenCodeUsageScanner {
 
         Ok(Some(OpenCodeUsageScan {
             usage: aggregate_history(&records, now),
-            go_windows,
             warnings,
         }))
     }
@@ -247,7 +214,6 @@ mod unit_tests {
         UsageRecord {
             key: ("session".into(), "message".into()),
             timestamp: Utc.with_ymd_and_hms(2026, 7, 18, 10, 0, 0).unwrap(),
-            provider_id: "opencode".into(),
             model: "model".into(),
             tokens,
             cost,

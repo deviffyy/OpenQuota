@@ -119,7 +119,7 @@ fn exact_message(provider: &str, model: &str, cost: f64, input: u64, output: u64
 
 fn scan(paths: Vec<PathBuf>) -> super::scanner::OpenCodeUsageScan {
     OpenCodeUsageScanner::for_paths(paths.clone())
-        .scan_paths(paths, now(), false, &pricing())
+        .scan_paths(paths, now(), &pricing())
         .unwrap()
         .unwrap()
 }
@@ -195,42 +195,6 @@ fn multiple_databases_are_merged_and_duplicate_messages_count_once() {
     assert_eq!(today.tokens, 500);
     assert_eq!(today.estimated_cost_usd, Some(5.0));
     assert!(!today.cost_estimated);
-    assert_eq!(result.go_windows.unwrap().session_spend, 2.0);
-}
-
-#[test]
-fn costless_old_go_rows_do_not_shift_the_monthly_anchor() {
-    let directory = tempdir().unwrap();
-    let path = directory.path().join("opencode.db");
-    let connection = create_database(&path, false);
-    insert_message(
-        &connection,
-        "old-session",
-        "old-message",
-        Utc.with_ymd_and_hms(2026, 1, 31, 9, 0, 0)
-            .unwrap()
-            .timestamp_millis(),
-        r#"{
-            "role":"assistant",
-            "providerID":"opencode-go",
-            "modelID":"priced-model",
-            "tokens":{"total":100,"input":100,"output":0}
-        }"#,
-    );
-    insert_message(
-        &connection,
-        "current-session",
-        "current-message",
-        timestamp(),
-        &exact_message("opencode-go", "priced-model", 2.0, 200, 0),
-    );
-    drop(connection);
-
-    let windows = scan(vec![path]).go_windows.unwrap();
-    assert_eq!(
-        windows.monthly_resets_at,
-        Utc.with_ymd_and_hms(2026, 8, 18, 10, 0, 0).unwrap()
-    );
 }
 
 #[test]
@@ -370,10 +334,6 @@ fn epoch_second_rows_and_invalid_message_cost_fall_back_to_valid_parts() {
     assert_eq!(today.tokens, 125);
     assert_eq!(today.estimated_cost_usd, Some(1.5));
     assert!(!today.cost_estimated);
-    assert_eq!(
-        result.go_windows.unwrap().monthly_resets_at,
-        Utc.with_ymd_and_hms(2026, 8, 18, 10, 0, 0).unwrap()
-    );
 }
 
 #[test]
@@ -404,36 +364,6 @@ fn missing_stored_cost_uses_pricing_and_marks_the_period_estimated() {
     let today = scan(vec![path]).usage.today.unwrap();
     assert_eq!(today.estimated_cost_usd, Some(1.0));
     assert!(today.cost_estimated);
-}
-
-#[test]
-fn estimated_go_spend_does_not_invent_subscription_caps() {
-    let directory = tempdir().unwrap();
-    let path = directory.path().join("opencode.db");
-    let connection = create_database(&path, false);
-    insert_message(
-        &connection,
-        "session-1",
-        "message-1",
-        timestamp(),
-        r#"{
-            "role":"assistant",
-            "providerID":"opencode-go",
-            "modelID":"priced-model",
-            "tokens":{
-                "total":1000000,
-                "input":1000000,
-                "output":0
-            }
-        }"#,
-    );
-    drop(connection);
-
-    let result = scan(vec![path]);
-    let today = result.usage.today.unwrap();
-    assert_eq!(today.estimated_cost_usd, Some(1.0));
-    assert!(today.cost_estimated);
-    assert!(result.go_windows.is_none());
 }
 
 #[test]
@@ -562,7 +492,7 @@ fn all_present_unusable_databases_return_a_safe_typed_error() {
     let path = directory.path().join("opencode.db");
     fs::write(&path, b"private-content-not-a-database").unwrap();
     let error = OpenCodeUsageScanner::for_paths(vec![path.clone()])
-        .scan_paths(vec![path.clone()], now(), false, &pricing())
+        .scan_paths(vec![path.clone()], now(), &pricing())
         .unwrap_err();
     assert_eq!(error, OpenCodeError::DatabaseUnreadable);
     assert!(!error.to_string().contains(path.to_string_lossy().as_ref()));
@@ -605,30 +535,6 @@ fn local_detection_requires_a_key_or_a_readable_hosted_usage_row() {
     );
     drop(connection);
     assert!(provider.has_local_credentials());
-}
-
-#[test]
-fn go_key_without_database_shows_zero_estimated_caps() {
-    let directory = tempdir().unwrap();
-    fs::write(
-        directory.path().join("auth.json"),
-        r#"{"opencode-go":{"type":"api","key":"secret-key"}}"#,
-    )
-    .unwrap();
-    let provider = OpenCodeProvider::with_dependencies(
-        OpenCodePaths::for_data_directory(directory.path().to_path_buf()),
-        pricing_store(directory.path()),
-        now(),
-    );
-    let snapshot = provider.refresh().unwrap();
-    assert_eq!(snapshot.plan.as_deref(), Some("Go"));
-    assert_eq!(snapshot.quotas.len(), 3);
-    assert!(snapshot.quotas.iter().all(|quota| {
-        quota.used_value == Some(0.0)
-            && quota.estimated
-            && quota.source_note.is_some()
-            && quota.unit.as_deref() == Some("usd")
-    }));
 }
 
 #[test]
