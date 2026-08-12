@@ -532,9 +532,6 @@ fn restore_manual_panel_size(window: &WebviewWindow) -> Result<(), String> {
     let minimum = PANEL_MIN_HEIGHT.min(maximum);
     let session = window.app_handle().try_state::<Arc<PanelResizeSession>>();
     let saved_height = session.as_ref().and_then(|session| session.saved_height());
-    if let Some(height) = saved_height {
-        resize_panel_for_context(window, height.clamp(minimum, maximum))?;
-    }
     // Floating restores the user's saved width (or the wider default); the popup is always the
     // original fixed width.
     let floating = panel_floating(window);
@@ -547,10 +544,23 @@ fn restore_manual_panel_size(window: &WebviewWindow) -> Result<(), String> {
     } else {
         PANEL_MIN_WIDTH
     };
-    let height = current_logical_height(&window.as_ref().window()).unwrap_or(PANEL_MIN_HEIGHT);
-    let _ = window.set_size(LogicalSize::new(width, f64::from(height)));
+    let current_height = current_logical_height(&window.as_ref().window()).unwrap_or(minimum);
+    let height = restored_panel_height(saved_height, current_height, minimum, maximum);
+    // Native constraints do not resize an already-created borderless window. Apply the clamped
+    // height directly so floating windows never open taller than the current display work area.
+    if floating {
+        window
+            .set_size(LogicalSize::new(width, f64::from(height)))
+            .map_err(|_| "OpenQuota window could not be resized.".to_owned())?;
+    } else {
+        resize_panel_for_context(window, height)?;
+    }
     configure_panel_size_constraints(window)?;
     Ok(())
+}
+
+fn restored_panel_height(saved: Option<u32>, current: u32, minimum: u32, maximum: u32) -> u32 {
+    saved.unwrap_or(current).clamp(minimum, maximum)
 }
 
 fn resize_panel_for_context(window: &WebviewWindow, height: u32) -> Result<(), String> {
@@ -887,8 +897,9 @@ mod tests {
 
     use super::{
         anchored_vertical_frame, clamped_panel_width, panel_resize_edge_for_context,
-        panel_resize_edge_for_frames, panel_surface_color, PanelHeightMode, PanelResizeEdge,
-        PanelResizeSession, VerticalFrame, DARK_PANEL_SURFACE, LIGHT_PANEL_SURFACE,
+        panel_resize_edge_for_frames, panel_surface_color, restored_panel_height, PanelHeightMode,
+        PanelResizeEdge, PanelResizeSession, VerticalFrame, DARK_PANEL_SURFACE,
+        LIGHT_PANEL_SURFACE,
     };
     use crate::models::ThemePreference;
     use crate::storage::Storage;
@@ -930,6 +941,13 @@ mod tests {
         assert_eq!(clamped_panel_width(1), 320.0);
         assert_eq!(clamped_panel_width(420), 420.0);
         assert_eq!(clamped_panel_width(10_000), 560.0);
+    }
+
+    #[test]
+    fn restored_height_clamps_the_startup_window_without_a_manual_preference() {
+        assert_eq!(restored_panel_height(None, 800, 240, 765), 765);
+        assert_eq!(restored_panel_height(Some(540), 800, 240, 765), 540);
+        assert_eq!(restored_panel_height(Some(1_000), 800, 240, 765), 765);
     }
 
     #[test]
