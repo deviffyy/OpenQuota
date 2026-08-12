@@ -11,6 +11,7 @@ vi.mock('./backend', () => mocks);
 
 function settingsView(theme: AppSettings['theme'] = 'system'): SettingsViewState {
   return {
+    resolvedLanguage: 'en',
     accountRevision: 0,
     renamableProviderIds: [],
     notificationPermission: 'prompt',
@@ -19,6 +20,7 @@ function settingsView(theme: AppSettings['theme'] = 'system'): SettingsViewState
     platformSummary: null,
     settings: {
       schemaVersion: 6,
+      language: 'en',
       providerNames: {},
       providers: [],
       knownProviderIds: [],
@@ -84,7 +86,7 @@ describe('SettingsController', () => {
     controller.save({ ...settingsView().settings, theme: 'dark' });
 
     await vi.waitFor(() => expect(controller.state?.settings.theme).toBe('system'));
-    expect(onError).toHaveBeenCalledWith('Autostart unavailable.');
+    expect(onError).toHaveBeenCalledWith('Settings could not be saved.');
   });
 
   it('reloads an external account change after pending saves settle', async () => {

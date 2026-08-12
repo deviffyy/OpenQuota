@@ -10,13 +10,16 @@ describe('update controller helpers', () => {
       ),
     ).toEqual({
       code: 'download_forbidden',
-      message: 'Download refused.',
-      action: 'Try again later.',
+      message: 'GitHub refused the update download.',
+      action: 'Try again or download the installer from the release page.',
       retryable: false,
     });
-    expect(updateFailure(new Error('Update service unavailable.'), 'Safe fallback').message).toBe(
-      'Update service unavailable.',
-    );
+    expect(updateFailure(new Error('Update service unavailable.'), 'Safe fallback')).toEqual({
+      code: 'update_failed',
+      message: 'OpenQuota could not complete the update.',
+      action: 'Try again or download the installer from the release page.',
+      retryable: true,
+    });
   });
 
   it('formats refresh timing without constructing mutable date state', () => {

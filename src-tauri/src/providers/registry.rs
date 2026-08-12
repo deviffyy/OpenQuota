@@ -306,6 +306,7 @@ mod tests {
             short_name: "P".into(),
             fallback_enabled: true,
             local_usage_source_note: None,
+            local_usage_source_kind: None,
             links: vec![],
             metrics: vec![MetricDefinition::new(
                 format!("{id}.session"),
@@ -348,6 +349,24 @@ mod tests {
         assert!(registry.runtime("second").is_some());
         assert!(registry.definition("first").is_some());
         assert!(registry.metric("first.session").is_some());
+    }
+
+    #[test]
+    fn metric_labels_use_explicit_keys_without_id_suffix_inference() {
+        let mut custom = definition("custom");
+        custom.metrics[0].label = "Custom Session".into();
+        let custom_registry = ProviderRegistry::new(vec![runtime(custom)]).unwrap();
+        assert_eq!(
+            custom_registry.metric("custom.session").unwrap().label_kind,
+            None
+        );
+
+        let builtin =
+            ProviderRegistry::new(vec![runtime(crate::providers::codex::definition())]).unwrap();
+        assert_eq!(
+            builtin.metric("codex.session").unwrap().label_kind,
+            Some(crate::models::MetricLabelKind::Session)
+        );
     }
 
     #[test]
@@ -470,7 +489,8 @@ mod tests {
     #[test]
     fn builtin_provider_catalog_keeps_the_product_defaults() {
         use crate::providers::{
-            antigravity, claude, codex, copilot, cursor, devin, grok, opencode, openrouter, zai,
+            antigravity, claude, codex, copilot, cursor, devin, grok, kimi, minimax, opencode,
+            openrouter, zai,
         };
 
         let registry = ProviderRegistry::new(vec![
@@ -481,6 +501,8 @@ mod tests {
             runtime(copilot::definition()),
             runtime(devin::definition()),
             runtime(grok::definition()),
+            runtime(kimi::definition()),
+            runtime(minimax::definition()),
             runtime(opencode::definition()),
             runtime(openrouter::definition()),
             runtime(zai::definition()),
@@ -502,11 +524,18 @@ mod tests {
                 "copilot",
                 "devin",
                 "grok",
+                "kimi",
+                "minimax",
                 "opencode",
                 "openrouter",
                 "zai",
             ]
         );
+        assert!(catalog
+            .providers
+            .iter()
+            .flat_map(|provider| &provider.links)
+            .all(|link| link.kind.is_some()));
         assert_eq!(
             registry
                 .definition("codex")

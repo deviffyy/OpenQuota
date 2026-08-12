@@ -513,7 +513,11 @@ pub fn usage_history(
             None => {}
         }
     }
-    accumulator.build(now, "From your Cursor usage export")
+    accumulator.build_with_source_kind(
+        now,
+        "From your Cursor usage export",
+        Some(crate::models::UsageSourceKind::CursorExport),
+    )
 }
 
 fn quota(

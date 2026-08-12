@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { codexState, providerCatalogIndex, settingsState } from '../test/appFixtures';
+import { setUiLanguage } from './i18n';
 import { ProviderCatalogIndex } from './metrics';
 import totalSpendSource from './TotalSpend.svelte?raw';
 import {
@@ -11,7 +12,7 @@ import {
   SHARE_CARD_WIDTH,
   TOTAL_SPEND_GEOMETRY,
   TOTAL_SPEND_OUTER_PADDING,
-  TOTAL_SPEND_PERIOD_LABELS,
+  totalSpendPeriodLabels,
   totalSpendShareCardHeight,
 } from './shareCard';
 import type { AppSettings, ProviderLayout, ProviderSnapshot } from './types';
@@ -32,7 +33,10 @@ function renderTotalSpendShareCard(
   return renderTotalSpendShareCardWithCatalog(providerCatalogIndex, options);
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  setUiLanguage('en');
+});
 
 describe('share card layout', () => {
   it('uses the authored width and 4x export scale', () => {
@@ -125,8 +129,10 @@ describe('share card layout', () => {
       {
         id: 'rateLimited',
         title: 'Live usage paused',
-        message: 'Retrying in about 5 minutes',
+        message: '',
         tone: 'warning',
+        retrySeconds: 300,
+        showingStaleLimits: false,
       },
     ];
     const rows = buildProviderShareRows(
@@ -166,6 +172,39 @@ describe('share card layout', () => {
     expect(rows[0]).toMatchObject({ kind: 'quota', reading: '75 searches left' });
   });
 
+  it('translates request and search units in exported quota rows', () => {
+    setUiLanguage('zh-CN');
+    const snapshot = structuredClone(codexState.snapshot!);
+    snapshot.quotas[0] = {
+      ...snapshot.quotas[0],
+      format: 'count',
+      usedPercent: 25,
+      usedValue: 25,
+      limitValue: 100,
+      unit: 'requests',
+    };
+
+    const rows = buildProviderShareRows(
+      'codex',
+      snapshot,
+      settingsState.settings.providers[0],
+      settingsState.settings,
+      Date.now(),
+    );
+    expect(rows[0]).toMatchObject({ kind: 'quota', reading: '剩余 75 次请求' });
+
+    snapshot.quotas[0].unit = 'searches';
+    expect(
+      buildProviderShareRows(
+        'codex',
+        snapshot,
+        settingsState.settings.providers[0],
+        settingsState.settings,
+        Date.now(),
+      )[0],
+    ).toMatchObject({ kind: 'quota', reading: '剩余 75 次搜索' });
+  });
+
   it('exports customizable status metrics as text rows', () => {
     const catalog = new ProviderCatalogIndex({
       providers: [
@@ -200,8 +239,10 @@ describe('share card layout', () => {
         {
           id: 'payAsYouGo',
           label: 'Extra Usage',
-          text: '2500 cap',
+          text: '',
           tone: 'positive',
+          value: 2500,
+          unit: 'cap',
         },
       ],
       notices: [],
@@ -273,7 +314,7 @@ describe('share card layout', () => {
   });
 
   it('keeps Total Spend to the period switcher and usage body', () => {
-    expect(TOTAL_SPEND_PERIOD_LABELS).toEqual(['Today', 'Yesterday', '30 Days']);
+    expect(totalSpendPeriodLabels()).toEqual(['Today', 'Yesterday', '30 Days']);
     expect(TOTAL_SPEND_OUTER_PADDING).toBe(10);
     expect(TOTAL_SPEND_GEOMETRY).toMatchObject({
       width: 320,

@@ -7,6 +7,7 @@ use crate::{
     models::{ProviderSnapshot, ProviderViewState},
     pacing::{NotificationEvaluator, PaceAlert},
     popup::PopupDismissGuard,
+    providers::ProviderRegistry,
     service::UsageViewState,
     settings::SettingsService,
     tray_presentation,
@@ -38,7 +39,7 @@ pub fn finish_refresh(
             settings.registry(),
             chrono::Utc::now(),
         );
-        let failed = deliver(app, &alerts);
+        let failed = deliver(app, &alerts, &preferences.language, settings.registry());
         if !failed.is_empty() {
             notifications.rollback(&failed);
         }
@@ -51,7 +52,12 @@ fn notification_snapshot(state: &ProviderViewState) -> Option<&ProviderSnapshot>
     state.snapshot.as_ref()
 }
 
-fn deliver(app: &AppHandle, alerts: &[PaceAlert]) -> Vec<PaceAlert> {
+fn deliver(
+    app: &AppHandle,
+    alerts: &[PaceAlert],
+    language: &str,
+    registry: &ProviderRegistry,
+) -> Vec<PaceAlert> {
     if permission(app) != "granted" {
         if !alerts.is_empty() {
             crate::app_debug!(
@@ -62,18 +68,24 @@ fn deliver(app: &AppHandle, alerts: &[PaceAlert]) -> Vec<PaceAlert> {
         }
         return alerts.to_vec();
     }
+    let locale = crate::native_i18n::Locale::for_preference(language);
     alerts
         .iter()
         .filter_map(|alert| {
+            let metric_kind = registry
+                .metric(&alert.metric_id)
+                .and_then(|definition| definition.label_kind);
+            let metric = crate::native_i18n::metric_label(locale, metric_kind, &alert.metric);
             let result = show(
                 app,
-                alert.milestone.title(),
+                alert.milestone.title(locale),
                 &format!(
                     "{} · {}\n{}",
                     alert.provider,
-                    alert.metric,
-                    alert.milestone.body()
+                    metric,
+                    alert.milestone.body(locale)
                 ),
+                language,
             );
             if result.is_ok() {
                 crate::app_info!("notifications", "pace alert delivered");
@@ -86,11 +98,12 @@ fn deliver(app: &AppHandle, alerts: &[PaceAlert]) -> Vec<PaceAlert> {
         .collect()
 }
 
-fn show(app: &AppHandle, title: &str, body: &str) -> Result<(), String> {
+fn show(app: &AppHandle, title: &str, body: &str, language: &str) -> Result<(), String> {
+    let labels = crate::native_i18n::Labels::for_preference(language);
     let mut notification = notify_rust::Notification::new();
     notification.summary(title).body(body).appname("OpenQuota");
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    notification.action("default", "Open OpenQuota");
+    notification.action("default", labels.notification_action);
     #[cfg(target_os = "windows")]
     notification.app_id(&app.config().identifier);
     #[cfg(target_os = "macos")]
@@ -102,7 +115,7 @@ fn show(app: &AppHandle, title: &str, body: &str) -> Result<(), String> {
 
     let handle = notification
         .show()
-        .map_err(|_| "The notification could not be delivered.".to_owned())?;
+        .map_err(|_| labels.notification_failed.to_owned())?;
     let app = app.clone();
     thread::spawn(move || {
         let _ = handle.wait_for_response(move |response: &notify_rust::NotificationResponse| {

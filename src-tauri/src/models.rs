@@ -80,7 +80,7 @@ pub enum StatusTone {
     Danger,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusMetric {
     pub id: String,
@@ -90,6 +90,16 @@ pub struct StatusMetric {
     pub tone: StatusTone,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subtitle: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<StatusMetricUnit>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum StatusMetricUnit {
+    Cap,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -106,6 +116,10 @@ pub struct ProviderNotice {
     pub title: String,
     pub message: String,
     pub tone: ProviderNoticeTone,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub showing_stale_limits: Option<bool>,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -153,11 +167,32 @@ pub struct ModelUsageVariant {
     pub cost_usd: Option<f64>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum UsageSourceKind {
+    #[serde(alias = "estimatedLogsSource")]
+    EstimatedLogs,
+    #[serde(alias = "estimatedLogsWithPiSource")]
+    EstimatedLogsWithPi,
+    #[serde(alias = "estimatedUsageHistorySource")]
+    EstimatedUsageHistory,
+    #[serde(alias = "estimatedHistoryWithPiSource")]
+    EstimatedHistoryWithPi,
+    #[serde(alias = "cursorExportSource")]
+    CursorExport,
+    #[serde(alias = "openCodeDatabaseSource")]
+    OpenCodeDatabase,
+    #[serde(other)]
+    Unknown,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelUsageBreakdown {
     pub models: Vec<ModelUsageEntry>,
     pub source_note: String,
+    #[serde(default, alias = "sourceKey", skip_serializing_if = "Option::is_none")]
+    pub source_kind: Option<UsageSourceKind>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -322,11 +357,46 @@ pub struct TrayMetricDefinition {
     pub suffix: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MetricLabelKind {
+    Session,
+    Weekly,
+    Today,
+    Yesterday,
+    Last30Days,
+    Daily,
+    Monthly,
+    UsageTrend,
+    ExtraUsage,
+    ExtraBalance,
+    RateLimitResets,
+    Credits,
+    TotalUsage,
+    AutoUsage,
+    ApiUsage,
+    #[serde(alias = "requestsLabel")]
+    Requests,
+    Balance,
+    ThisWeek,
+    ThisMonth,
+    KeyLimit,
+    WebSearches,
+    SparkWeekly,
+    ClaudeWeekly,
+    OrgCredits,
+    OrgSpend,
+    Chat,
+    Completions,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MetricDefinition {
     pub id: String,
     pub label: String,
+    #[serde(default, alias = "labelKey", skip_serializing_if = "Option::is_none")]
+    pub label_kind: Option<MetricLabelKind>,
     pub source: MetricSource,
     pub pinnable: bool,
     pub default_enabled: bool,
@@ -336,6 +406,11 @@ pub struct MetricDefinition {
 }
 
 impl MetricDefinition {
+    pub fn with_label_kind(mut self, kind: MetricLabelKind) -> Self {
+        self.label_kind = Some(kind);
+        self
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: impl Into<String>,
@@ -351,6 +426,7 @@ impl MetricDefinition {
         Self {
             id: id.into(),
             label: label.into(),
+            label_kind: None,
             source,
             pinnable,
             default_enabled,
@@ -507,6 +583,19 @@ impl MetricDefinition {
 pub struct ProviderLink {
     pub label: String,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<ProviderLinkKind>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ProviderLinkKind {
+    Status,
+    Dashboard,
+    ApiKeys,
+    Usage,
+    Activity,
+    Credits,
 }
 
 impl ProviderLink {
@@ -514,7 +603,13 @@ impl ProviderLink {
         Self {
             label: label.into(),
             url: url.into(),
+            kind: None,
         }
+    }
+
+    pub fn with_kind(mut self, kind: ProviderLinkKind) -> Self {
+        self.kind = Some(kind);
+        self
     }
 
     pub fn visible(&self) -> Option<Self> {
@@ -526,7 +621,9 @@ impl ProviderLink {
         {
             return None;
         }
-        Some(Self::new(label, url))
+        let mut visible = Self::new(label, url);
+        visible.kind = self.kind;
+        Some(visible)
     }
 }
 
@@ -537,7 +634,10 @@ pub struct ProviderDefinition {
     pub display_name: String,
     pub short_name: String,
     pub fallback_enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_usage_source_note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_usage_source_kind: Option<UsageSourceKind>,
     #[serde(default)]
     pub links: Vec<ProviderLink>,
     pub metrics: Vec<MetricDefinition>,
@@ -682,6 +782,8 @@ pub struct NotificationPreferences {
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub schema_version: u32,
+    #[serde(default = "default_language")]
+    pub language: String,
     pub providers: Vec<ProviderLayout>,
     pub known_provider_ids: Vec<String>,
     pub provider_names: BTreeMap<String, String>,
@@ -706,10 +808,25 @@ pub struct AppSettings {
     pub detection_notice_dismissed: bool,
 }
 
+fn default_language() -> String {
+    "system".to_owned()
+}
+
+pub fn normalize_language_preference(value: &str) -> &'static str {
+    match value {
+        "system" => "system",
+        "en" => "en",
+        "zh-CN" => "zh-CN",
+        "zh-TW" => "zh-TW",
+        _ => "en",
+    }
+}
+
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
             schema_version: 6,
+            language: default_language(),
             providers: Vec::new(),
             known_provider_ids: Vec::new(),
             provider_names: BTreeMap::new(),
@@ -749,6 +866,7 @@ impl AppSettings {
 #[serde(rename_all = "camelCase")]
 pub struct SettingsViewState {
     pub settings: AppSettings,
+    pub resolved_language: String,
     pub account_revision: u64,
     pub renamable_provider_ids: Vec<String>,
     pub notification_permission: String,
@@ -760,8 +878,10 @@ pub struct SettingsViewState {
 #[cfg(test)]
 mod tests {
     use super::{
-        ApiKeyStatus, AppSettings, LogLevel, ProviderApiKeyState, ProviderErrorKind, ProviderLink,
-        ProviderSnapshot, ProviderViewState, UsagePeriod, WindowMode,
+        ApiKeyStatus, AppSettings, LogLevel, MetricDefinition, MetricLabelKind,
+        ModelUsageBreakdown, ProviderApiKeyState, ProviderErrorKind, ProviderLink, ProviderNotice,
+        ProviderNoticeTone, ProviderSnapshot, ProviderViewState, StatusMetric, StatusMetricUnit,
+        StatusTone, UsagePeriod, UsageSourceKind, WindowMode,
     };
 
     #[test]
@@ -780,6 +900,22 @@ mod tests {
         assert_eq!(settings.last_update_check_at, None);
         assert_eq!(settings.log_level, LogLevel::Info);
         assert_eq!(settings.window_mode, WindowMode::Popup);
+    }
+
+    #[test]
+    fn older_settings_without_language_default_to_system() {
+        let mut value = serde_json::to_value(AppSettings::default()).unwrap();
+        value.as_object_mut().unwrap().remove("language");
+
+        let settings: AppSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(settings.language, "system");
+    }
+
+    #[test]
+    fn unsupported_language_preferences_fall_back_to_english() {
+        assert_eq!(super::normalize_language_preference("invalid-locale"), "en");
+        assert_eq!(super::normalize_language_preference("zh-CN"), "zh-CN");
+        assert_eq!(super::normalize_language_preference("zh-TW"), "zh-TW");
     }
 
     #[test]
@@ -833,6 +969,113 @@ mod tests {
         )
         .unwrap();
         assert!(period.cost_estimated);
+    }
+
+    #[test]
+    fn older_metric_and_usage_payloads_default_new_semantic_fields() {
+        let metric: MetricDefinition = serde_json::from_value(serde_json::json!({
+            "id": "custom.session",
+            "label": "Custom Session",
+            "source": {
+                "kind": "quota",
+                "sourceId": "session",
+                "sessionWindow": false
+            },
+            "pinnable": true,
+            "defaultEnabled": true,
+            "defaultSection": "alwaysVisible",
+            "defaultPinned": false,
+            "tray": null
+        }))
+        .unwrap();
+        assert_eq!(metric.label_kind, None);
+
+        let breakdown: ModelUsageBreakdown = serde_json::from_value(serde_json::json!({
+            "models": [],
+            "sourceNote": "From a custom source"
+        }))
+        .unwrap();
+        assert_eq!(breakdown.source_kind, None);
+    }
+
+    #[test]
+    fn legacy_translation_keys_deserialize_to_semantics_but_are_not_serialized() {
+        let parsed: MetricDefinition = serde_json::from_value(serde_json::json!({
+            "id": "custom.requests",
+            "label": "Requests",
+            "labelKey": "requestsLabel",
+            "source": { "kind": "value", "sourceId": "requests" },
+            "pinnable": true,
+            "defaultEnabled": true,
+            "defaultSection": "onDemand",
+            "defaultPinned": false,
+            "tray": null
+        }))
+        .unwrap();
+        assert_eq!(parsed.label_kind, Some(MetricLabelKind::Requests));
+        let value = serde_json::to_value(parsed).unwrap();
+        assert_eq!(value["labelKind"], "requests");
+        assert!(value.get("labelKey").is_none());
+
+        let parsed: ModelUsageBreakdown = serde_json::from_value(serde_json::json!({
+            "models": [],
+            "sourceNote": "Legacy source",
+            "sourceKey": "estimatedLogsSource"
+        }))
+        .unwrap();
+        assert_eq!(parsed.source_kind, Some(UsageSourceKind::EstimatedLogs));
+        let value = serde_json::to_value(parsed).unwrap();
+        assert_eq!(value["sourceKind"], "estimatedLogs");
+        assert!(value.get("sourceKey").is_none());
+    }
+
+    #[test]
+    fn older_status_payloads_default_typed_presentation_fields() {
+        let metric: StatusMetric = serde_json::from_value(serde_json::json!({
+            "id": "payAsYouGo",
+            "label": "Extra Usage",
+            "text": "2500 cap",
+            "tone": "positive"
+        }))
+        .unwrap();
+        assert_eq!(metric.value, None);
+        assert_eq!(metric.unit, None);
+
+        let notice: ProviderNotice = serde_json::from_value(serde_json::json!({
+            "id": "rateLimited",
+            "title": "Live usage paused",
+            "message": "Retrying in about 5 minutes",
+            "tone": "warning"
+        }))
+        .unwrap();
+        assert_eq!(notice.retry_seconds, None);
+        assert_eq!(notice.showing_stale_limits, None);
+
+        let status = StatusMetric {
+            id: "payAsYouGo".into(),
+            label: "Extra Usage".into(),
+            text: String::new(),
+            tone: StatusTone::Positive,
+            subtitle: None,
+            value: Some(2500.0),
+            unit: Some(StatusMetricUnit::Cap),
+        };
+        assert_eq!(
+            serde_json::to_value(status).unwrap()["unit"],
+            serde_json::json!("cap")
+        );
+
+        let notice = ProviderNotice {
+            id: "rateLimited".into(),
+            title: "Live usage paused".into(),
+            message: String::new(),
+            tone: ProviderNoticeTone::Warning,
+            retry_seconds: Some(60),
+            showing_stale_limits: Some(true),
+        };
+        let value = serde_json::to_value(notice).unwrap();
+        assert_eq!(value["retrySeconds"], serde_json::json!(60));
+        assert_eq!(value["showingStaleLimits"], serde_json::json!(true));
     }
 
     #[test]

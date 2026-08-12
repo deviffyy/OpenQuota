@@ -233,7 +233,11 @@ fn aggregate_history(records: &[UsageRecord], now: DateTime<Utc>) -> UsageHistor
             accumulator.add_unknown_model(date, &record.model);
         }
     }
-    accumulator.build(now, USAGE_SOURCE_NOTE)
+    accumulator.build_with_source_kind(
+        now,
+        USAGE_SOURCE_NOTE,
+        Some(crate::models::UsageSourceKind::OpenCodeDatabase),
+    )
 }
 
 #[cfg(test)]

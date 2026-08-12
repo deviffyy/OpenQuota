@@ -12,8 +12,8 @@ use thiserror::Error;
 
 use crate::{
     models::{
-        MetricDefinition, MetricSection, ProviderDefinition, ProviderLink, ProviderSnapshot,
-        UsageHistory, UsagePeriodSelection,
+        MetricDefinition, MetricLabelKind, MetricSection, ProviderDefinition, ProviderLink,
+        ProviderLinkKind, ProviderSnapshot, UsageHistory, UsagePeriodSelection, UsageSourceKind,
     },
     pricing::PricingStore,
 };
@@ -35,9 +35,12 @@ pub(crate) fn definition() -> ProviderDefinition {
         short_name: "Cu".into(),
         fallback_enabled: true,
         local_usage_source_note: Some("From your Cursor usage export".into()),
+        local_usage_source_kind: Some(UsageSourceKind::CursorExport),
         links: vec![
-            ProviderLink::new("Status", "https://status.cursor.com/"),
-            ProviderLink::new("Dashboard", "https://www.cursor.com/dashboard"),
+            ProviderLink::new("Status", "https://status.cursor.com/")
+                .with_kind(ProviderLinkKind::Status),
+            ProviderLink::new("Dashboard", "https://www.cursor.com/dashboard")
+                .with_kind(ProviderLinkKind::Dashboard),
         ],
         metrics: vec![
             MetricDefinition::quota(
@@ -49,7 +52,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 false,
                 "U",
-            ),
+            )
+            .with_label_kind(MetricLabelKind::TotalUsage),
             MetricDefinition::quota(
                 "cursor.auto",
                 "Auto Usage",
@@ -59,7 +63,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 true,
                 "A",
-            ),
+            )
+            .with_label_kind(MetricLabelKind::AutoUsage),
             MetricDefinition::quota(
                 "cursor.api",
                 "API Usage",
@@ -69,7 +74,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 true,
                 "AP",
-            ),
+            )
+            .with_label_kind(MetricLabelKind::ApiUsage),
             MetricDefinition::quota_or_value(
                 "cursor.onDemand",
                 "Extra Usage",
@@ -78,7 +84,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 false,
                 "E",
-            ),
+            )
+            .with_label_kind(MetricLabelKind::ExtraUsage),
             MetricDefinition::quota(
                 "cursor.requests",
                 "Requests",
@@ -88,7 +95,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 false,
                 "R",
-            ),
+            )
+            .with_label_kind(MetricLabelKind::Requests),
             MetricDefinition::value(
                 "cursor.credits",
                 "Credits",
@@ -98,29 +106,33 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "C",
                 None,
-            ),
-            MetricDefinition::trend("cursor.trend"),
+            )
+            .with_label_kind(MetricLabelKind::Credits),
+            MetricDefinition::trend("cursor.trend").with_label_kind(MetricLabelKind::UsageTrend),
             MetricDefinition::usage(
                 "cursor.today",
                 "Today",
                 UsagePeriodSelection::Today,
                 MetricSection::OnDemand,
                 "T",
-            ),
+            )
+            .with_label_kind(MetricLabelKind::Today),
             MetricDefinition::usage(
                 "cursor.yesterday",
                 "Yesterday",
                 UsagePeriodSelection::Yesterday,
                 MetricSection::OnDemand,
                 "Y",
-            ),
+            )
+            .with_label_kind(MetricLabelKind::Yesterday),
             MetricDefinition::usage(
                 "cursor.last30",
                 "Last 30 Days",
                 UsagePeriodSelection::Last30Days,
                 MetricSection::OnDemand,
                 "M",
-            ),
+            )
+            .with_label_kind(MetricLabelKind::Last30Days),
         ],
     }
 }

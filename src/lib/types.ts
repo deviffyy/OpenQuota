@@ -32,6 +32,8 @@ export interface StatusMetric {
   text: string;
   tone: 'neutral' | 'positive' | 'warning' | 'danger';
   subtitle?: string | null;
+  value?: number | null;
+  unit?: 'cap' | null;
 }
 
 export type ResetClaimOutcome = 'success' | 'nothingToReset' | 'noCredit' | 'failed';
@@ -41,6 +43,8 @@ export interface ProviderNotice {
   title: string;
   message: string;
   tone: 'info' | 'warning';
+  retrySeconds?: number | null;
+  showingStaleLimits?: boolean | null;
 }
 
 export interface UsagePeriod {
@@ -68,7 +72,17 @@ export interface ModelUsageVariant {
 export interface ModelUsageBreakdown {
   models: ModelUsageEntry[];
   sourceNote: string;
+  sourceKind?: UsageSourceKind | null;
 }
+
+export type UsageSourceKind =
+  | 'estimatedLogs'
+  | 'estimatedLogsWithPi'
+  | 'estimatedUsageHistory'
+  | 'estimatedHistoryWithPi'
+  | 'cursorExport'
+  | 'openCodeDatabase'
+  | 'unknown';
 
 export interface DailyUsage {
   date: string;
@@ -141,6 +155,7 @@ export interface TrayMetricDefinition {
 export interface MetricDefinition {
   id: string;
   label: string;
+  labelKind?: MetricLabelKind | null;
   source: MetricSource;
   pinnable: boolean;
   defaultEnabled: boolean;
@@ -149,10 +164,43 @@ export interface MetricDefinition {
   tray: TrayMetricDefinition | null;
 }
 
+export type MetricLabelKind =
+  | 'session'
+  | 'weekly'
+  | 'today'
+  | 'yesterday'
+  | 'last30Days'
+  | 'daily'
+  | 'monthly'
+  | 'usageTrend'
+  | 'extraUsage'
+  | 'extraBalance'
+  | 'rateLimitResets'
+  | 'credits'
+  | 'totalUsage'
+  | 'autoUsage'
+  | 'apiUsage'
+  | 'requests'
+  | 'balance'
+  | 'thisWeek'
+  | 'thisMonth'
+  | 'keyLimit'
+  | 'webSearches'
+  | 'sparkWeekly'
+  | 'claudeWeekly'
+  | 'orgCredits'
+  | 'orgSpend'
+  | 'chat'
+  | 'completions';
+
 export interface ProviderLink {
   label: string;
   url: string;
+  kind?: ProviderLinkKind | null;
 }
+
+export type ProviderLinkKind =
+  'status' | 'dashboard' | 'apiKeys' | 'usage' | 'activity' | 'credits';
 
 export type ApiKeyStatus = 'notSet' | 'fromEnvironment' | 'fromConfig' | 'saved' | 'overrideActive';
 
@@ -167,6 +215,7 @@ export interface ProviderDefinition {
   shortName: string;
   fallbackEnabled: boolean;
   localUsageSourceNote: string | null;
+  localUsageSourceKind?: UsageSourceKind | null;
   links: ProviderLink[];
   metrics: MetricDefinition[];
 }
@@ -198,6 +247,7 @@ export interface NotificationPreferences {
 
 export interface AppSettings {
   schemaVersion: number;
+  language: 'system' | 'en' | 'zh-CN' | 'zh-TW';
   providers: ProviderLayout[];
   knownProviderIds: string[];
   providerNames: Record<string, string>;
@@ -247,6 +297,7 @@ export interface UpdateFailure {
 
 export interface SettingsViewState {
   settings: AppSettings;
+  resolvedLanguage: 'en' | 'zh-CN' | 'zh-TW';
   accountRevision: number;
   renamableProviderIds: string[];
   notificationPermission: 'granted' | 'denied' | 'prompt' | 'unavailable';

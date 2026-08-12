@@ -9,6 +9,7 @@ afterEach(cleanup);
 
 const settings: AppSettings = {
   schemaVersion: 6,
+  language: 'en',
   providerNames: {},
   knownProviderIds: ['codex', 'claude', 'antigravity'],
   showTotalSpend: false,
@@ -252,6 +253,22 @@ describe('pointer reorder integrations', () => {
     expect(
       onChange.mock.calls[0][0].providers.map((provider: { id: string }) => provider.id),
     ).toEqual(['claude', 'codex', 'antigravity']);
+  });
+
+  it('uses custom provider names in list control labels', () => {
+    render(CustomizeProviderList, {
+      settings: { ...settings, providerNames: { codex: 'Work' } },
+      catalog: providerCatalogIndex,
+      onOpen: vi.fn(),
+      onChange: vi.fn(),
+      onReorderStart: vi.fn(),
+      onReorderEnd: vi.fn(),
+      onSettings: vi.fn(),
+      reducedMotion: false,
+    });
+
+    expect(screen.getByRole('checkbox', { name: 'Enable Work' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Customize Work' })).toBeInTheDocument();
   });
 
   it('moves a metric across Customize sections through the same pointer engine', async () => {

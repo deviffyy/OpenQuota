@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
+  import { t } from './i18n';
   import Icon from './Icon.svelte';
 
   interface Props {
@@ -66,13 +67,13 @@
     </div>
     <div class="confirmation-sheet__actions">
       <button bind:this={cancelButton} type="button" disabled={pending} onclick={onCancel}
-        >Cancel</button
+        >{t('cancel')}</button
       >
       <button
         class="confirmation-sheet__confirm"
         type="button"
         disabled={pending}
-        onclick={onConfirm}>{pending ? 'Resetting…' : confirmLabel}</button
+        onclick={onConfirm}>{pending ? t('resetting') : confirmLabel}</button
       >
     </div>
   </div>

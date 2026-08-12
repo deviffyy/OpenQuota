@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n';
   import { flip } from 'svelte/animate';
   import type { AppSettings, ProviderLayout } from './types';
   import type { ProviderCatalogIndex } from './metrics';
@@ -49,7 +50,7 @@
   }
 </script>
 
-<section class="screen customize-screen" aria-label="Customize">
+<section class="screen customize-screen" aria-label={t('customize')}>
   <div class="customize-list" role="list">
     {#each settings.providers.filter( (provider) => catalog.provider(provider.id) ) as provider (provider.id)}
       <div
@@ -77,7 +78,7 @@
           data-reorder-touch-handle
           role="button"
           tabindex={provider.enabled ? 0 : undefined}
-          aria-label={`Move ${providerDisplayName(provider.id)}`}
+          aria-label={t('move', { label: providerDisplayName(provider.id) })}
           aria-describedby="reorder-instructions"
           aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
           ><Icon name="grip-lines" size={16} strokeWidth={2} /></span
@@ -85,13 +86,13 @@
         <button class="provider-list-main" type="button" onclick={() => onOpen(provider.id)}
           ><ProviderIcon providerId={provider.id} /><span
             ><b>{providerDisplayName(provider.id)}</b><small
-              >{provider.metrics.length} metrics</small
+              >{t('metricCount', { count: provider.metrics.length })}</small
             ></span
           ></button
         >
         <label class="switch"
           ><input
-            aria-label={`Enable ${provider.id}`}
+            aria-label={t('enable', { label: providerDisplayName(provider.id) })}
             type="checkbox"
             checked={provider.enabled}
             onchange={(event) =>
@@ -101,16 +102,19 @@
         <button
           class="chevron"
           type="button"
-          aria-label={`Customize ${provider.id}`}
+          aria-label={t('customizeProvider', { label: providerDisplayName(provider.id) })}
           onclick={() => onOpen(provider.id)}
           ><Icon name="chevron-right" size={13} strokeWidth={2.2} /></button
         >
       </div>
     {/each}
   </div>
-  <button class="screen-cross-link" type="button" aria-label="Settings" onclick={onSettings}>
+  <button class="screen-cross-link" type="button" aria-label={t('settings')} onclick={onSettings}>
     <Icon name="gear" size={17} />
-    <span><b>Settings</b><small>Notifications, appearance and more</small></span>
+    <span
+      ><b>{t('settings')}</b><small>{t('notifications')}, {t('appearance')} {t('andMore')}</small
+      ></span
+    >
     <Icon name="chevron-right" size={13} strokeWidth={2.2} />
   </button>
 </section>

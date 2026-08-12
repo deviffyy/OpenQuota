@@ -2845,6 +2845,7 @@ dependencies = [
  "chrono",
  "fontdue",
  "notify-rust",
+ "objc2-foundation",
  "regex",
  "reqwest",
  "roxmltree",

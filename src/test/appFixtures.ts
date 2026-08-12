@@ -76,9 +76,10 @@ export const providerCatalog: ProviderCatalog = {
       shortName: 'Cl',
       fallbackEnabled: false,
       localUsageSourceNote: 'From your Claude usage history (estimated)',
+      localUsageSourceKind: 'estimatedUsageHistory',
       links: [
-        { label: 'Status', url: 'https://status.anthropic.com/' },
-        { label: 'Dashboard', url: 'https://claude.ai/settings/usage' },
+        { label: 'Status', url: 'https://status.anthropic.com/', kind: 'status' },
+        { label: 'Dashboard', url: 'https://claude.ai/settings/usage', kind: 'dashboard' },
       ],
       metrics: [
         quota('claude.session', 'Session', 'session', true),
@@ -101,9 +102,14 @@ export const providerCatalog: ProviderCatalog = {
       shortName: 'Cx',
       fallbackEnabled: true,
       localUsageSourceNote: 'From your Codex logs (estimated)',
+      localUsageSourceKind: 'estimatedLogs',
       links: [
-        { label: 'Status', url: 'https://status.openai.com/' },
-        { label: 'Dashboard', url: 'https://chatgpt.com/codex/settings/usage' },
+        { label: 'Status', url: 'https://status.openai.com/', kind: 'status' },
+        {
+          label: 'Dashboard',
+          url: 'https://chatgpt.com/codex/settings/usage',
+          kind: 'dashboard',
+        },
       ],
       metrics: [
         quota('codex.session', 'Session', 'session'),
@@ -146,8 +152,8 @@ export const providerCatalog: ProviderCatalog = {
       fallbackEnabled: false,
       localUsageSourceNote: null,
       links: [
-        { label: 'Activity', url: 'https://openrouter.ai/activity' },
-        { label: 'Credits', url: 'https://openrouter.ai/settings/credits' },
+        { label: 'Activity', url: 'https://openrouter.ai/activity', kind: 'activity' },
+        { label: 'Credits', url: 'https://openrouter.ai/settings/credits', kind: 'credits' },
       ],
       metrics: [
         quota('openrouter.credits', 'Credits', 'credits'),
@@ -334,6 +340,7 @@ export const antigravityState: ProviderViewState = {
 };
 
 export const settingsState: SettingsViewState = {
+  resolvedLanguage: 'en',
   accountRevision: 0,
   renamableProviderIds: ['claude', 'codex'],
   notificationPermission: 'prompt',
@@ -342,6 +349,7 @@ export const settingsState: SettingsViewState = {
   platformSummary: null,
   settings: {
     schemaVersion: 6,
+    language: 'en',
     providerNames: {},
     knownProviderIds: ['claude', 'codex', 'antigravity'],
     showTotalSpend: true,

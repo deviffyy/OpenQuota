@@ -224,7 +224,11 @@ fn aggregate(events: Vec<TokenEvent>, now: DateTime<Utc>, pricing: &ModelPricing
             accumulator.add_unknown_model(date, model);
         }
     }
-    accumulator.build(now, SOURCE_NOTE)
+    accumulator.build_with_source_kind(
+        now,
+        SOURCE_NOTE,
+        Some(crate::models::UsageSourceKind::EstimatedLogs),
+    )
 }
 
 fn integer_u64(value: &Value) -> Option<u64> {
