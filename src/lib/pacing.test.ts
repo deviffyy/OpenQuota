@@ -91,9 +91,10 @@ describe('quota pacing', () => {
       'Resets in 1h',
     );
     expect(formatReset(new Date(now - 1).toISOString(), now, 'exact')).toBe('Resets soon');
-    expect(formatReset(new Date(now + 30 * 60 * 60_000).toISOString(), now, 'exact')).toContain(
-      'Resets tomorrow at',
-    );
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(12, 0, 0, 0);
+    expect(formatReset(tomorrow.toISOString(), now, 'exact')).toContain('Resets tomorrow at');
     expect(formatReset(new Date(now + 72 * 60 * 60_000).toISOString(), now, 'exact')).toMatch(
       /^Resets .+ at /,
     );

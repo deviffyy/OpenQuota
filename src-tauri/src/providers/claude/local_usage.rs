@@ -553,10 +553,12 @@ mod tests {
     fn provider_fixture_parses_and_deduplicates_claude_usage_lines() {
         let events = parse_jsonl(include_str!("fixtures/usage.jsonl"));
         assert_eq!(events.len(), 2);
+        let now =
+            events.iter().map(|event| event.timestamp).max().unwrap() + chrono::Duration::days(1);
         let events = deduplicate(events);
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].total_tokens(), 170);
-        let history = aggregate(events, chrono::Utc::now(), &test_bundled_pricing());
+        let history = aggregate(events, now, &test_bundled_pricing());
         assert!(history.last_30_days.unwrap().estimated_cost_usd.is_some());
     }
 
