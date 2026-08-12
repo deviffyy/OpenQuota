@@ -12,8 +12,8 @@ use thiserror::Error;
 
 use crate::{
     models::{
-        MetricDefinition, MetricSection, ProviderDefinition, ProviderLink, ProviderSnapshot,
-        UsageHistory, UsagePeriodSelection,
+        MetricDefinition, MetricLabelKind, MetricSection, ProviderDefinition, ProviderLink,
+        ProviderLinkKind, ProviderSnapshot, UsageHistory, UsagePeriodSelection, UsageSourceKind,
     },
     pricing::PricingStore,
 };
@@ -35,11 +35,12 @@ pub(crate) fn definition() -> ProviderDefinition {
         short_name: "Cu".into(),
         fallback_enabled: true,
         local_usage_source_note: Some("From your Cursor usage export".into()),
-        local_usage_source_key: Some("cursorExportSource".into()),
-        pi_usage_source_key: None,
+        local_usage_source_kind: Some(UsageSourceKind::CursorExport),
         links: vec![
-            ProviderLink::new("Status", "https://status.cursor.com/"),
-            ProviderLink::new("Dashboard", "https://www.cursor.com/dashboard"),
+            ProviderLink::new("Status", "https://status.cursor.com/")
+                .with_kind(ProviderLinkKind::Status),
+            ProviderLink::new("Dashboard", "https://www.cursor.com/dashboard")
+                .with_kind(ProviderLinkKind::Dashboard),
         ],
         metrics: vec![
             MetricDefinition::quota(
@@ -52,7 +53,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "U",
             )
-            .with_label_key("totalUsage"),
+            .with_label_kind(MetricLabelKind::TotalUsage),
             MetricDefinition::quota(
                 "cursor.auto",
                 "Auto Usage",
@@ -63,7 +64,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 true,
                 "A",
             )
-            .with_label_key("autoUsage"),
+            .with_label_kind(MetricLabelKind::AutoUsage),
             MetricDefinition::quota(
                 "cursor.api",
                 "API Usage",
@@ -74,7 +75,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 true,
                 "AP",
             )
-            .with_label_key("apiUsage"),
+            .with_label_kind(MetricLabelKind::ApiUsage),
             MetricDefinition::quota_or_value(
                 "cursor.onDemand",
                 "Extra Usage",
@@ -84,7 +85,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "E",
             )
-            .with_label_key("extraUsage"),
+            .with_label_kind(MetricLabelKind::ExtraUsage),
             MetricDefinition::quota(
                 "cursor.requests",
                 "Requests",
@@ -95,7 +96,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "R",
             )
-            .with_label_key("requestsLabel"),
+            .with_label_kind(MetricLabelKind::Requests),
             MetricDefinition::value(
                 "cursor.credits",
                 "Credits",
@@ -106,8 +107,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 "C",
                 None,
             )
-            .with_label_key("credits"),
-            MetricDefinition::trend("cursor.trend").with_label_key("usageTrend"),
+            .with_label_kind(MetricLabelKind::Credits),
+            MetricDefinition::trend("cursor.trend").with_label_kind(MetricLabelKind::UsageTrend),
             MetricDefinition::usage(
                 "cursor.today",
                 "Today",
@@ -115,7 +116,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 "T",
             )
-            .with_label_key("today"),
+            .with_label_kind(MetricLabelKind::Today),
             MetricDefinition::usage(
                 "cursor.yesterday",
                 "Yesterday",
@@ -123,7 +124,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 "Y",
             )
-            .with_label_key("yesterday"),
+            .with_label_kind(MetricLabelKind::Yesterday),
             MetricDefinition::usage(
                 "cursor.last30",
                 "Last 30 Days",
@@ -131,7 +132,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 "M",
             )
-            .with_label_key("last30Days"),
+            .with_label_kind(MetricLabelKind::Last30Days),
         ],
     }
 }

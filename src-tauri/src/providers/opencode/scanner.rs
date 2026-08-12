@@ -17,7 +17,6 @@ use super::{
 const SCAN_DAYS: i64 = 33;
 pub(crate) const USAGE_SOURCE_NOTE: &str =
     "From your OpenCode local database; missing costs use catalog estimates";
-pub(crate) const USAGE_SOURCE_KEY: &str = "openCodeDatabaseSource";
 
 #[derive(Debug)]
 pub(crate) struct OpenCodeUsageScan {
@@ -234,7 +233,11 @@ fn aggregate_history(records: &[UsageRecord], now: DateTime<Utc>) -> UsageHistor
             accumulator.add_unknown_model(date, &record.model);
         }
     }
-    accumulator.build_with_source_key(now, USAGE_SOURCE_NOTE, Some(USAGE_SOURCE_KEY))
+    accumulator.build_with_source_kind(
+        now,
+        USAGE_SOURCE_NOTE,
+        Some(crate::models::UsageSourceKind::OpenCodeDatabase),
+    )
 }
 
 #[cfg(test)]

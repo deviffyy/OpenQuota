@@ -679,8 +679,7 @@ mod tests {
             short_name: "C".into(),
             fallback_enabled: true,
             local_usage_source_note: None,
-            local_usage_source_key: None,
-            pi_usage_source_key: None,
+            local_usage_source_kind: None,
             links: vec![],
             metrics: vec![MetricDefinition::new(
                 "custom.rolling",
@@ -770,8 +769,7 @@ mod tests {
             short_name: "Sw".into(),
             fallback_enabled: true,
             local_usage_source_note: None,
-            local_usage_source_key: None,
-            pi_usage_source_key: None,
+            local_usage_source_kind: None,
             links: vec![],
             metrics: vec![
                 quota_metric("switching.session", "session", "S"),

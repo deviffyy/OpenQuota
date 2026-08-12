@@ -167,14 +167,32 @@ pub struct ModelUsageVariant {
     pub cost_usd: Option<f64>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum UsageSourceKind {
+    #[serde(alias = "estimatedLogsSource")]
+    EstimatedLogs,
+    #[serde(alias = "estimatedLogsWithPiSource")]
+    EstimatedLogsWithPi,
+    #[serde(alias = "estimatedUsageHistorySource")]
+    EstimatedUsageHistory,
+    #[serde(alias = "estimatedHistoryWithPiSource")]
+    EstimatedHistoryWithPi,
+    #[serde(alias = "cursorExportSource")]
+    CursorExport,
+    #[serde(alias = "openCodeDatabaseSource")]
+    OpenCodeDatabase,
+    #[serde(other)]
+    Unknown,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelUsageBreakdown {
     pub models: Vec<ModelUsageEntry>,
     pub source_note: String,
-    /// Stable localization key for the source note. Older snapshots only have `sourceNote`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source_key: Option<String>,
+    #[serde(default, alias = "sourceKey", skip_serializing_if = "Option::is_none")]
+    pub source_kind: Option<UsageSourceKind>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -339,13 +357,46 @@ pub struct TrayMetricDefinition {
     pub suffix: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum MetricLabelKind {
+    Session,
+    Weekly,
+    Today,
+    Yesterday,
+    Last30Days,
+    Daily,
+    Monthly,
+    UsageTrend,
+    ExtraUsage,
+    ExtraBalance,
+    RateLimitResets,
+    Credits,
+    TotalUsage,
+    AutoUsage,
+    ApiUsage,
+    #[serde(alias = "requestsLabel")]
+    Requests,
+    Balance,
+    ThisWeek,
+    ThisMonth,
+    KeyLimit,
+    WebSearches,
+    SparkWeekly,
+    ClaudeWeekly,
+    OrgCredits,
+    OrgSpend,
+    Chat,
+    Completions,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct MetricDefinition {
     pub id: String,
     pub label: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub label_key: Option<String>,
+    #[serde(default, alias = "labelKey", skip_serializing_if = "Option::is_none")]
+    pub label_kind: Option<MetricLabelKind>,
     pub source: MetricSource,
     pub pinnable: bool,
     pub default_enabled: bool,
@@ -355,8 +406,8 @@ pub struct MetricDefinition {
 }
 
 impl MetricDefinition {
-    pub fn with_label_key(mut self, key: &str) -> Self {
-        self.label_key = Some(key.to_owned());
+    pub fn with_label_kind(mut self, kind: MetricLabelKind) -> Self {
+        self.label_kind = Some(kind);
         self
     }
 
@@ -375,7 +426,7 @@ impl MetricDefinition {
         Self {
             id: id.into(),
             label: label.into(),
-            label_key: None,
+            label_kind: None,
             source,
             pinnable,
             default_enabled,
@@ -532,6 +583,19 @@ impl MetricDefinition {
 pub struct ProviderLink {
     pub label: String,
     pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<ProviderLinkKind>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ProviderLinkKind {
+    Status,
+    Dashboard,
+    ApiKeys,
+    Usage,
+    Activity,
+    Credits,
 }
 
 impl ProviderLink {
@@ -539,7 +603,13 @@ impl ProviderLink {
         Self {
             label: label.into(),
             url: url.into(),
+            kind: None,
         }
+    }
+
+    pub fn with_kind(mut self, kind: ProviderLinkKind) -> Self {
+        self.kind = Some(kind);
+        self
     }
 
     pub fn visible(&self) -> Option<Self> {
@@ -551,7 +621,9 @@ impl ProviderLink {
         {
             return None;
         }
-        Some(Self::new(label, url))
+        let mut visible = Self::new(label, url);
+        visible.kind = self.kind;
+        Some(visible)
     }
 }
 
@@ -565,9 +637,7 @@ pub struct ProviderDefinition {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub local_usage_source_note: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub local_usage_source_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub pi_usage_source_key: Option<String>,
+    pub local_usage_source_kind: Option<UsageSourceKind>,
     #[serde(default)]
     pub links: Vec<ProviderLink>,
     pub metrics: Vec<MetricDefinition>,
@@ -808,10 +878,10 @@ pub struct SettingsViewState {
 #[cfg(test)]
 mod tests {
     use super::{
-        ApiKeyStatus, AppSettings, LogLevel, MetricDefinition, ModelUsageBreakdown,
-        ProviderApiKeyState, ProviderErrorKind, ProviderLink, ProviderNotice, ProviderNoticeTone,
-        ProviderSnapshot, ProviderViewState, StatusMetric, StatusMetricUnit, StatusTone,
-        UsagePeriod, WindowMode,
+        ApiKeyStatus, AppSettings, LogLevel, MetricDefinition, MetricLabelKind,
+        ModelUsageBreakdown, ProviderApiKeyState, ProviderErrorKind, ProviderLink, ProviderNotice,
+        ProviderNoticeTone, ProviderSnapshot, ProviderViewState, StatusMetric, StatusMetricUnit,
+        StatusTone, UsagePeriod, UsageSourceKind, WindowMode,
     };
 
     #[test]
@@ -918,14 +988,45 @@ mod tests {
             "tray": null
         }))
         .unwrap();
-        assert_eq!(metric.label_key, None);
+        assert_eq!(metric.label_kind, None);
 
         let breakdown: ModelUsageBreakdown = serde_json::from_value(serde_json::json!({
             "models": [],
             "sourceNote": "From a custom source"
         }))
         .unwrap();
-        assert_eq!(breakdown.source_key, None);
+        assert_eq!(breakdown.source_kind, None);
+    }
+
+    #[test]
+    fn legacy_translation_keys_deserialize_to_semantics_but_are_not_serialized() {
+        let parsed: MetricDefinition = serde_json::from_value(serde_json::json!({
+            "id": "custom.requests",
+            "label": "Requests",
+            "labelKey": "requestsLabel",
+            "source": { "kind": "value", "sourceId": "requests" },
+            "pinnable": true,
+            "defaultEnabled": true,
+            "defaultSection": "onDemand",
+            "defaultPinned": false,
+            "tray": null
+        }))
+        .unwrap();
+        assert_eq!(parsed.label_kind, Some(MetricLabelKind::Requests));
+        let value = serde_json::to_value(parsed).unwrap();
+        assert_eq!(value["labelKind"], "requests");
+        assert!(value.get("labelKey").is_none());
+
+        let parsed: ModelUsageBreakdown = serde_json::from_value(serde_json::json!({
+            "models": [],
+            "sourceNote": "Legacy source",
+            "sourceKey": "estimatedLogsSource"
+        }))
+        .unwrap();
+        assert_eq!(parsed.source_kind, Some(UsageSourceKind::EstimatedLogs));
+        let value = serde_json::to_value(parsed).unwrap();
+        assert_eq!(value["sourceKind"], "estimatedLogs");
+        assert!(value.get("sourceKey").is_none());
     }
 
     #[test]

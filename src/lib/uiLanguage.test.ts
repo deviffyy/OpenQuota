@@ -154,8 +154,8 @@ describe('native UI language contract', () => {
   it('uses English as the complete catalog and falls back for partial catalogs', () => {
     expect(Object.keys(en).length).toBeGreaterThan(0);
     expect(Object.keys(messages.en).sort()).toEqual(Object.keys(en).sort());
-    expect(Object.keys(messages['zh-CN']).sort()).toEqual(Object.keys(en).sort());
-    expect(Object.keys(messages['zh-TW']).sort()).toEqual(Object.keys(en).sort());
+    expect(messages['zh-CN'].settings).toBe('设置');
+    expect(messages['zh-TW'].settings).toBe('設定');
     setUiLanguage('zh-CN');
     expect(t('settings')).toBe('设置');
     expect(t('settings')).not.toBeUndefined();

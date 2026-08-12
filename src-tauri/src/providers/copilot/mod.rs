@@ -13,8 +13,8 @@ use reqwest::StatusCode;
 use thiserror::Error;
 
 use crate::models::{
-    MetricDefinition, MetricSection, ProviderDefinition, ProviderErrorKind, ProviderLink,
-    ProviderSnapshot, UsageHistory, ValueMetric,
+    MetricDefinition, MetricLabelKind, MetricSection, ProviderDefinition, ProviderErrorKind,
+    ProviderLink, ProviderLinkKind, ProviderSnapshot, UsageHistory, ValueMetric,
 };
 
 use self::{
@@ -36,11 +36,12 @@ pub(crate) fn definition() -> ProviderDefinition {
         short_name: "Co".into(),
         fallback_enabled: false,
         local_usage_source_note: None,
-        local_usage_source_key: None,
-        pi_usage_source_key: None,
+        local_usage_source_kind: None,
         links: vec![
-            ProviderLink::new("Status", "https://www.githubstatus.com/"),
-            ProviderLink::new("Dashboard", "https://github.com/settings/billing"),
+            ProviderLink::new("Status", "https://www.githubstatus.com/")
+                .with_kind(ProviderLinkKind::Status),
+            ProviderLink::new("Dashboard", "https://github.com/settings/billing")
+                .with_kind(ProviderLinkKind::Dashboard),
         ],
         metrics: vec![
             MetricDefinition::quota(
@@ -53,7 +54,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 true,
                 "C",
             )
-            .with_label_key("credits"),
+            .with_label_kind(MetricLabelKind::Credits),
             MetricDefinition::value(
                 "copilot.extra",
                 "Extra Usage",
@@ -64,7 +65,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 "E",
                 None,
             )
-            .with_label_key("extraUsage"),
+            .with_label_kind(MetricLabelKind::ExtraUsage),
             MetricDefinition::value(
                 "copilot.orgCredits",
                 "Org Credits",
@@ -75,7 +76,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 "OC",
                 None,
             )
-            .with_label_key("orgCredits"),
+            .with_label_kind(MetricLabelKind::OrgCredits),
             MetricDefinition::value(
                 "copilot.orgSpend",
                 "Org Spend",
@@ -86,7 +87,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 "OS",
                 None,
             )
-            .with_label_key("orgSpend"),
+            .with_label_kind(MetricLabelKind::OrgSpend),
             MetricDefinition::quota(
                 "copilot.chat",
                 "Chat",
@@ -97,7 +98,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "Ch",
             )
-            .with_label_key("chat"),
+            .with_label_kind(MetricLabelKind::Chat),
             MetricDefinition::quota(
                 "copilot.completions",
                 "Completions",
@@ -108,7 +109,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "Cm",
             )
-            .with_label_key("completions"),
+            .with_label_kind(MetricLabelKind::Completions),
         ],
     }
 }

@@ -9,8 +9,8 @@ use reqwest::StatusCode;
 use thiserror::Error;
 
 use crate::models::{
-    ApiKeyStatus, MetricDefinition, MetricSection, ProviderDefinition, ProviderErrorKind,
-    ProviderLink, ProviderSnapshot, UsageHistory,
+    ApiKeyStatus, MetricDefinition, MetricLabelKind, MetricSection, ProviderDefinition,
+    ProviderErrorKind, ProviderLink, ProviderLinkKind, ProviderSnapshot, UsageHistory,
 };
 
 use self::{
@@ -28,14 +28,15 @@ pub(crate) fn definition() -> ProviderDefinition {
         short_name: "Z".into(),
         fallback_enabled: false,
         local_usage_source_note: None,
-        local_usage_source_key: None,
-        pi_usage_source_key: None,
+        local_usage_source_kind: None,
         links: vec![
             ProviderLink::new(
                 "Dashboard",
                 "https://z.ai/manage-apikey/coding-plan/personal/my-plan",
-            ),
-            ProviderLink::new("API Keys", "https://z.ai/manage-apikey/apikey-list"),
+            )
+            .with_kind(ProviderLinkKind::Dashboard),
+            ProviderLink::new("API Keys", "https://z.ai/manage-apikey/apikey-list")
+                .with_kind(ProviderLinkKind::ApiKeys),
         ],
         metrics: vec![
             MetricDefinition::quota(
@@ -48,7 +49,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 true,
                 "S",
             )
-            .with_label_key("session"),
+            .with_label_kind(MetricLabelKind::Session),
             MetricDefinition::quota(
                 "zai.weekly",
                 "Weekly",
@@ -59,7 +60,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 true,
                 "W",
             )
-            .with_label_key("weekly"),
+            .with_label_kind(MetricLabelKind::Weekly),
             MetricDefinition::quota(
                 "zai.webSearches",
                 "Web Searches",
@@ -70,7 +71,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "Search",
             )
-            .with_label_key("webSearches"),
+            .with_label_kind(MetricLabelKind::WebSearches),
         ],
     }
 }

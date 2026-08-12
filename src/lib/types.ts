@@ -72,8 +72,17 @@ export interface ModelUsageVariant {
 export interface ModelUsageBreakdown {
   models: ModelUsageEntry[];
   sourceNote: string;
-  sourceKey?: string | null;
+  sourceKind?: UsageSourceKind | null;
 }
+
+export type UsageSourceKind =
+  | 'estimatedLogs'
+  | 'estimatedLogsWithPi'
+  | 'estimatedUsageHistory'
+  | 'estimatedHistoryWithPi'
+  | 'cursorExport'
+  | 'openCodeDatabase'
+  | 'unknown';
 
 export interface DailyUsage {
   date: string;
@@ -146,7 +155,7 @@ export interface TrayMetricDefinition {
 export interface MetricDefinition {
   id: string;
   label: string;
-  labelKey?: string | null;
+  labelKind?: MetricLabelKind | null;
   source: MetricSource;
   pinnable: boolean;
   defaultEnabled: boolean;
@@ -155,10 +164,43 @@ export interface MetricDefinition {
   tray: TrayMetricDefinition | null;
 }
 
+export type MetricLabelKind =
+  | 'session'
+  | 'weekly'
+  | 'today'
+  | 'yesterday'
+  | 'last30Days'
+  | 'daily'
+  | 'monthly'
+  | 'usageTrend'
+  | 'extraUsage'
+  | 'extraBalance'
+  | 'rateLimitResets'
+  | 'credits'
+  | 'totalUsage'
+  | 'autoUsage'
+  | 'apiUsage'
+  | 'requests'
+  | 'balance'
+  | 'thisWeek'
+  | 'thisMonth'
+  | 'keyLimit'
+  | 'webSearches'
+  | 'sparkWeekly'
+  | 'claudeWeekly'
+  | 'orgCredits'
+  | 'orgSpend'
+  | 'chat'
+  | 'completions';
+
 export interface ProviderLink {
   label: string;
   url: string;
+  kind?: ProviderLinkKind | null;
 }
+
+export type ProviderLinkKind =
+  'status' | 'dashboard' | 'apiKeys' | 'usage' | 'activity' | 'credits';
 
 export type ApiKeyStatus = 'notSet' | 'fromEnvironment' | 'fromConfig' | 'saved' | 'overrideActive';
 
@@ -173,8 +215,7 @@ export interface ProviderDefinition {
   shortName: string;
   fallbackEnabled: boolean;
   localUsageSourceNote: string | null;
-  localUsageSourceKey?: string | null;
-  piUsageSourceKey?: string | null;
+  localUsageSourceKind?: UsageSourceKind | null;
   links: ProviderLink[];
   metrics: MetricDefinition[];
 }

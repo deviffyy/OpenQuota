@@ -7,8 +7,8 @@ use reqwest::StatusCode;
 use thiserror::Error;
 
 use crate::models::{
-    MetricDefinition, MetricSection, ProviderDefinition, ProviderErrorKind, ProviderLink,
-    ProviderSnapshot, UsageHistory,
+    MetricDefinition, MetricLabelKind, MetricSection, ProviderDefinition, ProviderErrorKind,
+    ProviderLink, ProviderLinkKind, ProviderSnapshot, UsageHistory,
 };
 
 use self::{
@@ -26,12 +26,11 @@ pub(crate) fn definition() -> ProviderDefinition {
         short_name: "D".into(),
         fallback_enabled: false,
         local_usage_source_note: None,
-        local_usage_source_key: None,
-        pi_usage_source_key: None,
-        links: vec![ProviderLink::new(
-            "Dashboard",
-            "https://app.devin.ai/settings/plans",
-        )],
+        local_usage_source_kind: None,
+        links: vec![
+            ProviderLink::new("Dashboard", "https://app.devin.ai/settings/plans")
+                .with_kind(ProviderLinkKind::Dashboard),
+        ],
         metrics: vec![
             MetricDefinition::quota(
                 "devin.daily",
@@ -43,7 +42,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "D",
             )
-            .with_label_key("daily"),
+            .with_label_kind(MetricLabelKind::Daily),
             MetricDefinition::quota(
                 "devin.weekly",
                 "Weekly",
@@ -54,7 +53,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "W",
             )
-            .with_label_key("weekly"),
+            .with_label_kind(MetricLabelKind::Weekly),
             MetricDefinition::value(
                 "devin.extra",
                 "Extra Balance",
@@ -65,7 +64,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 "E",
                 None,
             )
-            .with_label_key("extraBalance"),
+            .with_label_kind(MetricLabelKind::ExtraBalance),
         ],
     }
 }

@@ -11,15 +11,16 @@ use thiserror::Error;
 
 use crate::{
     models::{
-        MetricDefinition, MetricSection, ProviderDefinition, ProviderErrorKind, ProviderLink,
-        ProviderSnapshot, UsageHistory, UsagePeriodSelection,
+        MetricDefinition, MetricLabelKind, MetricSection, ProviderDefinition, ProviderErrorKind,
+        ProviderLink, ProviderLinkKind, ProviderSnapshot, UsageHistory, UsagePeriodSelection,
+        UsageSourceKind,
     },
     pricing::PricingStore,
 };
 
 use self::{
     paths::OpenCodePaths,
-    scanner::{OpenCodeUsageScanner, USAGE_SOURCE_KEY, USAGE_SOURCE_NOTE},
+    scanner::{OpenCodeUsageScanner, USAGE_SOURCE_NOTE},
     windows::OpenCodeWindows,
 };
 
@@ -32,9 +33,9 @@ pub(crate) fn definition() -> ProviderDefinition {
         short_name: "OC".into(),
         fallback_enabled: false,
         local_usage_source_note: Some(USAGE_SOURCE_NOTE.into()),
-        local_usage_source_key: Some(USAGE_SOURCE_KEY.into()),
-        pi_usage_source_key: None,
-        links: vec![ProviderLink::new("Dashboard", "https://opencode.ai/auth")],
+        local_usage_source_kind: Some(UsageSourceKind::OpenCodeDatabase),
+        links: vec![ProviderLink::new("Dashboard", "https://opencode.ai/auth")
+            .with_kind(ProviderLinkKind::Dashboard)],
         metrics: vec![
             MetricDefinition::quota(
                 "opencode.session",
@@ -46,7 +47,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "S",
             )
-            .with_label_key("session"),
+            .with_label_kind(MetricLabelKind::Session),
             MetricDefinition::quota(
                 "opencode.weekly",
                 "Weekly",
@@ -57,7 +58,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "W",
             )
-            .with_label_key("weekly"),
+            .with_label_kind(MetricLabelKind::Weekly),
             MetricDefinition::quota(
                 "opencode.monthly",
                 "Monthly",
@@ -68,8 +69,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "M",
             )
-            .with_label_key("monthly"),
-            MetricDefinition::trend("opencode.trend").with_label_key("usageTrend"),
+            .with_label_kind(MetricLabelKind::Monthly),
+            MetricDefinition::trend("opencode.trend").with_label_kind(MetricLabelKind::UsageTrend),
             MetricDefinition::usage(
                 "opencode.today",
                 "Today",
@@ -77,7 +78,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 "T",
             )
-            .with_label_key("today"),
+            .with_label_kind(MetricLabelKind::Today),
             MetricDefinition::usage(
                 "opencode.yesterday",
                 "Yesterday",
@@ -85,7 +86,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 "Y",
             )
-            .with_label_key("yesterday"),
+            .with_label_kind(MetricLabelKind::Yesterday),
             MetricDefinition::usage(
                 "opencode.last30",
                 "Last 30 Days",
@@ -93,7 +94,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 "30",
             )
-            .with_label_key("last30Days"),
+            .with_label_kind(MetricLabelKind::Last30Days),
         ],
     }
 }

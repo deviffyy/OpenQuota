@@ -11,8 +11,8 @@ use thiserror::Error;
 
 use crate::{
     models::{
-        MetricDefinition, MetricSection, ProviderDefinition, ProviderErrorKind, ProviderLink,
-        ProviderSnapshot, UsagePeriodSelection,
+        MetricDefinition, MetricLabelKind, MetricSection, ProviderDefinition, ProviderErrorKind,
+        ProviderLink, ProviderLinkKind, ProviderSnapshot, UsagePeriodSelection, UsageSourceKind,
     },
     pricing::PricingStore,
     providers::log_usage::scan_or_cached_usage,
@@ -35,9 +35,9 @@ pub(crate) fn definition() -> ProviderDefinition {
         short_name: "G".into(),
         fallback_enabled: false,
         local_usage_source_note: Some("From your Grok logs (estimated)".into()),
-        local_usage_source_key: Some("estimatedLogsSource".into()),
-        pi_usage_source_key: None,
-        links: vec![ProviderLink::new("Usage", "https://grok.com/?_s=usage")],
+        local_usage_source_kind: Some(UsageSourceKind::EstimatedLogs),
+        links: vec![ProviderLink::new("Usage", "https://grok.com/?_s=usage")
+            .with_kind(ProviderLinkKind::Usage)],
         metrics: vec![
             MetricDefinition::quota(
                 "grok.weekly",
@@ -49,7 +49,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "W",
             )
-            .with_label_key("weekly"),
+            .with_label_kind(MetricLabelKind::Weekly),
             MetricDefinition::status(
                 "grok.payAsYouGo",
                 "Extra Usage",
@@ -59,8 +59,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "E",
             )
-            .with_label_key("extraUsage"),
-            MetricDefinition::trend("grok.trend").with_label_key("usageTrend"),
+            .with_label_kind(MetricLabelKind::ExtraUsage),
+            MetricDefinition::trend("grok.trend").with_label_kind(MetricLabelKind::UsageTrend),
             MetricDefinition::usage(
                 "grok.today",
                 "Today",
@@ -68,7 +68,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 "T",
             )
-            .with_label_key("today"),
+            .with_label_kind(MetricLabelKind::Today),
             MetricDefinition::usage(
                 "grok.yesterday",
                 "Yesterday",
@@ -76,7 +76,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 "Y",
             )
-            .with_label_key("yesterday"),
+            .with_label_kind(MetricLabelKind::Yesterday),
             MetricDefinition::usage(
                 "grok.last30",
                 "Last 30 Days",
@@ -84,7 +84,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 "M",
             )
-            .with_label_key("last30Days"),
+            .with_label_kind(MetricLabelKind::Last30Days),
         ],
     }
 }

@@ -15,8 +15,9 @@ use thiserror::Error;
 
 use crate::{
     models::{
-        MetricDefinition, MetricSection, ProviderDefinition, ProviderLink, ProviderNotice,
-        ProviderNoticeTone, ProviderSnapshot, UsagePeriodSelection,
+        MetricDefinition, MetricLabelKind, MetricSection, ProviderDefinition, ProviderLink,
+        ProviderLinkKind, ProviderNotice, ProviderNoticeTone, ProviderSnapshot,
+        UsagePeriodSelection, UsageSourceKind,
     },
     pricing::{ModelPricing, PricingStore},
     storage::Storage,
@@ -33,11 +34,12 @@ fn definition_for(id: &str, display_name: &str, fallback_enabled: bool) -> Provi
         short_name: "Cl".into(),
         fallback_enabled,
         local_usage_source_note: Some("From your Claude usage history (estimated)".into()),
-        local_usage_source_key: Some("estimatedUsageHistorySource".into()),
-        pi_usage_source_key: Some("estimatedHistoryWithPiSource".into()),
+        local_usage_source_kind: Some(UsageSourceKind::EstimatedUsageHistory),
         links: vec![
-            ProviderLink::new("Status", "https://status.anthropic.com/"),
-            ProviderLink::new("Dashboard", "https://claude.ai/settings/usage"),
+            ProviderLink::new("Status", "https://status.anthropic.com/")
+                .with_kind(ProviderLinkKind::Status),
+            ProviderLink::new("Dashboard", "https://claude.ai/settings/usage")
+                .with_kind(ProviderLinkKind::Dashboard),
         ],
         metrics: vec![
             MetricDefinition::quota(
@@ -50,7 +52,7 @@ fn definition_for(id: &str, display_name: &str, fallback_enabled: bool) -> Provi
                 true,
                 "S",
             )
-            .with_label_key("session"),
+            .with_label_kind(MetricLabelKind::Session),
             MetricDefinition::quota(
                 "claude.weekly",
                 "Weekly",
@@ -61,7 +63,7 @@ fn definition_for(id: &str, display_name: &str, fallback_enabled: bool) -> Provi
                 true,
                 "W",
             )
-            .with_label_key("weekly"),
+            .with_label_kind(MetricLabelKind::Weekly),
             MetricDefinition::quota(
                 "claude.sonnet",
                 "Sonnet",
@@ -91,8 +93,8 @@ fn definition_for(id: &str, display_name: &str, fallback_enabled: bool) -> Provi
                 false,
                 "E",
             )
-            .with_label_key("extraUsage"),
-            MetricDefinition::trend("claude.trend").with_label_key("usageTrend"),
+            .with_label_kind(MetricLabelKind::ExtraUsage),
+            MetricDefinition::trend("claude.trend").with_label_kind(MetricLabelKind::UsageTrend),
             MetricDefinition::usage(
                 "claude.today",
                 "Today",
@@ -100,7 +102,7 @@ fn definition_for(id: &str, display_name: &str, fallback_enabled: bool) -> Provi
                 MetricSection::OnDemand,
                 "T",
             )
-            .with_label_key("today"),
+            .with_label_kind(MetricLabelKind::Today),
             MetricDefinition::usage(
                 "claude.yesterday",
                 "Yesterday",
@@ -108,7 +110,7 @@ fn definition_for(id: &str, display_name: &str, fallback_enabled: bool) -> Provi
                 MetricSection::OnDemand,
                 "Y",
             )
-            .with_label_key("yesterday"),
+            .with_label_kind(MetricLabelKind::Yesterday),
             MetricDefinition::usage(
                 "claude.last30",
                 "Last 30 Days",
@@ -116,7 +118,7 @@ fn definition_for(id: &str, display_name: &str, fallback_enabled: bool) -> Provi
                 MetricSection::OnDemand,
                 "M",
             )
-            .with_label_key("last30Days"),
+            .with_label_kind(MetricLabelKind::Last30Days),
         ],
     };
     if id != "claude" {

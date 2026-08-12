@@ -1,4 +1,4 @@
-use crate::models::{StatusMetricUnit, StatusTone};
+use crate::models::{MetricLabelKind, StatusMetricUnit, StatusTone};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Locale {
@@ -130,37 +130,40 @@ impl Labels {
     }
 }
 
-pub fn metric_label(locale: Locale, key: Option<&str>, fallback: &str) -> String {
-    let common = match key {
-        Some("session") => Some(("Session", "会话", "工作階段")),
-        Some("weekly") => Some(("Weekly", "每周", "每週")),
-        Some("today") => Some(("Today", "今天", "今天")),
-        Some("yesterday") => Some(("Yesterday", "昨天", "昨天")),
-        Some("last30Days") => Some(("30 Days", "30 天", "30 天")),
-        Some("daily") => Some(("Daily", "每日", "每日")),
-        Some("monthly") => Some(("Monthly", "每月", "每月")),
-        Some("usageTrend") => Some(("Usage Trend", "用量趋势", "用量趨勢")),
-        Some("extraUsage") => Some(("Extra Usage", "额外用量", "額外用量")),
-        Some("extraBalance") => Some(("Extra Balance", "额外余额", "額外餘額")),
-        Some("disabled") => Some(("Disabled", "已禁用", "已停用")),
-        Some("rateLimitResets") => Some(("Rate Limit Resets", "限额重置", "限額重設")),
-        Some("credits") => Some(("Credits", "额度", "額度")),
-        Some("totalUsage") => Some(("Total Usage", "总用量", "總用量")),
-        Some("autoUsage") => Some(("Auto Usage", "自动用量", "自動用量")),
-        Some("apiUsage") => Some(("API Usage", "API 用量", "API 用量")),
-        Some("requestsLabel") => Some(("Requests", "请求", "要求")),
-        Some("balance") => Some(("Balance", "余额", "餘額")),
-        Some("thisWeek") => Some(("This Week", "本周", "本週")),
-        Some("thisMonth") => Some(("This Month", "本月", "本月")),
-        Some("keyLimit") => Some(("Key Limit", "密钥限额", "金鑰限額")),
-        Some("webSearches") => Some(("Web Searches", "网页搜索", "網頁搜尋")),
-        Some("sparkWeekly") => Some(("Spark Weekly", "Spark 每周", "Spark 每週")),
-        Some("claudeWeekly") => Some(("Claude Weekly", "Claude 每周", "Claude 每週")),
-        Some("orgCredits") => Some(("Org Credits", "组织额度", "組織額度")),
-        Some("orgSpend") => Some(("Org Spend", "组织消费", "組織消費")),
-        Some("chat") => Some(("Chat", "聊天", "聊天")),
-        Some("completions") => Some(("Completions", "代码补全", "程式碼補全")),
-        _ => None,
+pub fn metric_label(locale: Locale, kind: Option<MetricLabelKind>, fallback: &str) -> String {
+    let common = match kind {
+        Some(MetricLabelKind::Session) => Some(("Session", "会话", "工作階段")),
+        Some(MetricLabelKind::Weekly) => Some(("Weekly", "每周", "每週")),
+        Some(MetricLabelKind::Today) => Some(("Today", "今天", "今天")),
+        Some(MetricLabelKind::Yesterday) => Some(("Yesterday", "昨天", "昨天")),
+        Some(MetricLabelKind::Last30Days) => Some(("30 Days", "30 天", "30 天")),
+        Some(MetricLabelKind::Daily) => Some(("Daily", "每日", "每日")),
+        Some(MetricLabelKind::Monthly) => Some(("Monthly", "每月", "每月")),
+        Some(MetricLabelKind::UsageTrend) => Some(("Usage Trend", "用量趋势", "用量趨勢")),
+        Some(MetricLabelKind::ExtraUsage) => Some(("Extra Usage", "额外用量", "額外用量")),
+        Some(MetricLabelKind::ExtraBalance) => Some(("Extra Balance", "额外余额", "額外餘額")),
+        Some(MetricLabelKind::RateLimitResets) => {
+            Some(("Rate Limit Resets", "限额重置", "限額重設"))
+        }
+        Some(MetricLabelKind::Credits) => Some(("Credits", "额度", "額度")),
+        Some(MetricLabelKind::TotalUsage) => Some(("Total Usage", "总用量", "總用量")),
+        Some(MetricLabelKind::AutoUsage) => Some(("Auto Usage", "自动用量", "自動用量")),
+        Some(MetricLabelKind::ApiUsage) => Some(("API Usage", "API 用量", "API 用量")),
+        Some(MetricLabelKind::Requests) => Some(("Requests", "请求", "要求")),
+        Some(MetricLabelKind::Balance) => Some(("Balance", "余额", "餘額")),
+        Some(MetricLabelKind::ThisWeek) => Some(("This Week", "本周", "本週")),
+        Some(MetricLabelKind::ThisMonth) => Some(("This Month", "本月", "本月")),
+        Some(MetricLabelKind::KeyLimit) => Some(("Key Limit", "密钥限额", "金鑰限額")),
+        Some(MetricLabelKind::WebSearches) => Some(("Web Searches", "网页搜索", "網頁搜尋")),
+        Some(MetricLabelKind::SparkWeekly) => Some(("Spark Weekly", "Spark 每周", "Spark 每週")),
+        Some(MetricLabelKind::ClaudeWeekly) => {
+            Some(("Claude Weekly", "Claude 每周", "Claude 每週"))
+        }
+        Some(MetricLabelKind::OrgCredits) => Some(("Org Credits", "组织额度", "組織額度")),
+        Some(MetricLabelKind::OrgSpend) => Some(("Org Spend", "组织消费", "組織消費")),
+        Some(MetricLabelKind::Chat) => Some(("Chat", "聊天", "聊天")),
+        Some(MetricLabelKind::Completions) => Some(("Completions", "代码补全", "程式碼補全")),
+        None => None,
     };
     common
         .map(|labels| match locale {
@@ -181,7 +184,12 @@ pub fn status_metric_text(
     fallback: &str,
 ) -> String {
     if id == "payAsYouGo" && tone == StatusTone::Neutral {
-        return metric_label(locale, Some("disabled"), fallback);
+        return match locale {
+            Locale::En => "Disabled",
+            Locale::ZhCn => "已禁用",
+            Locale::ZhTw => "已停用",
+        }
+        .to_owned();
     }
     if id == "payAsYouGo"
         && tone == StatusTone::Positive
@@ -232,7 +240,14 @@ fn system_language() -> Option<String> {
     (length > 1).then(|| String::from_utf16_lossy(&buffer[..length as usize - 1]))
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "macos")]
+fn system_language() -> Option<String> {
+    objc2_foundation::NSLocale::preferredLanguages()
+        .firstObject()
+        .map(|language| language.to_string())
+}
+
+#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
 fn system_language() -> Option<String> {
     ["LC_ALL", "LC_MESSAGES", "LANG"]
         .into_iter()
@@ -246,6 +261,7 @@ fn system_language() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::{Labels, Locale};
+    use crate::models::MetricLabelKind;
 
     #[test]
     fn language_tags_match_frontend_resolution() {
@@ -289,11 +305,11 @@ mod tests {
     #[test]
     fn native_metric_labels_and_units_follow_the_resolved_locale() {
         assert_eq!(
-            super::metric_label(Locale::ZhCn, Some("weekly"), "Weekly"),
+            super::metric_label(Locale::ZhCn, Some(MetricLabelKind::Weekly), "Weekly"),
             "每周"
         );
         assert_eq!(
-            super::metric_label(Locale::ZhTw, Some("requestsLabel"), "Requests"),
+            super::metric_label(Locale::ZhTw, Some(MetricLabelKind::Requests), "Requests"),
             "要求"
         );
         assert_eq!(super::count_unit(Locale::ZhTw, "searches"), "次搜尋");

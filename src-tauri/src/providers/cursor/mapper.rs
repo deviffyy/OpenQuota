@@ -513,10 +513,10 @@ pub fn usage_history(
             None => {}
         }
     }
-    accumulator.build_with_source_key(
+    accumulator.build_with_source_kind(
         now,
         "From your Cursor usage export",
-        Some("cursorExportSource"),
+        Some(crate::models::UsageSourceKind::CursorExport),
     )
 }
 

@@ -30,8 +30,12 @@ describe('provider catalog index', () => {
     });
     expect(catalog.localUsageSourceNote('codex')).toBe('From your Codex logs (estimated)');
     expect(catalog.provider('codex')?.links).toEqual([
-      { label: 'Status', url: 'https://status.openai.com/' },
-      { label: 'Dashboard', url: 'https://chatgpt.com/codex/settings/usage' },
+      { label: 'Status', url: 'https://status.openai.com/', kind: 'status' },
+      {
+        label: 'Dashboard',
+        url: 'https://chatgpt.com/codex/settings/usage',
+        kind: 'dashboard',
+      },
     ]);
   });
 
@@ -51,12 +55,12 @@ describe('provider catalog index', () => {
     snapshot.usage.last30Days!.modelBreakdown = {
       models: [],
       sourceNote: 'From your Codex logs and pi (estimated)',
-      sourceKey: 'estimatedLogsWithPiSource',
+      sourceKind: 'estimatedLogsWithPi',
     };
 
     expect(usageSourceNote(catalog, snapshot)).toBe('From your Codex logs and pi (estimated)');
-    snapshot.usage.last30Days!.modelBreakdown!.sourceKey = null;
-    expect(usageSourceNote(catalog, snapshot)).toBe('From your Codex logs (estimated)');
+    snapshot.usage.last30Days!.modelBreakdown!.sourceKind = null;
+    expect(usageSourceNote(catalog, snapshot)).toBe('From your Codex logs and pi (estimated)');
     snapshot.usage.last30Days!.modelBreakdown = null;
     snapshot.usage.today!.modelBreakdown = null;
     snapshot.usage.yesterday!.modelBreakdown = null;

@@ -2,6 +2,7 @@
   import Icon from './Icon.svelte';
   import type { ProviderLink } from './types';
   import { t } from './i18n';
+  import { localizedProviderLinkLabel } from './metrics';
 
   interface Props {
     links: ProviderLink[];
@@ -14,12 +15,13 @@
 
 <div class="provider-links" style={`--provider-link-columns: ${columns}`}>
   {#each links as link, linkIndex (`${link.label}:${link.url}`)}
+    {@const label = localizedProviderLinkLabel(link)}
     <button
       type="button"
-      aria-label={t('opensInBrowser', { label: link.label })}
+      aria-label={t('opensInBrowser', { label })}
       onclick={() => onOpen(linkIndex)}
     >
-      <span>{link.label}</span><Icon name="external-link" size={10} strokeWidth={1.8} />
+      <span>{label}</span><Icon name="external-link" size={10} strokeWidth={1.8} />
     </button>
   {/each}
 </div>

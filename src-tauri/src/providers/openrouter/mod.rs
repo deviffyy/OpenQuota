@@ -9,8 +9,8 @@ use thiserror::Error;
 
 use crate::{
     models::{
-        ApiKeyStatus, MetricDefinition, MetricSection, ProviderDefinition, ProviderErrorKind,
-        ProviderLink, ProviderSnapshot, UsageHistory,
+        ApiKeyStatus, MetricDefinition, MetricLabelKind, MetricSection, ProviderDefinition,
+        ProviderErrorKind, ProviderLink, ProviderLinkKind, ProviderSnapshot, UsageHistory,
     },
     providers::api_key::ApiKeyStore,
 };
@@ -32,11 +32,12 @@ pub(crate) fn definition() -> ProviderDefinition {
         short_name: "OR".into(),
         fallback_enabled: false,
         local_usage_source_note: None,
-        local_usage_source_key: None,
-        pi_usage_source_key: None,
+        local_usage_source_kind: None,
         links: vec![
-            ProviderLink::new("Activity", "https://openrouter.ai/activity"),
-            ProviderLink::new("Credits", "https://openrouter.ai/settings/credits"),
+            ProviderLink::new("Activity", "https://openrouter.ai/activity")
+                .with_kind(ProviderLinkKind::Activity),
+            ProviderLink::new("Credits", "https://openrouter.ai/settings/credits")
+                .with_kind(ProviderLinkKind::Credits),
         ],
         metrics: vec![
             MetricDefinition::quota(
@@ -49,7 +50,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 true,
                 "C",
             )
-            .with_label_key("credits"),
+            .with_label_kind(MetricLabelKind::Credits),
             MetricDefinition::value(
                 "openrouter.balance",
                 "Balance",
@@ -60,7 +61,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 "B",
                 None,
             )
-            .with_label_key("balance"),
+            .with_label_kind(MetricLabelKind::Balance),
             MetricDefinition::value(
                 "openrouter.today",
                 "Today",
@@ -71,7 +72,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 "T",
                 None,
             )
-            .with_label_key("today"),
+            .with_label_kind(MetricLabelKind::Today),
             MetricDefinition::value(
                 "openrouter.week",
                 "This Week",
@@ -82,7 +83,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 "W",
                 None,
             )
-            .with_label_key("thisWeek"),
+            .with_label_kind(MetricLabelKind::ThisWeek),
             MetricDefinition::value(
                 "openrouter.month",
                 "This Month",
@@ -93,7 +94,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 "M",
                 None,
             )
-            .with_label_key("thisMonth"),
+            .with_label_kind(MetricLabelKind::ThisMonth),
             MetricDefinition::quota(
                 "openrouter.keyLimit",
                 "Key Limit",
@@ -104,7 +105,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "K",
             )
-            .with_label_key("keyLimit"),
+            .with_label_kind(MetricLabelKind::KeyLimit),
         ],
     }
 }

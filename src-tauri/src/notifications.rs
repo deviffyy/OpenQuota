@@ -72,10 +72,10 @@ fn deliver(
     alerts
         .iter()
         .filter_map(|alert| {
-            let metric_key = registry
+            let metric_kind = registry
                 .metric(&alert.metric_id)
-                .and_then(|definition| definition.label_key.as_deref());
-            let metric = crate::native_i18n::metric_label(locale, metric_key, &alert.metric);
+                .and_then(|definition| definition.label_kind);
+            let metric = crate::native_i18n::metric_label(locale, metric_kind, &alert.metric);
             let result = show(
                 app,
                 alert.milestone.title(locale),

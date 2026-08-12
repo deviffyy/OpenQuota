@@ -643,7 +643,7 @@
       >
       {#if canRenameProvider(menuProvider.id, renamableProviderIds)}
         <button type="button" role="menuitem" onclick={() => onRenameProvider(menuProvider.id)}
-          ><Icon name="edit" size={15} />Rename…</button
+          ><Icon name="edit" size={15} />{t('rename')}…</button
         >
       {/if}
       <button type="button" role="menuitem" onclick={() => onOpenProviderCustomize(menuProvider.id)}

@@ -1,20 +1,76 @@
 import type {
   MetricDefinition,
+  MetricLabelKind,
   ProviderCatalog,
   ProviderDefinition,
+  ProviderLink,
+  ProviderLinkKind,
   ProviderNotice,
   ProviderSnapshot,
   StatusMetric,
+  UsageSourceKind,
 } from './types';
-import { messages, t, type TranslationKey } from './i18n';
+import { t, type TranslationKey } from './i18n';
 
-function localizedKey(key: string | null | undefined, values: Record<string, string | number>) {
-  if (!key || !(key in messages.en)) return undefined;
-  return t(key as TranslationKey, values);
+const metricLabelKeys: Record<MetricLabelKind, TranslationKey> = {
+  session: 'session',
+  weekly: 'weekly',
+  today: 'today',
+  yesterday: 'yesterday',
+  last30Days: 'last30Days',
+  daily: 'daily',
+  monthly: 'monthly',
+  usageTrend: 'usageTrend',
+  extraUsage: 'extraUsage',
+  extraBalance: 'extraBalance',
+  rateLimitResets: 'rateLimitResets',
+  credits: 'credits',
+  totalUsage: 'totalUsage',
+  autoUsage: 'autoUsage',
+  apiUsage: 'apiUsage',
+  requests: 'requestsLabel',
+  balance: 'balance',
+  thisWeek: 'thisWeek',
+  thisMonth: 'thisMonth',
+  keyLimit: 'keyLimit',
+  webSearches: 'webSearches',
+  sparkWeekly: 'sparkWeekly',
+  claudeWeekly: 'claudeWeekly',
+  orgCredits: 'orgCredits',
+  orgSpend: 'orgSpend',
+  chat: 'chat',
+  completions: 'completions',
+};
+
+const usageSourceKeys: Partial<Record<UsageSourceKind, TranslationKey>> = {
+  estimatedLogs: 'estimatedLogsSource',
+  estimatedLogsWithPi: 'estimatedLogsWithPiSource',
+  estimatedUsageHistory: 'estimatedUsageHistorySource',
+  estimatedHistoryWithPi: 'estimatedHistoryWithPiSource',
+  cursorExport: 'cursorExportSource',
+  openCodeDatabase: 'openCodeDatabaseSource',
+};
+
+const providerLinkKeys: Record<ProviderLinkKind, TranslationKey> = {
+  status: 'providerLinkStatus',
+  dashboard: 'providerLinkDashboard',
+  apiKeys: 'providerLinkApiKeys',
+  usage: 'providerLinkUsage',
+  activity: 'providerLinkActivity',
+  credits: 'providerLinkCredits',
+};
+
+function localizedUsageSource(kind: UsageSourceKind | null | undefined, provider: string) {
+  const key = kind && usageSourceKeys[kind];
+  return key ? t(key, { provider }) : undefined;
 }
 
 function localizedMetricLabel(definition: MetricDefinition) {
-  return localizedKey(definition.labelKey, {}) ?? definition.label;
+  return definition.labelKind ? t(metricLabelKeys[definition.labelKind]) : definition.label;
+}
+
+export function localizedProviderLinkLabel(link: ProviderLink) {
+  return link.kind ? t(providerLinkKeys[link.kind]) : link.label;
 }
 
 export function localizedStatusText(metric: StatusMetric) {
@@ -97,7 +153,7 @@ export class ProviderCatalogIndex {
     const provider = this.provider(id);
     const name = provider?.displayName ?? id;
     return (
-      localizedKey(provider?.localUsageSourceKey, { provider: name }) ??
+      localizedUsageSource(provider?.localUsageSourceKind, name) ??
       provider?.localUsageSourceNote ??
       t('usageHistorySource', { provider: name })
     );
@@ -109,10 +165,12 @@ export function usageSourceNote(catalog: ProviderCatalogIndex, snapshot: Provide
     snapshot.usage.last30Days?.modelBreakdown ??
     snapshot.usage.today?.modelBreakdown ??
     snapshot.usage.yesterday?.modelBreakdown;
-  const source = localizedKey(breakdown?.sourceKey, {
-    provider: catalog.displayName(snapshot.providerId),
-  });
+  const source = localizedUsageSource(
+    breakdown?.sourceKind,
+    catalog.displayName(snapshot.providerId),
+  );
   if (source) return source;
+  if (breakdown?.sourceNote.trim()) return breakdown.sourceNote;
   return catalog.localUsageSourceNote(snapshot.providerId);
 }
 

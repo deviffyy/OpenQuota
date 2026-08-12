@@ -10,7 +10,8 @@ use serde_json::{json, Value};
 use thiserror::Error;
 
 use crate::models::{
-    MetricDefinition, MetricSection, ProviderDefinition, ProviderSnapshot, UsageHistory,
+    MetricDefinition, MetricLabelKind, MetricSection, ProviderDefinition, ProviderSnapshot,
+    UsageHistory,
 };
 
 use self::{
@@ -35,8 +36,7 @@ pub(crate) fn definition() -> ProviderDefinition {
         short_name: "A".into(),
         fallback_enabled: false,
         local_usage_source_note: None,
-        local_usage_source_key: None,
-        pi_usage_source_key: None,
+        local_usage_source_kind: None,
         links: vec![],
         metrics: vec![
             MetricDefinition::quota(
@@ -49,7 +49,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 true,
                 "S",
             )
-            .with_label_key("session"),
+            .with_label_kind(MetricLabelKind::Session),
             MetricDefinition::quota(
                 "antigravity.geminiWeekly",
                 "Weekly",
@@ -60,7 +60,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 true,
                 "W",
             )
-            .with_label_key("weekly"),
+            .with_label_kind(MetricLabelKind::Weekly),
             MetricDefinition::quota(
                 "antigravity.claude",
                 "Claude",
@@ -81,7 +81,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "CW",
             )
-            .with_label_key("claudeWeekly"),
+            .with_label_kind(MetricLabelKind::ClaudeWeekly),
         ],
     }
 }

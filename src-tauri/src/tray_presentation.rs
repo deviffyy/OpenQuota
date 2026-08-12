@@ -251,11 +251,8 @@ fn tray_metric(
     locale: crate::native_i18n::Locale,
 ) -> Option<TrayMetric> {
     let tray = definition.tray.as_ref()?;
-    let localized_label = crate::native_i18n::metric_label(
-        locale,
-        definition.label_key.as_deref(),
-        &definition.label,
-    );
+    let localized_label =
+        crate::native_i18n::metric_label(locale, definition.label_kind, &definition.label);
     let quota = |id: &str| {
         snapshot
             .quotas
