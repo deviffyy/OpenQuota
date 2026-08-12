@@ -162,7 +162,7 @@ describe('OpenQuota dashboard', () => {
     );
   });
 
-  it('provides a native drag surface and hide control in floating window mode', async () => {
+  it('provides a native drag region and hide control in floating window mode', async () => {
     Object.defineProperty(window, '__TAURI_INTERNALS__', {
       configurable: true,
       value: {},
@@ -193,8 +193,7 @@ describe('OpenQuota dashboard', () => {
         'panel-resize-dragger--bottom',
       );
 
-      await fireEvent.pointerDown(dragSurface!, { button: 0 });
-      expect(mocks.startDragging).toHaveBeenCalledOnce();
+      expect(dragSurface).toHaveAttribute('data-tauri-drag-region');
     } finally {
       delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
       Object.defineProperty(navigator, 'userAgent', { configurable: true, value: userAgent });

@@ -75,6 +75,22 @@ pub fn lock_panel_resize_axis(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn current_panel_width(app: AppHandle) -> Result<f64, String> {
+    let window = app
+        .get_webview_window(MAIN_WINDOW)
+        .ok_or("OpenQuota window is unavailable.")?;
+    Ok(crate::window::panel_logical_width(&window))
+}
+
+#[tauri::command]
+pub fn set_panel_width(app: AppHandle, width: f64) -> Result<(), String> {
+    let window = app
+        .get_webview_window(MAIN_WINDOW)
+        .ok_or("OpenQuota window is unavailable.")?;
+    crate::window::apply_panel_width(&window, width)
+}
+
+#[tauri::command]
 pub fn quit_app(app: AppHandle) {
     if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
         finish_native_panel_resize(&window);

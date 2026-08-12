@@ -25,6 +25,8 @@
     resetProviderCustomization as resetProviderCustomizationCommand,
     setPanelHeightAutomatic,
     setPanelHeightManual,
+    setPanelWidth,
+    currentPanelWidth,
     type PanelHeightMode,
     type PanelResizeEdge,
   } from './lib/backend';
@@ -438,12 +440,6 @@
   }
   function handleWindowPointerDown(event: PointerEvent) {
     if (
-      event.target instanceof Element &&
-      event.target.closest('.floating-chrome__drag') !== null
-    ) {
-      handleFloatingWindowPointerDown(event);
-    }
-    if (
       optionsMenuElement?.open &&
       event.target instanceof Node &&
       !optionsMenuElement.contains(event.target)
@@ -510,12 +506,59 @@
       if (panelResizeOperation === operation) panelResizeOperation = null;
     });
   }
-  function handleFloatingWindowPointerDown(event: PointerEvent) {
-    if (event.button !== 0 || !('__TAURI_INTERNALS__' in window)) return;
+  function handlePanelWidthResizePointerDown(event: PointerEvent) {
+    if (event.button !== 0) return;
     event.preventDefault();
-    void getCurrentWindow()
-      .startDragging()
-      .catch(() => (settingsError = 'OpenQuota window could not be moved.'));
+    event.stopPropagation();
+    const dragger = event.currentTarget as HTMLElement;
+    dragger.setPointerCapture(event.pointerId);
+    void (async () => {
+      try {
+        // Manual pointer-tracked resize: programmatic setSize on each move. Unlike the native
+        // startResizeDragging gesture (unreliable for borderless windows), this works everywhere.
+        const startWidth = await currentPanelWidth();
+        const startX = event.clientX;
+        let latestWidth = startWidth;
+        let animationFrame: number | null = null;
+        let resizeOperation = Promise.resolve();
+        const queueLatestWidth = () => {
+          if (animationFrame !== null) return;
+          animationFrame = requestAnimationFrame(() => {
+            animationFrame = null;
+            const width = latestWidth;
+            resizeOperation = resizeOperation
+              .then(() => setPanelWidth(width))
+              .catch(() => undefined);
+          });
+        };
+        const onMove = (moveEvent: PointerEvent) => {
+          latestWidth = startWidth + (moveEvent.clientX - startX);
+          queueLatestWidth();
+        };
+        const finish = () => {
+          window.removeEventListener('pointermove', onMove);
+          window.removeEventListener('pointerup', finish);
+          window.removeEventListener('pointercancel', finish);
+          if (dragger.hasPointerCapture(event.pointerId)) {
+            dragger.releasePointerCapture(event.pointerId);
+          }
+          if (animationFrame !== null) {
+            cancelAnimationFrame(animationFrame);
+            animationFrame = null;
+            const width = latestWidth;
+            resizeOperation = resizeOperation
+              .then(() => setPanelWidth(width))
+              .catch(() => undefined);
+          }
+          void resizeOperation.finally(() => lockPanelResizeAxis().catch(() => undefined));
+        };
+        window.addEventListener('pointermove', onMove);
+        window.addEventListener('pointerup', finish);
+        window.addEventListener('pointercancel', finish);
+      } catch {
+        settingsError = 'OpenQuota panel width could not be resized.';
+      }
+    })();
   }
   async function changePanelHeightMode(mode: PanelHeightMode) {
     if (!('__TAURI_INTERNALS__' in window)) return;
@@ -703,7 +746,11 @@
   {/if}
   {#if floatingWindow}
     <header class="floating-chrome" aria-label="OpenQuota window controls">
-      <div class="floating-chrome__drag">
+      <div
+        class="floating-chrome__drag"
+        data-tauri-drag-region
+        title="Drag to reposition OpenQuota"
+      >
         <OpenQuotaMark size={14} />
         <span>OpenQuota</span>
       </div>
@@ -1008,6 +1055,15 @@
       onpointerdown={handlePanelResizePointerDown}
     ></div>
   {/if}
+  {#if floatingWindow && (renderedResizeEdge === 'top' || renderedResizeEdge === 'bottom')}
+    <div
+      class="panel-resize-dragger panel-resize-dragger--right"
+      role="separator"
+      aria-label="Resize panel width"
+      aria-orientation="vertical"
+      onpointerdown={handlePanelWidthResizePointerDown}
+    ></div>
+  {/if}
 </main>
 
 <style>
@@ -1137,6 +1193,26 @@
 
     .panel-resize-dragger--bottom {
       box-shadow: 0 -10px 18px -20px rgba(0, 0, 0, 0.7);
+    }
+
+    .panel-resize-dragger--right {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 8px;
+      height: auto;
+      flex: 0 0 auto;
+      cursor: ew-resize;
+    }
+
+    .panel-resize-dragger--right::after {
+      width: 4px;
+      height: 36px;
+    }
+
+    .panel-resize-dragger--right:hover::after {
+      height: 42px;
     }
 
     .content {
@@ -1683,7 +1759,7 @@
     .popover {
       width: 100%;
       min-width: 0;
-      max-width: 320px;
+      max-width: 100%;
     }
   }
 </style>

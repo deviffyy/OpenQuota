@@ -14,11 +14,11 @@
       {
         "label": "main",
         "title": "OpenQuota",
-        "width": 320,
+        "width": 380,
         "height": 800,
         "minWidth": 320,
         "minHeight": 240,
-        "maxWidth": 320,
+        "maxWidth": 560,
         "resizable": false,
         "fullscreen": false,
         "decorations": false,
