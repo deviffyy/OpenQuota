@@ -18,7 +18,6 @@ pub(crate) enum CostProvenance {
 pub(crate) struct UsageRecord {
     pub(crate) key: (String, String),
     pub(crate) timestamp: DateTime<Utc>,
-    pub(crate) provider_id: String,
     pub(crate) model: String,
     pub(crate) tokens: u64,
     pub(crate) cost: Option<f64>,
@@ -65,7 +64,6 @@ impl ParsedMessage {
         UsageRecord {
             key: (self.session_id, self.message_id),
             timestamp: self.timestamp,
-            provider_id: self.provider_id,
             model: self.model,
             tokens: tokens.total,
             cost,
