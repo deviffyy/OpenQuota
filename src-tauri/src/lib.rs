@@ -48,10 +48,10 @@ use crate::{
     pricing::PricingStore,
     providers::{
         antigravity::AntigravityProvider, claude, codex::reset_claim::CodexResetClaimService,
-        codex::CodexProvider, copilot::CopilotProvider, cursor::CursorProvider,
-        detect_local_credentials, devin::DevinProvider, grok::GrokProvider, kimi::KimiProvider,
-        minimax::MiniMaxProvider, opencode::OpenCodeProvider, openrouter::OpenRouterProvider,
-        zai::ZaiProvider, ProviderRegistry, UsageProvider,
+        codex::CodexProvider, commandcode::CommandCodeProvider, copilot::CopilotProvider,
+        cursor::CursorProvider, detect_local_credentials, devin::DevinProvider, grok::GrokProvider,
+        kimi::KimiProvider, minimax::MiniMaxProvider, opencode::OpenCodeProvider,
+        openrouter::OpenRouterProvider, zai::ZaiProvider, ProviderRegistry, UsageProvider,
     },
     storage::Storage,
     window::{
@@ -370,6 +370,7 @@ pub fn run() {
             providers.extend(vec![
                 Arc::new(CodexProvider::new(storage.clone(), pricing.clone())?)
                     as Arc<dyn UsageProvider>,
+                Arc::new(CommandCodeProvider::new()?) as Arc<dyn UsageProvider>,
                 Arc::new(CursorProvider::new(pricing.clone())?) as Arc<dyn UsageProvider>,
                 Arc::new(AntigravityProvider::new(
                     app_data_dir.join("antigravity").join("auth.json"),
