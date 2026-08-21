@@ -5,15 +5,13 @@ use std::{
     time::Duration,
 };
 
-use chrono::{DateTime, Utc};
 use rusqlite::{types::ValueRef, Connection, OpenFlags, Row};
 use serde_json::Value;
 
 use crate::pricing::ModelPricing;
 
 use super::record::{
-    parse_message, parse_part, provider_id, timestamp_from_number, timestamp_from_value,
-    ParsedMessage, ParsedPart, UsageRecord, EPOCH_MILLISECONDS_THRESHOLD, GO_PROVIDER_ID,
+    parse_message, parse_part, ParsedMessage, ParsedPart, UsageRecord, EPOCH_MILLISECONDS_THRESHOLD,
 };
 
 const PROVIDER_JSON: &str = "COALESCE(\
@@ -25,7 +23,6 @@ const PROVIDER_JSON: &str = "COALESCE(\
 #[derive(Debug, Default)]
 pub(crate) struct DatabaseUsage {
     pub(crate) records: Vec<UsageRecord>,
-    pub(crate) go_anchor: Option<DateTime<Utc>>,
 }
 
 pub(crate) enum DatabaseRead {
@@ -51,7 +48,6 @@ pub(crate) fn read_database(
     let schema = inspect_schema(&connection)?;
     let mut messages = load_messages(&connection, &schema, cutoff_ms)?;
     let parts = load_parts(&connection, &schema, cutoff_ms, &messages)?;
-    let go_anchor = load_go_anchor(&connection, &schema)?;
 
     let mut records = Vec::with_capacity(messages.len());
     for message in messages.drain(..) {
@@ -61,7 +57,7 @@ pub(crate) fn read_database(
             .unwrap_or(&[]);
         records.push(message.into_usage(message_parts, pricing));
     }
-    Ok(DatabaseRead::Usable(DatabaseUsage { records, go_anchor }))
+    Ok(DatabaseRead::Usable(DatabaseUsage { records }))
 }
 
 pub(crate) fn has_hosted_usage(path: &Path) -> Result<bool, ()> {
@@ -305,63 +301,6 @@ fn load_parts(
 
 fn timestamp_filter(column: &str) -> String {
     format!(" WHERE ({column} >= ?1 OR ({column} >= ?2 AND {column} < ?3))")
-}
-
-fn load_go_anchor(
-    connection: &Connection,
-    schema: &DatabaseSchema,
-) -> Result<Option<DateTime<Utc>>, ()> {
-    let join = schema.session_join_sql();
-    let cost = hosted_cost_sql(schema.part.is_some());
-    if schema.message_time_created {
-        let sql = format!(
-            "SELECT m.time_created FROM message m{join} \
-             WHERE json_valid(m.data) \
-               AND json_extract(m.data,'$.role') = 'assistant' \
-               AND {PROVIDER_JSON} = 'opencode-go' \
-               AND {cost}"
-        );
-        let mut statement = connection.prepare(&sql).map_err(|_| ())?;
-        let mut rows = statement.query([]).map_err(|_| ())?;
-        let mut anchor: Option<DateTime<Utc>> = None;
-        while let Some(row) = rows.next().map_err(|_| ())? {
-            if let Some(timestamp) = row_i64(row, 0).and_then(timestamp_from_number) {
-                anchor = Some(anchor.map_or(timestamp, |current| current.min(timestamp)));
-            }
-        }
-        return Ok(anchor);
-    }
-
-    let sql = format!("SELECT NULL, m.data, {cost} FROM message m{join} WHERE json_valid(m.data)");
-    let mut statement = connection.prepare(&sql).map_err(|_| ())?;
-    let mut rows = statement.query([]).map_err(|_| ())?;
-    let mut anchor: Option<DateTime<Utc>> = None;
-    while let Some(row) = rows.next().map_err(|_| ())? {
-        let column_timestamp = row_i64(row, 0);
-        let Some(data) = row_text(row, 1) else {
-            continue;
-        };
-        let Ok(value) = serde_json::from_str::<Value>(&data) else {
-            continue;
-        };
-        if value.get("role").and_then(Value::as_str) != Some("assistant")
-            || provider_id(&value).as_deref() != Some(GO_PROVIDER_ID)
-            || !row.get::<_, bool>(2).unwrap_or(false)
-        {
-            continue;
-        }
-        let timestamp = column_timestamp
-            .and_then(timestamp_from_number)
-            .or_else(|| {
-                value
-                    .pointer("/time/created")
-                    .and_then(timestamp_from_value)
-            });
-        if let Some(timestamp) = timestamp {
-            anchor = Some(anchor.map_or(timestamp, |current| current.min(timestamp)));
-        }
-    }
-    Ok(anchor)
 }
 
 fn row_text(row: &Row<'_>, index: usize) -> Option<String> {
