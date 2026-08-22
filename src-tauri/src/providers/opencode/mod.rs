@@ -127,6 +127,7 @@ impl From<OpenCodeError> for ProviderError {
             }
             OpenCodeError::ConnectionFailed => ProviderErrorKind::Network,
             OpenCodeError::RequestFailed(429) => ProviderErrorKind::RateLimited,
+            OpenCodeError::RequestFailed(500..=599) => ProviderErrorKind::Network,
             OpenCodeError::InvalidResponse | OpenCodeError::RequestFailed(_) => {
                 ProviderErrorKind::InvalidResponse
             }
@@ -138,7 +139,7 @@ impl From<OpenCodeError> for ProviderError {
 pub struct OpenCodeProvider {
     paths: OpenCodePaths,
     scanner: OpenCodeUsageScanner,
-    client: OpenCodeClient,
+    client: Result<OpenCodeClient, OpenCodeError>,
     pricing: Arc<PricingStore>,
     now: Arc<dyn Fn() -> DateTime<Utc> + Send + Sync>,
 }
@@ -149,7 +150,7 @@ impl OpenCodeProvider {
         Self {
             scanner: OpenCodeUsageScanner::new(paths.clone()),
             paths,
-            client: OpenCodeClient::new().expect("OpenCode Go client configuration is valid"),
+            client: OpenCodeClient::new(),
             pricing,
             now: Arc::new(Utc::now),
         }
@@ -165,7 +166,7 @@ impl OpenCodeProvider {
         Self {
             scanner: OpenCodeUsageScanner::new(paths.clone()),
             paths,
-            client,
+            client: Ok(client),
             pricing,
             now: Arc::new(move || now),
         }
@@ -179,7 +180,13 @@ impl OpenCodeProvider {
         };
         let go_usage = go_api_key
             .as_deref()
-            .map(|key| self.client.fetch_go_usage(key).and_then(map_go_usage))
+            .map(|key| {
+                self.client
+                    .as_ref()
+                    .map_err(|error| *error)
+                    .and_then(|client| client.fetch_go_usage(key))
+                    .and_then(map_go_usage)
+            })
             .transpose();
         let pricing = self.pricing.current();
         let scan = self.scanner.scan(now, &pricing);
