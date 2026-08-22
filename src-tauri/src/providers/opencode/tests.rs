@@ -45,6 +45,21 @@ fn pricing_store(directory: &Path) -> Arc<PricingStore> {
     Arc::new(PricingStore::new(directory.join("pricing")).unwrap())
 }
 
+#[test]
+fn missing_go_subscription_is_reported_as_permission() {
+    let error: crate::providers::ProviderError = OpenCodeError::GoSubscriptionRequired.into();
+
+    assert_eq!(error.kind(), ProviderErrorKind::Permission);
+    assert_eq!(error.to_string(), "OpenCode Go subscription required.");
+}
+
+#[test]
+fn go_usage_rate_limit_is_reported_as_rate_limited() {
+    let error: crate::providers::ProviderError = OpenCodeError::RequestFailed(429).into();
+
+    assert_eq!(error.kind(), ProviderErrorKind::RateLimited);
+}
+
 fn create_database(path: &Path, with_parts: bool) -> Connection {
     let connection = Connection::open(path).unwrap();
     connection

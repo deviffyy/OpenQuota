@@ -104,6 +104,8 @@ pub(crate) enum OpenCodeError {
     DatabaseUnreadable,
     #[error("OpenCode Go login data is invalid or expired. Sign in to OpenCode Go again.")]
     InvalidAuth,
+    #[error("OpenCode Go subscription required.")]
+    GoSubscriptionRequired,
     #[error("Could not reach OpenCode Go. Check your internet connection.")]
     ConnectionFailed,
     #[error("OpenCode Go returned an invalid usage response.")]
@@ -118,6 +120,7 @@ impl From<OpenCodeError> for ProviderError {
             OpenCodeError::NotDetected | OpenCodeError::InvalidAuth => {
                 ProviderErrorKind::Authentication
             }
+            OpenCodeError::GoSubscriptionRequired => ProviderErrorKind::Permission,
             OpenCodeError::CredentialsUnreadable => ProviderErrorKind::CredentialStorage,
             OpenCodeError::DataDirectoryUnreadable | OpenCodeError::DatabaseUnreadable => {
                 ProviderErrorKind::LocalData

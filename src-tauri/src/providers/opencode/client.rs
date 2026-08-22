@@ -62,3 +62,10 @@ impl OpenCodeClient {
         Ok(UsageResponse { status, body })
     }
 }
+
+#[cfg(test)]
+impl OpenCodeClient {
+    pub(super) fn for_test(url: &str, timeout: Duration) -> Self {
+        Self::with_endpoint(url, timeout).expect("test OpenCode endpoint should be valid")
+    }
+}

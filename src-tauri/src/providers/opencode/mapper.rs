@@ -5,10 +5,14 @@ use crate::models::{QuotaFormat, QuotaWindow};
 
 use super::{client::UsageResponse, OpenCodeError};
 
+const ROLLING_PERIOD_SECONDS: u64 = 5 * 60 * 60;
+const WEEKLY_PERIOD_SECONDS: u64 = 7 * 24 * 60 * 60;
+
 pub(super) fn map_go_usage(response: UsageResponse) -> Result<Vec<QuotaWindow>, OpenCodeError> {
     match response.status.as_u16() {
         200..=299 => {}
-        401 | 403 => return Err(OpenCodeError::InvalidAuth),
+        401 => return Err(OpenCodeError::InvalidAuth),
+        403 => return Err(OpenCodeError::GoSubscriptionRequired),
         status => return Err(OpenCodeError::RequestFailed(status)),
     }
     let usage = response
@@ -17,15 +21,30 @@ pub(super) fn map_go_usage(response: UsageResponse) -> Result<Vec<QuotaWindow>, 
         .and_then(Value::as_object)
         .ok_or(OpenCodeError::InvalidResponse)?;
     [
-        quota(usage.get("rolling"), "session", "Session"),
-        quota(usage.get("weekly"), "weekly", "Weekly"),
-        quota(usage.get("monthly"), "monthly", "Monthly"),
+        quota(
+            usage.get("rolling"),
+            "session",
+            "Session",
+            ROLLING_PERIOD_SECONDS,
+        ),
+        quota(
+            usage.get("weekly"),
+            "weekly",
+            "Weekly",
+            WEEKLY_PERIOD_SECONDS,
+        ),
+        quota(usage.get("monthly"), "monthly", "Monthly", 0),
     ]
     .into_iter()
     .collect()
 }
 
-fn quota(value: Option<&Value>, id: &str, label: &str) -> Result<QuotaWindow, OpenCodeError> {
+fn quota(
+    value: Option<&Value>,
+    id: &str,
+    label: &str,
+    period_seconds: u64,
+) -> Result<QuotaWindow, OpenCodeError> {
     let value = value
         .and_then(Value::as_object)
         .ok_or(OpenCodeError::InvalidResponse)?;
@@ -45,7 +64,7 @@ fn quota(value: Option<&Value>, id: &str, label: &str) -> Result<QuotaWindow, Op
         label: label.into(),
         used_percent,
         resets_at,
-        period_seconds: 0,
+        period_seconds,
         format: QuotaFormat::Percent,
         used_value: None,
         limit_value: None,
@@ -61,21 +80,82 @@ mod tests {
     use serde_json::json;
 
     use super::{map_go_usage, UsageResponse};
+    use crate::providers::test_http;
 
     #[test]
     fn maps_authoritative_go_usage_windows() {
         let response = UsageResponse {
             status: StatusCode::OK,
             body: json!({"usage": {
-                "rolling": {"percent": 31, "resetsAt": "2026-08-12T12:00:00Z", "status": "active"},
-                "weekly": {"percent": 100, "resetsAt": "2026-08-17T00:00:00Z", "status": "exhausted"},
-                "monthly": {"percent": 72, "resetsAt": "2026-09-05T00:00:00Z", "status": "active"}
+                "rolling": {"percent": 31, "resetsAt": "2026-08-12T12:00:00Z", "status": "ok"},
+                "weekly": {"percent": 100, "resetsAt": "2026-08-17T00:00:00Z", "status": "rate-limited"},
+                "monthly": {"percent": 72, "resetsAt": "2026-09-05T00:00:00Z", "status": "ok"}
             }}),
         };
         let quotas = map_go_usage(response).unwrap();
         assert_eq!(quotas.len(), 3);
         assert_eq!(quotas[0].id, "session");
+        assert_eq!(quotas[0].period_seconds, 5 * 60 * 60);
+        assert_eq!(quotas[1].period_seconds, 7 * 24 * 60 * 60);
+        assert_eq!(quotas[2].period_seconds, 0);
         assert_eq!(quotas[1].used_percent, 100.0);
         assert!(!quotas.iter().any(|quota| quota.estimated));
+    }
+
+    #[test]
+    fn maps_missing_go_subscription_as_entitlement_error() {
+        let response = UsageResponse {
+            status: StatusCode::FORBIDDEN,
+            body: json!({
+                "type": "error",
+                "error": {
+                    "type": "EntitlementError",
+                    "message": "OpenCode Go subscription required."
+                }
+            }),
+        };
+
+        let error = map_go_usage(response).unwrap_err();
+        assert_eq!(error.to_string(), "OpenCode Go subscription required.");
+    }
+
+    #[test]
+    fn maps_invalid_key_as_authentication_error() {
+        let response = UsageResponse {
+            status: StatusCode::UNAUTHORIZED,
+            body: json!({}),
+        };
+
+        let error = map_go_usage(response).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "OpenCode Go login data is invalid or expired. Sign in to OpenCode Go again."
+        );
+    }
+
+    #[test]
+    fn maps_rate_limit_response_as_rate_limited_error() {
+        let response = UsageResponse {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            body: json!({}),
+        };
+
+        let error = map_go_usage(response).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "OpenCode Go usage request failed (HTTP 429)."
+        );
+    }
+
+    #[test]
+    fn client_fetches_usage_from_a_test_endpoint() {
+        let url = test_http::serve_once(200, &[], r#"{"usage":{}}"#);
+        let client =
+            super::super::client::OpenCodeClient::for_test(&url, std::time::Duration::from_secs(1));
+
+        let response = client.fetch_go_usage("test-key").unwrap();
+
+        assert_eq!(response.status, StatusCode::OK);
+        assert_eq!(response.body["usage"], json!({}));
     }
 }
