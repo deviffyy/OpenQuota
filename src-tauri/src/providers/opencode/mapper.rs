@@ -104,16 +104,7 @@ mod tests {
 
     #[test]
     fn maps_missing_go_subscription_as_entitlement_error() {
-        let response = UsageResponse {
-            status: StatusCode::FORBIDDEN,
-            body: json!({
-                "type": "error",
-                "error": {
-                    "type": "EntitlementError",
-                    "message": "OpenCode Go subscription required."
-                }
-            }),
-        };
+        let response = fetch_response(403, r#"{"type":"error"}"#);
 
         let error = map_go_usage(response).unwrap_err();
         assert_eq!(error.to_string(), "OpenCode Go subscription required.");
@@ -121,10 +112,7 @@ mod tests {
 
     #[test]
     fn maps_invalid_key_as_authentication_error() {
-        let response = UsageResponse {
-            status: StatusCode::UNAUTHORIZED,
-            body: json!({}),
-        };
+        let response = fetch_response(401, r#"{"type":"error"}"#);
 
         let error = map_go_usage(response).unwrap_err();
         assert_eq!(
@@ -135,10 +123,7 @@ mod tests {
 
     #[test]
     fn maps_rate_limit_response_as_rate_limited_error() {
-        let response = UsageResponse {
-            status: StatusCode::TOO_MANY_REQUESTS,
-            body: json!({}),
-        };
+        let response = fetch_response(429, r#"{"type":"error"}"#);
 
         let error = map_go_usage(response).unwrap_err();
         assert_eq!(
@@ -149,13 +134,16 @@ mod tests {
 
     #[test]
     fn client_fetches_usage_from_a_test_endpoint() {
-        let url = test_http::serve_once(200, &[], r#"{"usage":{}}"#);
-        let client =
-            super::super::client::OpenCodeClient::for_test(&url, std::time::Duration::from_secs(1));
-
-        let response = client.fetch_go_usage("test-key").unwrap();
+        let response = fetch_response(200, r#"{"usage":{}}"#);
 
         assert_eq!(response.status, StatusCode::OK);
         assert_eq!(response.body["usage"], json!({}));
+    }
+
+    fn fetch_response(status: u16, body: &str) -> UsageResponse {
+        let url = test_http::serve_once(status, &[], body);
+        let client =
+            super::super::client::OpenCodeClient::for_test(&url, std::time::Duration::from_secs(1));
+        client.fetch_go_usage("test-key").unwrap()
     }
 }

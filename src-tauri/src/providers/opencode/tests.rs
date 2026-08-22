@@ -3,6 +3,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Duration,
 };
 
 use chrono::{TimeZone, Utc};
@@ -16,8 +17,8 @@ use crate::{
 };
 
 use super::{
-    database::has_hosted_usage, definition, paths::OpenCodePaths, scanner::OpenCodeUsageScanner,
-    OpenCodeError, OpenCodeProvider,
+    client::OpenCodeClient, database::has_hosted_usage, definition, paths::OpenCodePaths,
+    scanner::OpenCodeUsageScanner, OpenCodeError, OpenCodeProvider,
 };
 
 fn now() -> chrono::DateTime<Utc> {
@@ -43,6 +44,10 @@ fn pricing() -> ModelPricing {
 
 fn pricing_store(directory: &Path) -> Arc<PricingStore> {
     Arc::new(PricingStore::new(directory.join("pricing")).unwrap())
+}
+
+fn test_client(url: &str) -> OpenCodeClient {
+    OpenCodeClient::for_test(url, Duration::from_secs(1))
 }
 
 #[test]
@@ -519,8 +524,12 @@ fn local_detection_requires_a_key_or_a_readable_hosted_usage_row() {
     let directory = tempdir().unwrap();
     let data_directory = directory.path();
     let paths = OpenCodePaths::for_data_directory(data_directory.to_path_buf());
-    let provider =
-        OpenCodeProvider::with_dependencies(paths.clone(), pricing_store(data_directory), now());
+    let provider = OpenCodeProvider::with_dependencies(
+        paths.clone(),
+        test_client("http://127.0.0.1:1"),
+        pricing_store(data_directory),
+        now(),
+    );
     assert!(!provider.has_local_credentials());
 
     let empty = create_database(&data_directory.join("opencode.db"), false);
@@ -567,6 +576,7 @@ fn malformed_auth_does_not_blank_valid_database_usage() {
     drop(connection);
     let provider = OpenCodeProvider::with_dependencies(
         OpenCodePaths::for_data_directory(directory.path().to_path_buf()),
+        test_client("http://127.0.0.1:1"),
         pricing_store(directory.path()),
         now(),
     );
@@ -581,6 +591,7 @@ fn absent_and_unreadable_sources_map_to_distinct_safe_categories() {
     let directory = tempdir().unwrap();
     let absent = OpenCodeProvider::with_dependencies(
         OpenCodePaths::for_data_directory(directory.path().to_path_buf()),
+        test_client("http://127.0.0.1:1"),
         pricing_store(directory.path()),
         now(),
     )
@@ -591,6 +602,7 @@ fn absent_and_unreadable_sources_map_to_distinct_safe_categories() {
     fs::write(directory.path().join("opencode.db"), b"corrupt").unwrap();
     let unreadable = OpenCodeProvider::with_dependencies(
         OpenCodePaths::for_data_directory(directory.path().to_path_buf()),
+        test_client("http://127.0.0.1:1"),
         pricing_store(directory.path()),
         now(),
     )
@@ -600,4 +612,76 @@ fn absent_and_unreadable_sources_map_to_distinct_safe_categories() {
     assert!(!unreadable
         .to_string()
         .contains(directory.path().to_string_lossy().as_ref()));
+}
+
+#[test]
+fn account_usage_endpoint_populates_quotas_without_local_history() {
+    let directory = tempdir().unwrap();
+    fs::write(
+        directory.path().join("auth.json"),
+        r#"{"opencode-go":{"type":"api","key":"secret-key"}}"#,
+    )
+    .unwrap();
+    let body = serde_json::json!({
+        "usage": {
+            "rolling": {"percent": 31, "resetsAt": "2026-08-12T12:00:00Z", "status": "ok"},
+            "weekly": {"percent": 100, "resetsAt": "2026-08-17T00:00:00Z", "status": "rate-limited"},
+            "monthly": {"percent": 72, "resetsAt": "2026-09-05T00:00:00Z", "status": "ok"}
+        }
+    })
+    .to_string();
+    let url = crate::providers::test_http::serve_once(200, &[], &body);
+    let provider = OpenCodeProvider::with_dependencies(
+        OpenCodePaths::for_data_directory(directory.path().to_path_buf()),
+        test_client(&url),
+        pricing_store(directory.path()),
+        now(),
+    );
+
+    let snapshot = provider.refresh().unwrap();
+
+    assert_eq!(snapshot.plan.as_deref(), Some("Go"));
+    assert_eq!(snapshot.quotas[0].used_percent, 31.0);
+    assert_eq!(snapshot.quotas[1].used_percent, 100.0);
+    assert!(snapshot.usage.today.is_none());
+}
+
+#[test]
+fn unavailable_account_quota_keeps_local_history_and_explains_the_error() {
+    let directory = tempdir().unwrap();
+    fs::write(
+        directory.path().join("auth.json"),
+        r#"{"opencode-go":{"type":"api","key":"secret-key"}}"#,
+    )
+    .unwrap();
+    let connection = create_database(&directory.path().join("opencode.db"), false);
+    insert_message(
+        &connection,
+        "session",
+        "message",
+        timestamp(),
+        &exact_message("opencode", "priced-model", 1.0, 100, 0),
+    );
+    drop(connection);
+    let url = crate::providers::test_http::serve_once(
+        403,
+        &[],
+        r#"{"type":"error","error":{"type":"EntitlementError","message":"OpenCode Go subscription required."}}"#,
+    );
+    let provider = OpenCodeProvider::with_dependencies(
+        OpenCodePaths::for_data_directory(directory.path().to_path_buf()),
+        test_client(&url),
+        pricing_store(directory.path()),
+        now(),
+    );
+
+    let snapshot = provider.refresh().unwrap();
+
+    assert!(snapshot.plan.is_none());
+    assert!(snapshot.quotas.is_empty());
+    assert!(snapshot.usage.today.is_some());
+    assert!(snapshot
+        .warnings
+        .iter()
+        .any(|warning| { warning.contains("OpenCode Go subscription required.") }));
 }

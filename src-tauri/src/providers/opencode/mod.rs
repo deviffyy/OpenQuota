@@ -158,13 +158,14 @@ impl OpenCodeProvider {
     #[cfg(test)]
     fn with_dependencies(
         paths: OpenCodePaths,
+        client: OpenCodeClient,
         pricing: Arc<PricingStore>,
         now: DateTime<Utc>,
     ) -> Self {
         Self {
             scanner: OpenCodeUsageScanner::new(paths.clone()),
             paths,
-            client: OpenCodeClient::new().expect("OpenCode Go client configuration is valid"),
+            client,
             pricing,
             now: Arc::new(move || now),
         }
@@ -222,10 +223,11 @@ impl OpenCodeProvider {
         let (plan, quotas) = match go_usage {
             Ok(Some(quotas)) => (Some("Go".into()), quotas),
             Ok(None) => (None, Vec::new()),
-            Err(_) => {
+            Err(error) => {
                 warnings.push(
-                    "OpenCode Go quota data is temporarily unavailable; local usage is still shown."
-                        .into(),
+                    format!(
+                        "{error} Local usage is still shown while OpenCode Go quota data is unavailable."
+                    ),
                 );
                 (None, Vec::new())
             }
