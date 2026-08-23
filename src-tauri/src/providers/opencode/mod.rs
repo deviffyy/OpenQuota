@@ -40,7 +40,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 "opencode.session",
                 "Session",
                 "session",
-                false,
+                true,
                 true,
                 MetricSection::AlwaysVisible,
                 false,
@@ -230,14 +230,15 @@ impl OpenCodeProvider {
         let (plan, quotas) = match go_usage {
             Ok(Some(quotas)) => (Some("Go".into()), quotas),
             Ok(None) => (None, Vec::new()),
-            Err(error) => {
+            Err(OpenCodeError::GoSubscriptionRequired) => {
                 warnings.push(
                     format!(
-                        "{error} Local usage is still shown while OpenCode Go quota data is unavailable."
+                        "OpenCode Go subscription required. Local usage is still shown while OpenCode Go quota data is unavailable."
                     ),
                 );
                 (None, Vec::new())
             }
+            Err(error) => return Err(error),
         };
         Ok(snapshot(plan, quotas, scan.usage, warnings, now))
     }

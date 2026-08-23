@@ -182,7 +182,7 @@ fn definition_exposes_the_complete_metric_contract() {
         .metrics
         .iter()
         .all(|metric| !metric.default_pinned));
-    assert!(!definition.metrics[0].source.session_window());
+    assert!(definition.metrics[0].source.session_window());
 }
 
 #[test]
@@ -691,4 +691,34 @@ fn unavailable_account_quota_keeps_local_history_and_explains_the_error() {
         .warnings
         .iter()
         .any(|warning| { warning.contains("OpenCode Go subscription required.") }));
+}
+
+#[test]
+fn transient_account_quota_failure_is_propagated_with_local_history() {
+    let directory = tempdir().unwrap();
+    fs::write(
+        directory.path().join("auth.json"),
+        r#"{"opencode-go":{"type":"api","key":"secret-key"}}"#,
+    )
+    .unwrap();
+    let connection = create_database(&directory.path().join("opencode.db"), false);
+    insert_message(
+        &connection,
+        "session",
+        "message",
+        timestamp(),
+        &exact_message("opencode", "priced-model", 1.0, 100, 0),
+    );
+    drop(connection);
+    let url = crate::providers::test_http::serve_once(429, &[], r#"{"type":"error"}"#);
+    let provider = OpenCodeProvider::with_dependencies(
+        OpenCodePaths::for_data_directory(directory.path().to_path_buf()),
+        test_client(&url),
+        pricing_store(directory.path()),
+        now(),
+    );
+
+    let error = provider.refresh().unwrap_err();
+
+    assert_eq!(error.kind(), ProviderErrorKind::RateLimited);
 }

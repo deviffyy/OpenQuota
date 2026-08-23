@@ -12,7 +12,12 @@ pub(super) fn map_go_usage(response: UsageResponse) -> Result<Vec<QuotaWindow>, 
     match response.status.as_u16() {
         200..=299 => {}
         401 => return Err(OpenCodeError::InvalidAuth),
-        403 => return Err(OpenCodeError::GoSubscriptionRequired),
+        403 if response.body.pointer("/error/type").and_then(Value::as_str)
+            == Some("EntitlementError") =>
+        {
+            return Err(OpenCodeError::GoSubscriptionRequired);
+        }
+        403 => return Err(OpenCodeError::RequestFailed(403)),
         status => return Err(OpenCodeError::RequestFailed(status)),
     }
     let usage = response
@@ -79,6 +84,7 @@ mod tests {
     use reqwest::StatusCode;
     use serde_json::json;
 
+    use super::super::OpenCodeError;
     use super::{map_go_usage, UsageResponse};
     use crate::providers::test_http;
 
@@ -104,10 +110,24 @@ mod tests {
 
     #[test]
     fn maps_missing_go_subscription_as_entitlement_error() {
-        let response = fetch_response(403, r#"{"type":"error"}"#);
+        let response = fetch_response(
+            403,
+            r#"{"error":{"type":"EntitlementError","message":"OpenCode Go subscription required."}}"#,
+        );
 
         let error = map_go_usage(response).unwrap_err();
-        assert_eq!(error.to_string(), "OpenCode Go subscription required.");
+        assert_eq!(error, OpenCodeError::GoSubscriptionRequired);
+    }
+
+    #[test]
+    fn maps_non_entitlement_forbidden_as_request_failure() {
+        let response = fetch_response(
+            403,
+            r#"{"error":{"type":"PermissionError","message":"Forbidden"}}"#,
+        );
+
+        let error = map_go_usage(response).unwrap_err();
+        assert_eq!(error, OpenCodeError::RequestFailed(403));
     }
 
     #[test]
