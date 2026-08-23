@@ -232,9 +232,8 @@ impl OpenCodeProvider {
             Ok(None) => (None, Vec::new()),
             Err(OpenCodeError::GoSubscriptionRequired) => {
                 warnings.push(
-                    format!(
-                        "OpenCode Go subscription required. Local usage is still shown while OpenCode Go quota data is unavailable."
-                    ),
+                    "OpenCode Go subscription required. Local usage is still shown while OpenCode Go quota data is unavailable."
+                        .to_string(),
                 );
                 (None, Vec::new())
             }
