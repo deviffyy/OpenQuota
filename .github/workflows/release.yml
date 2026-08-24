@@ -194,8 +194,6 @@ jobs:
         id: release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WINDOWS_SIGNING_ENABLED: ${{ needs.validate.outputs.windows_signing }}
-          MACOS_SIGNING_ENABLED: ${{ needs.validate.outputs.macos_signing }}
         run: |
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             is_draft="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')"
@@ -213,29 +211,6 @@ jobs:
               --notes $'OpenQuota desktop release for Windows and Linux on x64/ARM64, plus a macOS Universal build.\n\nAutomatic updates are cryptographically signed. Linux in-app updates are supported by AppImage builds; Debian packages update through the package installer.'
           fi
 
-          trust_start='<!-- openquota-native-trust:start -->'
-          trust_end='<!-- openquota-native-trust:end -->'
-          body="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq '.body')"
-          body_without_trust="$(printf '%s\n' "$body" | awk -v start="$trust_start" -v end="$trust_end" '
-            $0 == start { skipping = 1; next }
-            $0 == end { skipping = 0; next }
-            !skipping { print }
-          ')"
-          trust_notes="$trust_start"$'\n\n## Native package trust\n'
-          if [[ "$WINDOWS_SIGNING_ENABLED" = true ]]; then
-            trust_notes+=$'\n- Windows installers are Authenticode-signed and verified.'
-          else
-            trust_notes+=$'\n- Windows installers are not Authenticode-signed, so SmartScreen may warn.'
-          fi
-          if [[ "$MACOS_SIGNING_ENABLED" = true ]]; then
-            trust_notes+=$'\n- The macOS build is Developer ID-signed, notarized, and verified.'
-          else
-            trust_notes+=$'\n- The macOS build uses an ad-hoc signature and is not notarized, so Gatekeeper may require manual approval.'
-          fi
-          trust_notes+=$'\n\n'"$trust_end"
-          gh release edit "$RELEASE_TAG" \
-            --repo "$GITHUB_REPOSITORY" \
-            --notes "$body_without_trust"$'\n\n'"$trust_notes"
           release_id="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq '.databaseId')"
           test -n "$release_id"
           echo "release_id=$release_id" >> "$GITHUB_OUTPUT"
@@ -461,37 +436,6 @@ jobs:
             sleep 3
           done
           test "$verified" = true
-
-      - name: Verify native trust release notes
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          WINDOWS_SIGNING_ENABLED: ${{ needs.validate.outputs.windows_signing }}
-          MACOS_SIGNING_ENABLED: ${{ needs.validate.outputs.macos_signing }}
-        run: |
-          body="$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json body --jq '.body')"
-          test "$(grep -Fc '<!-- openquota-native-trust:start -->' <<<"$body")" -eq 1
-          test "$(grep -Fc '<!-- openquota-native-trust:end -->' <<<"$body")" -eq 1
-          count_line() {
-            awk -v expected="$1" '$0 == expected { count += 1 } END { print count + 0 }' <<<"$body"
-          }
-          windows_signed='- Windows installers are Authenticode-signed and verified.'
-          windows_unsigned='- Windows installers are not Authenticode-signed, so SmartScreen may warn.'
-          macos_signed='- The macOS build is Developer ID-signed, notarized, and verified.'
-          macos_unsigned='- The macOS build uses an ad-hoc signature and is not notarized, so Gatekeeper may require manual approval.'
-          if [[ "$WINDOWS_SIGNING_ENABLED" = true ]]; then
-            test "$(count_line "$windows_signed")" -eq 1
-            test "$(count_line "$windows_unsigned")" -eq 0
-          else
-            test "$(count_line "$windows_signed")" -eq 0
-            test "$(count_line "$windows_unsigned")" -eq 1
-          fi
-          if [[ "$MACOS_SIGNING_ENABLED" = true ]]; then
-            test "$(count_line "$macos_signed")" -eq 1
-            test "$(count_line "$macos_unsigned")" -eq 0
-          else
-            test "$(count_line "$macos_signed")" -eq 0
-            test "$(count_line "$macos_unsigned")" -eq 1
-          fi
 
       - name: Download and verify release metadata
         env:

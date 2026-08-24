@@ -149,23 +149,6 @@ requireContracts('release', release, [
   "needs.validate.result == 'success' && (inputs.verify_only",
   'dbus-tests',
   '--config src-tauri/tauri.windows-signing.conf.json',
-  '<!-- openquota-native-trust:start -->',
-  '<!-- openquota-native-trust:end -->',
-  'gh release edit "$RELEASE_TAG"',
-  'Verify native trust release notes',
-  'count_line() {',
-  "windows_signed='- Windows installers are Authenticode-signed and verified.'",
-  "windows_unsigned='- Windows installers are not Authenticode-signed, so SmartScreen may warn.'",
-  "macos_signed='- The macOS build is Developer ID-signed, notarized, and verified.'",
-  "macos_unsigned='- The macOS build uses an ad-hoc signature and is not notarized, so Gatekeeper may require manual approval.'",
-  'test "$(count_line "$windows_signed")" -eq 1',
-  'test "$(count_line "$windows_unsigned")" -eq 1',
-  'test "$(count_line "$macos_signed")" -eq 1',
-  'test "$(count_line "$macos_unsigned")" -eq 1',
-  'test "$(count_line "$windows_signed")" -eq 0',
-  'test "$(count_line "$windows_unsigned")" -eq 0',
-  'test "$(count_line "$macos_signed")" -eq 0',
-  'test "$(count_line "$macos_unsigned")" -eq 0',
 ]);
 
 requireContracts('release smoke tooling checkout', release, [
@@ -194,13 +177,9 @@ const exactSigningBindings = {
   macos_signing: [`macos_signing: ${expression('steps.signing_policy.outputs.macos_signing')}`],
   WINDOWS_SIGNING_ENABLED: [
     `WINDOWS_SIGNING_ENABLED: ${expression('steps.signing_policy.outputs.windows_signing')}`,
-    `WINDOWS_SIGNING_ENABLED: ${expression('needs.validate.outputs.windows_signing')}`,
-    `WINDOWS_SIGNING_ENABLED: ${expression('needs.validate.outputs.windows_signing')}`,
   ],
   MACOS_SIGNING_ENABLED: [
     `MACOS_SIGNING_ENABLED: ${expression('steps.signing_policy.outputs.macos_signing')}`,
-    `MACOS_SIGNING_ENABLED: ${expression('needs.validate.outputs.macos_signing')}`,
-    `MACOS_SIGNING_ENABLED: ${expression('needs.validate.outputs.macos_signing')}`,
   ],
   TAURI_SIGNING_PRIVATE_KEY: [
     `TAURI_SIGNING_PRIVATE_KEY: ${expression('secrets.TAURI_SIGNING_PRIVATE_KEY')}`,
@@ -420,6 +399,18 @@ for (const obsoleteContract of ['smoke-binary:', 'binary-path:', 'bundle-directo
   if (release.includes(obsoleteContract) || action.includes(obsoleteContract)) {
     throw new Error(
       `Packaged smoke configuration still uses raw-binary input: ${obsoleteContract}`,
+    );
+  }
+}
+
+for (const removedReleaseNoteContract of [
+  'openquota-native-trust:start',
+  '## Native package trust',
+  'Verify native trust release notes',
+]) {
+  if (release.includes(removedReleaseNoteContract)) {
+    throw new Error(
+      `Release notes still expose native trust status: ${removedReleaseNoteContract}`,
     );
   }
 }

@@ -15,8 +15,8 @@ Leave both native-signing repository variables unset or set them to `false`:
 
 The release workflow then builds an unsigned Windows installer and an ad-hoc-signed, unnotarized
 macOS application. Package installation and startup smoke tests still run, but Authenticode,
-Gatekeeper, and notarization checks are skipped. The workflow emits warnings and release notes state
-which native trust layers are unavailable.
+Gatekeeper, and notarization checks are skipped. The workflow emits warnings, and the download
+documentation describes the unavailable native trust layers.
 
 This default does not weaken updater verification. Tauri updater signatures are still generated,
 uploaded, and verified with the bundled public key before publication.
