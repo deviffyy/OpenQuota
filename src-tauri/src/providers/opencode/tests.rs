@@ -694,6 +694,34 @@ fn unavailable_account_quota_keeps_local_history_and_explains_the_error() {
 }
 
 #[test]
+fn empty_readable_database_does_not_hide_missing_go_subscription() {
+    let directory = tempdir().unwrap();
+    fs::write(
+        directory.path().join("auth.json"),
+        r#"{"opencode-go":{"type":"api","key":"secret-key"}}"#,
+    )
+    .unwrap();
+    let connection = create_database(&directory.path().join("opencode.db"), false);
+    drop(connection);
+    let url = crate::providers::test_http::serve_once(
+        403,
+        &[],
+        r#"{"type":"error","error":{"type":"EntitlementError","message":"OpenCode Go subscription required."}}"#,
+    );
+    let provider = OpenCodeProvider::with_dependencies(
+        OpenCodePaths::for_data_directory(directory.path().to_path_buf()),
+        test_client(&url),
+        pricing_store(directory.path()),
+        now(),
+    );
+
+    let error = provider.refresh().unwrap_err();
+
+    assert_eq!(error.kind(), ProviderErrorKind::Permission);
+    assert_eq!(error.to_string(), "OpenCode Go subscription required.");
+}
+
+#[test]
 fn transient_account_quota_failure_is_propagated_with_local_history() {
     let directory = tempdir().unwrap();
     fs::write(

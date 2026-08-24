@@ -230,7 +230,7 @@ impl OpenCodeProvider {
         let (plan, quotas) = match go_usage {
             Ok(Some(quotas)) => (Some("Go".into()), quotas),
             Ok(None) => (None, Vec::new()),
-            Err(OpenCodeError::GoSubscriptionRequired) => {
+            Err(OpenCodeError::GoSubscriptionRequired) if scan.usage.last_30_days.is_some() => {
                 warnings.push(
                     "OpenCode Go subscription required. Local usage is still shown while OpenCode Go quota data is unavailable."
                         .to_string(),
