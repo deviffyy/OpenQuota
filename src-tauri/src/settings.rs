@@ -785,7 +785,9 @@ fn normalize_with_persisted_accounts(
         let mut provider = default_provider(definition, is_detected);
         provider.enabled = !was_known && is_detected;
         settings.known_provider_ids.push(definition.id.clone());
-        if crate::providers::is_claude_account_provider_id(&provider.id) {
+        if crate::providers::is_claude_account_provider_id(&provider.id)
+            || crate::providers::is_codex_account_provider_id(&provider.id)
+        {
             let family = crate::providers::provider_family(&provider.id);
             let index = normalized
                 .iter()

@@ -37,33 +37,33 @@ pub struct TokenEvent {
 
 const LOG_CACHE_SCHEMA_VERSION: u8 = 3;
 
-pub fn scan_local_usage(
+pub fn scan_local_usage_scoped(
     storage: &Storage,
     now: DateTime<Utc>,
     pricing: &ModelPricing,
+    provider_id: &str,
+    session_roots: &[PathBuf],
 ) -> Result<UsageHistory, CodexError> {
-    let home = home_directory();
-    let configured_home = crate::provider_environment::value("CODEX_HOME");
-    let homes = codex_homes(configured_home.as_deref().map(OsStr::new), &home);
     let since_date = now
         .with_timezone(&Local)
         .date_naive()
         .checked_sub_days(Days::new(30))
         .unwrap_or(NaiveDate::MIN);
-    let events = scan_codex_events(storage, &homes, since_date)?;
+    let events = scan_codex_events(storage, provider_id, session_roots, since_date)?;
 
     let mut accumulator = DailyUsageAccumulator::default();
     aggregate_into(events, now, pricing, &mut accumulator);
-    let includes_pi = match pi_usage::scan_into(storage, now, pricing, "codex", &mut accumulator) {
-        Ok(includes_pi) => includes_pi,
-        Err(_) => {
-            crate::app_warn!(
-                "plugin:pi",
-                "pi usage history could not be folded into Codex"
-            );
-            false
-        }
-    };
+    let includes_pi =
+        match pi_usage::scan_into(storage, now, pricing, provider_id, &mut accumulator) {
+            Ok(includes_pi) => includes_pi,
+            Err(_) => {
+                crate::app_warn!(
+                    "plugin:pi",
+                    "pi usage history could not be folded into Codex"
+                );
+                false
+            }
+        };
     let source_note = if includes_pi {
         "From your Codex logs and pi (estimated)"
     } else {
@@ -74,6 +74,7 @@ pub fn scan_local_usage(
 
 fn scan_codex_events(
     storage: &Storage,
+    provider_id: &str,
     homes: &[PathBuf],
     since_date: NaiveDate,
 ) -> Result<Vec<TokenEvent>, CodexError> {
@@ -85,7 +86,7 @@ fn scan_codex_events(
         seen_paths.insert(path.clone());
         let Some(parsed) = load_or_parse_log(
             storage,
-            "codex",
+            provider_id,
             &path,
             LOG_CACHE_SCHEMA_VERSION,
             parse_jsonl,
@@ -103,7 +104,7 @@ fn scan_codex_events(
                 .filter(|event| event.timestamp.with_timezone(&Local).date_naive() >= since_date),
         );
     }
-    storage.prune_log_events("codex", &seen_paths)?;
+    storage.prune_log_events(provider_id, &seen_paths)?;
     Ok(events)
 }
 
@@ -851,7 +852,8 @@ mod tests {
         let storage = Storage::open(&directory.path().join("openquota.db")).unwrap();
         let since = NaiveDate::from_ymd_opt(2026, 7, 1).unwrap();
 
-        let initial = scan_codex_events(&storage, std::slice::from_ref(&home), since).unwrap();
+        let initial =
+            scan_codex_events(&storage, "codex", std::slice::from_ref(&home), since).unwrap();
         assert_eq!(initial.len(), 1);
         assert!(!initial[0].is_fast);
 
@@ -866,7 +868,7 @@ mod tests {
         )
         .unwrap();
 
-        let refreshed = scan_codex_events(&storage, &[home], since).unwrap();
+        let refreshed = scan_codex_events(&storage, "codex", &[home], since).unwrap();
         assert_eq!(refreshed.len(), 2);
         assert_eq!(refreshed.iter().map(|event| event.total).sum::<u64>(), 195);
         assert!(refreshed.iter().all(|event| !event.is_fast));
@@ -900,6 +902,7 @@ mod tests {
 
         let events = scan_codex_events(
             &storage,
+            "codex",
             &[home],
             NaiveDate::from_ymd_opt(2026, 3, 1).unwrap(),
         )

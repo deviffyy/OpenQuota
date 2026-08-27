@@ -32,10 +32,21 @@ pub fn provider_family(provider_id: &str) -> &str {
         .unwrap_or(provider_id)
 }
 
+pub fn is_account_provider_id(provider_id: &str, family: &str) -> bool {
+    provider_id
+        .strip_prefix(family)
+        .and_then(|rest| rest.strip_prefix('@'))
+        .is_some_and(|suffix| {
+            suffix.len() == 8 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
+        })
+}
+
 pub fn is_claude_account_provider_id(provider_id: &str) -> bool {
-    provider_id.strip_prefix("claude@").is_some_and(|suffix| {
-        suffix.len() == 8 && suffix.bytes().all(|byte| byte.is_ascii_hexdigit())
-    })
+    is_account_provider_id(provider_id, "claude")
+}
+
+pub fn is_codex_account_provider_id(provider_id: &str) -> bool {
+    is_account_provider_id(provider_id, "codex")
 }
 
 pub fn remember_default_account(
