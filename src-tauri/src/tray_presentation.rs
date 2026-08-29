@@ -639,11 +639,13 @@ mod tests {
             last_full_refresh_at: None,
         };
         let catalog = ProviderRegistry::from_definitions(vec![codex::definition()]).unwrap();
-        let groups = resolved_groups(
-            &state,
-            &default_settings(&catalog, &HashSet::from(["codex".to_owned()])),
-            &catalog,
-        );
+        let mut test_settings = default_settings(&catalog, &HashSet::from(["codex".to_owned()]));
+        test_settings.providers[0].metrics.iter_mut().for_each(|m| {
+            if m.id == "codex.session" {
+                m.pinned = true;
+            }
+        });
+        let groups = resolved_groups(&state, &test_settings, &catalog);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].provider_id, "codex");
         assert_eq!(groups[0].metrics.len(), 2);
@@ -664,12 +666,12 @@ mod tests {
             })
         );
 
-        let mut dashboard_hidden = default_settings(&catalog, &HashSet::from(["codex".to_owned()]));
+        let mut dashboard_hidden = test_settings.clone();
         dashboard_hidden.providers[0].metrics[0].enabled = false;
         let hidden_groups = resolved_groups(&state, &dashboard_hidden, &catalog);
         assert_eq!(hidden_groups[0].metrics[0].value, "75%");
 
-        let mut used_settings = default_settings(&catalog, &HashSet::from(["codex".to_owned()]));
+        let mut used_settings = test_settings.clone();
         used_settings.usage_display = crate::models::UsageDisplay::Used;
         let used_groups = resolved_groups(&state, &used_settings, &catalog);
         assert_eq!(
