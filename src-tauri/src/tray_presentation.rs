@@ -180,10 +180,23 @@ fn bar_fractions(groups: &[TrayGroup]) -> Vec<f64> {
 
 #[cfg(any(not(target_os = "macos"), test))]
 fn primary_gauge(groups: &[TrayGroup]) -> Option<TrayGauge> {
-    groups
+    let primary_gauges: Vec<TrayGauge> = groups
         .iter()
-        .flat_map(|group| group.metrics.iter())
-        .find_map(|metric| metric.gauge)
+        .filter_map(|group| group.metrics.iter().find_map(|metric| metric.gauge))
+        .collect();
+
+    if primary_gauges.is_empty() {
+        return None;
+    }
+
+    let sum_display: f64 = primary_gauges.iter().map(|g| g.display_fraction).sum();
+    let sum_remaining: f64 = primary_gauges.iter().map(|g| g.remaining_fraction).sum();
+    let count = primary_gauges.len() as f64;
+
+    Some(TrayGauge {
+        display_fraction: sum_display / count,
+        remaining_fraction: sum_remaining / count,
+    })
 }
 
 #[cfg(any(target_os = "macos", test))]
