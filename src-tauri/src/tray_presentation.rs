@@ -61,15 +61,22 @@ pub fn update(
     let tooltip = if groups.is_empty() {
         "OpenQuota".to_owned()
     } else {
-        format!(
-            "OpenQuota\n{}",
-            groups
-                .iter()
-                .flat_map(|group| group.metrics.iter())
-                .map(|metric| metric.detail.as_str())
-                .collect::<Vec<_>>()
-                .join(" · ")
-        )
+        let details = groups
+            .iter()
+            .flat_map(|group| group.metrics.iter())
+            .map(|metric| metric.detail.as_str())
+            .collect::<Vec<_>>()
+            .join(" · ");
+        
+        if let Some(gauge) = primary_gauge(&groups) {
+            format!(
+                "OpenQuota\nAverage Limit: {:.0}% left\n{}",
+                gauge.remaining_fraction * 100.0,
+                details
+            )
+        } else {
+            format!("OpenQuota\n{}", details)
+        }
     };
     #[cfg(not(target_os = "linux"))]
     if tray.set_tooltip(Some(tooltip)).is_err() {
