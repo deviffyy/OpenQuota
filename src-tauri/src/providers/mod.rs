@@ -2,6 +2,7 @@ pub mod antigravity;
 pub mod api_key;
 pub mod claude;
 pub mod codex;
+pub mod commandcode;
 pub mod copilot;
 pub mod credential_store;
 pub mod cursor;
