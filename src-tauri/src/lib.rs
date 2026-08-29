@@ -71,13 +71,16 @@ fn install_tray(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     };
     #[cfg(not(target_os = "macos"))]
     let menu = {
-        let open = MenuItem::with_id(app, "open", "Open OpenQuota", true, None::<&str>)?;
+        let summary = MenuItem::with_id(app, "summary", "Average Limit: ...", false, None::<&str>)?;
+        let separator_top = PredefinedMenuItem::separator(app)?;
+        let open = MenuItem::with_id(app, "open", "Open Dashboard", true, None::<&str>)?;
         let customize = MenuItem::with_id(app, "customize", "Customize…", true, None::<&str>)?;
         let settings_item = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
         let separator = PredefinedMenuItem::separator(app)?;
         let quit = MenuItem::with_id(app, "quit", "Quit OpenQuota", true, None::<&str>)?;
-        Menu::with_items(app, &[&open, &customize, &settings_item, &separator, &quit])?
+        Menu::with_items(app, &[&summary, &separator_top, &open, &customize, &settings_item, &separator, &quit])?
     };
+    app.manage(menu.clone());
 
     let icon = app
         .default_window_icon()

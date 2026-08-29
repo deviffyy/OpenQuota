@@ -1,4 +1,4 @@
-use tauri::{image::Image, AppHandle};
+use tauri::{image::Image, AppHandle, Manager};
 
 #[cfg(not(target_os = "macos"))]
 use crate::tray_icon;
@@ -87,7 +87,22 @@ pub fn update(
 
     #[cfg(not(target_os = "macos"))]
     {
-        let icon = primary_gauge(&groups)
+        let primary = primary_gauge(&groups);
+        
+        if let Some(menu) = app.try_state::<tauri::menu::Menu<tauri::Wry>>() {
+            if let Some(summary_item) = menu.get("summary") {
+                if let Some(summary_menu_item) = summary_item.as_menuitem() {
+                    let text = if let Some(gauge) = primary {
+                        format!("Average Limit: {:.0}% left", gauge.remaining_fraction * 100.0)
+                    } else {
+                        "OpenQuota".to_owned()
+                    };
+                    let _ = summary_menu_item.set_text(text);
+                }
+            }
+        }
+
+        let icon = primary
             .map(|gauge| tray_icon::render_gauge(gauge.display_fraction, gauge.remaining_fraction))
             .unwrap_or_else(mark_icon);
         if tray.set_icon(Some(icon)).is_err() {
@@ -447,6 +462,7 @@ mod tests {
     use std::collections::HashSet;
 
     use chrono::Utc;
+    use tauri::{AppHandle, Manager};
 
     use crate::{
         models::{
