@@ -67,7 +67,7 @@ pub fn update(
             .map(|metric| metric.detail.as_str())
             .collect::<Vec<_>>()
             .join(" · ");
-        
+
         if let Some(gauge) = primary_gauge(&groups) {
             format!(
                 "OpenQuota\nAverage Limit: {:.0}% left\n{}",
@@ -88,12 +88,15 @@ pub fn update(
     #[cfg(not(target_os = "macos"))]
     {
         let primary = primary_gauge(&groups);
-        
+
         if let Some(menu) = app.try_state::<tauri::menu::Menu<tauri::Wry>>() {
             if let Some(summary_item) = menu.get("summary") {
                 if let Some(summary_menu_item) = summary_item.as_menuitem() {
                     let text = if let Some(gauge) = primary {
-                        format!("Average Limit: {:.0}% left", gauge.remaining_fraction * 100.0)
+                        format!(
+                            "Average Limit: {:.0}% left",
+                            gauge.remaining_fraction * 100.0
+                        )
                     } else {
                         "OpenQuota".to_owned()
                     };

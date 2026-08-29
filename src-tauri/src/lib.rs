@@ -78,7 +78,18 @@ fn install_tray(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         let settings_item = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
         let separator = PredefinedMenuItem::separator(app)?;
         let quit = MenuItem::with_id(app, "quit", "Quit OpenQuota", true, None::<&str>)?;
-        Menu::with_items(app, &[&summary, &separator_top, &open, &customize, &settings_item, &separator, &quit])?
+        Menu::with_items(
+            app,
+            &[
+                &summary,
+                &separator_top,
+                &open,
+                &customize,
+                &settings_item,
+                &separator,
+                &quit,
+            ],
+        )?
     };
     app.manage(menu.clone());
 

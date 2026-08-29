@@ -86,12 +86,10 @@ pub(super) fn identity_for_source(source: &CodexAuthSource) -> Option<String> {
                 .account_identity()
                 .map(|id| identity_stamp(&id))
         }
-        CodexAuthSource::Hermes(path, hermes_id) => {
-            auth::load_hermes_from_path(path, hermes_id)
-                .ok()?
-                .account_identity()
-                .map(|id| identity_stamp(&id))
-        }
+        CodexAuthSource::Hermes(path, hermes_id) => auth::load_hermes_from_path(path, hermes_id)
+            .ok()?
+            .account_identity()
+            .map(|id| identity_stamp(&id)),
     }
 }
 
@@ -148,7 +146,7 @@ fn discover_from_multiple_homes(homes: &[PathBuf]) -> DiscoveredCodexAccounts {
     for (index, home_path) in homes.iter().enumerate() {
         let auth_path = home_path.join("auth.json");
         let discovered = auth::discover_identities_from_path(&auth_path);
-        
+
         for (raw_identity, auth_source) in discovered {
             let identity = identity_stamp(&raw_identity);
             if seen_identities.contains_key(&identity) {
