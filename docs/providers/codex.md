@@ -29,3 +29,9 @@ Codex usage recorded by pi can also be included. OpenQuota does not upload these
 - **Subscription usage unavailable** — replace an API-key-only login with a ChatGPT login.
 - **Session expired or revoked** — sign in again with `codex`.
 - **No local history** — check the active Codex data directory and the value of `CODEX_HOME`.
+
+## Multi-Account Support
+
+OpenQuota supports multiple Codex accounts through the Hermes credentials pool (`~/.hermes/auth.json`). When using the Hermes file format, OpenQuota detects and monitors all available accounts. 
+
+By default, the `Weekly` metric is pinned to the system tray for all active Codex accounts. The tray icon automatically calculates and displays the average health (remaining limit) across all pinned metrics across all your configured accounts.
