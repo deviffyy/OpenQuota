@@ -1,7 +1,5 @@
-use tauri::{image::Image, AppHandle, Manager};
+use tauri::{image::Image, AppHandle};
 
-#[cfg(not(target_os = "macos"))]
-use crate::tray_icon;
 use crate::{
     models::{
         AppSettings, MetricDefinition, MetricSource, MetricValue, MetricValueKind,
@@ -10,6 +8,8 @@ use crate::{
     providers::ProviderRegistry,
     service::UsageViewState,
 };
+#[cfg(not(target_os = "macos"))]
+use {crate::tray_icon, tauri::Manager};
 
 const TRAY_ID: &str = "openquota-tray";
 
