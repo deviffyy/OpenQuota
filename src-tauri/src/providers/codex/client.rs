@@ -27,6 +27,7 @@ pub struct TokenRefresh {
     pub id_token: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct CodexClient {
     client: Client,
     refresh_url: String,

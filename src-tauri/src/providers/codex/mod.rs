@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+pub mod accounts;
 pub mod auth;
 pub mod client;
 pub mod local_usage;
@@ -20,17 +22,19 @@ use crate::{
     storage::Storage,
 };
 
-use self::{
-    auth::CodexAuthState, client::CodexClient, local_usage::scan_local_usage, mapper::map_usage,
-};
+use self::{auth::CodexAuthState, client::CodexClient, mapper::map_usage};
 use crate::providers::log_usage::scan_or_cached_usage;
 
 pub(crate) fn definition() -> ProviderDefinition {
-    ProviderDefinition {
+    definition_for("codex", "Codex", true)
+}
+
+fn definition_for(id: &str, display_name: &str, fallback_enabled: bool) -> ProviderDefinition {
+    let mut definition = ProviderDefinition {
         id: "codex".into(),
-        display_name: "Codex".into(),
+        display_name: display_name.into(),
         short_name: "Cx".into(),
-        fallback_enabled: true,
+        fallback_enabled,
         local_usage_source_note: Some("From your Codex logs (estimated)".into()),
         links: vec![
             ProviderLink::new("Status", "https://status.openai.com/"),
@@ -44,7 +48,7 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 true,
                 MetricSection::AlwaysVisible,
-                true,
+                false,
                 "S",
             ),
             MetricDefinition::quota(
@@ -120,7 +124,17 @@ pub(crate) fn definition() -> ProviderDefinition {
                 "M",
             ),
         ],
+    };
+
+    if id != "codex" {
+        definition.id = id.into();
+        for metric in &mut definition.metrics {
+            if let Some(suffix) = metric.id.strip_prefix("codex.") {
+                metric.id = format!("{id}.{suffix}");
+            }
+        }
     }
+    definition
 }
 
 #[derive(Debug, Error)]
@@ -163,26 +177,65 @@ impl From<crate::storage::StorageError> for CodexError {
     }
 }
 
+pub(crate) fn runtimes(
+    storage: Arc<Storage>,
+    pricing: Arc<PricingStore>,
+) -> Result<Vec<Arc<dyn crate::providers::UsageProvider>>, CodexError> {
+    let discovery = accounts::discover(&storage)?;
+    let client = CodexClient::new()?;
+    let mut runtimes = Vec::new();
+
+    if let Some(account) = discovery.default_account {
+        runtimes.push(Arc::new(CodexProvider::new_scoped(
+            account,
+            storage.clone(),
+            pricing.clone(),
+            client.clone(),
+        )) as Arc<dyn crate::providers::UsageProvider>);
+    }
+
+    for account in discovery.accounts {
+        runtimes.push(Arc::new(CodexProvider::new_scoped(
+            account,
+            storage.clone(),
+            pricing.clone(),
+            client.clone(),
+        )) as Arc<dyn crate::providers::UsageProvider>);
+    }
+
+    Ok(runtimes)
+}
+
 pub struct CodexProvider {
+    definition: ProviderDefinition,
+    auth_source: accounts::CodexAuthSource,
     account_identity: Option<String>,
+    session_roots: Vec<std::path::PathBuf>,
     storage: Arc<Storage>,
     pricing: Arc<PricingStore>,
     client: CodexClient,
 }
 
 impl CodexProvider {
-    pub fn new(storage: Arc<Storage>, pricing: Arc<PricingStore>) -> Result<Self, CodexError> {
-        let account_identity = CodexAuthState::observed_account_identity()
-            .map(|identity| account_identity_key(&identity));
-        if let Some(identity) = account_identity.as_deref() {
-            crate::providers::remember_default_account(&storage, "codex", identity)?;
-        }
-        Ok(Self {
-            account_identity,
+    fn new_scoped(
+        account: accounts::CodexAccount,
+        storage: Arc<Storage>,
+        pricing: Arc<PricingStore>,
+        client: CodexClient,
+    ) -> Self {
+        Self {
+            definition: definition_for(&account.id, &account.display_name, account.id == "codex"),
+            auth_source: account.auth_source,
+            account_identity: Some(account.identity),
+            session_roots: account.session_roots,
             storage,
             pricing,
-            client: CodexClient::new()?,
-        })
+            client,
+        }
+    }
+
+    fn provider_id(&self) -> &str {
+        &self.definition.id
     }
 
     pub fn refresh(&self) -> Result<ProviderSnapshot, CodexError> {
@@ -191,7 +244,7 @@ impl CodexProvider {
 
     fn refresh_with_identity(&self) -> Result<(ProviderSnapshot, Option<String>), CodexError> {
         let now = Utc::now();
-        let candidates = CodexAuthState::load_candidates()?;
+        let candidates = CodexAuthState::load_candidates_scoped(&self.auth_source)?;
         crate::app_debug!(
             "auth:codex",
             "credential candidates loaded ({})",
@@ -279,17 +332,25 @@ impl CodexProvider {
         let pricing = self.pricing.current();
         let usage = scan_or_cached_usage(
             &self.storage,
-            "codex",
+            self.provider_id(),
             account_identity
                 .map(crate::providers::CacheIdentity::Resolved)
                 .unwrap_or(crate::providers::CacheIdentity::Unresolved),
-            "Codex",
-            || scan_local_usage(&self.storage, now, &pricing),
+            &self.definition.display_name,
+            || {
+                local_usage::scan_local_usage_scoped(
+                    &self.storage,
+                    now,
+                    &pricing,
+                    self.provider_id(),
+                    &self.session_roots,
+                )
+            },
             &mut warnings,
         );
         Self::ensure_candidate_source_current(auth, account_identity)?;
         Ok(ProviderSnapshot {
-            provider_id: "codex".into(),
+            provider_id: self.provider_id().into(),
             plan: mapped.plan,
             quotas: mapped.quotas,
             value_metrics: mapped.value_metrics,
@@ -372,11 +433,11 @@ fn provider_error(error: CodexError) -> crate::providers::ProviderError {
 
 impl crate::providers::UsageProvider for CodexProvider {
     fn definition(&self) -> ProviderDefinition {
-        definition()
+        self.definition.clone()
     }
 
     fn has_local_credentials(&self) -> bool {
-        CodexAuthState::has_local_credentials()
+        CodexAuthState::has_local_credentials_scoped(&self.auth_source)
     }
 
     fn cache_identity(&self) -> crate::providers::CacheIdentity<'_> {
@@ -405,10 +466,10 @@ impl crate::providers::UsageProvider for CodexProvider {
         Ok(crate::providers::ProviderRefresh {
             snapshot,
             cache_identity: identity.clone(),
-            account: identity.map(|identity| crate::providers::AccountRefresh {
+            account: identity.map(|id| crate::providers::AccountRefresh {
                 family: "codex",
-                provider_id: "codex",
-                identity,
+                provider_id: Box::leak(self.definition.id.clone().into_boxed_str()),
+                identity: id,
             }),
         })
     }
@@ -451,12 +512,18 @@ mod account_tests {
         let storage = Arc::new(Storage::open(&directory.path().join("openquota.db")).unwrap());
         let pricing = Arc::new(PricingStore::new(directory.path().join("pricing")).unwrap());
         let provider = CodexProvider {
+            definition: super::definition(),
+            auth_source: super::accounts::CodexAuthSource::Standard,
+            session_roots: Vec::new(),
             account_identity: Some("account-a".into()),
             storage: storage.clone(),
             pricing: pricing.clone(),
             client: CodexClient::new().unwrap(),
         };
         let unresolved = CodexProvider {
+            definition: super::definition(),
+            auth_source: super::accounts::CodexAuthSource::Standard,
+            session_roots: Vec::new(),
             account_identity: None,
             storage,
             pricing,

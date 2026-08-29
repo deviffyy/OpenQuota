@@ -47,11 +47,11 @@ use crate::{
     pacing::NotificationEvaluator,
     pricing::PricingStore,
     providers::{
-        antigravity::AntigravityProvider, claude, codex::reset_claim::CodexResetClaimService,
-        codex::CodexProvider, copilot::CopilotProvider, cursor::CursorProvider,
-        detect_local_credentials, devin::DevinProvider, grok::GrokProvider, kimi::KimiProvider,
-        minimax::MiniMaxProvider, opencode::OpenCodeProvider, openrouter::OpenRouterProvider,
-        zai::ZaiProvider, ProviderRegistry, UsageProvider,
+        antigravity::AntigravityProvider, claude, codex,
+        codex::reset_claim::CodexResetClaimService, copilot::CopilotProvider,
+        cursor::CursorProvider, detect_local_credentials, devin::DevinProvider, grok::GrokProvider,
+        kimi::KimiProvider, minimax::MiniMaxProvider, opencode::OpenCodeProvider,
+        openrouter::OpenRouterProvider, zai::ZaiProvider, ProviderRegistry, UsageProvider,
     },
     storage::Storage,
     window::{
@@ -71,13 +71,27 @@ fn install_tray(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     };
     #[cfg(not(target_os = "macos"))]
     let menu = {
-        let open = MenuItem::with_id(app, "open", "Open OpenQuota", true, None::<&str>)?;
+        let summary = MenuItem::with_id(app, "summary", "Average Limit: ...", false, None::<&str>)?;
+        let separator_top = PredefinedMenuItem::separator(app)?;
+        let open = MenuItem::with_id(app, "open", "Open Dashboard", true, None::<&str>)?;
         let customize = MenuItem::with_id(app, "customize", "Customize…", true, None::<&str>)?;
         let settings_item = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
         let separator = PredefinedMenuItem::separator(app)?;
         let quit = MenuItem::with_id(app, "quit", "Quit OpenQuota", true, None::<&str>)?;
-        Menu::with_items(app, &[&open, &customize, &settings_item, &separator, &quit])?
+        Menu::with_items(
+            app,
+            &[
+                &summary,
+                &separator_top,
+                &open,
+                &customize,
+                &settings_item,
+                &separator,
+                &quit,
+            ],
+        )?
     };
+    app.manage(menu.clone());
 
     let icon = app
         .default_window_icon()
@@ -367,9 +381,13 @@ pub fn run() {
             app_debug!("cache", "application database opened");
             let pricing = Arc::new(PricingStore::new(app_data_dir.join("pricing"))?);
             let mut providers = claude::runtimes(storage.clone(), pricing.clone())?;
+            providers.extend(
+                codex::runtimes(storage.clone(), pricing.clone()).unwrap_or_else(|error| {
+                    crate::app_error!("startup", "failed to launch codex runtimes ({error})");
+                    Vec::new()
+                }),
+            );
             providers.extend(vec![
-                Arc::new(CodexProvider::new(storage.clone(), pricing.clone())?)
-                    as Arc<dyn UsageProvider>,
                 Arc::new(CursorProvider::new(pricing.clone())?) as Arc<dyn UsageProvider>,
                 Arc::new(AntigravityProvider::new(
                     app_data_dir.join("antigravity").join("auth.json"),

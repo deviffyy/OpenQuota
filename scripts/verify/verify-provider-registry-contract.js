@@ -77,6 +77,7 @@ if (!runtimeBlock) {
 }
 const runtimeOrder = [
   'ClaudeProvider',
+  'CodexProvider',
   ...[...runtimeBlock.matchAll(/Arc::new\((\w+Provider)::new\b/g)].map(([, provider]) => provider),
 ];
 const expectedRuntimeOrder = [

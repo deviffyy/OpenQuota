@@ -1,7 +1,5 @@
 use tauri::{image::Image, AppHandle};
 
-#[cfg(not(target_os = "macos"))]
-use crate::tray_icon;
 use crate::{
     models::{
         AppSettings, MetricDefinition, MetricSource, MetricValue, MetricValueKind,
@@ -10,6 +8,8 @@ use crate::{
     providers::ProviderRegistry,
     service::UsageViewState,
 };
+#[cfg(not(target_os = "macos"))]
+use {crate::tray_icon, tauri::Manager};
 
 const TRAY_ID: &str = "openquota-tray";
 
@@ -30,7 +30,7 @@ struct TrayGroup {
 #[derive(Debug, Clone, Copy, PartialEq)]
 struct TrayGauge {
     display_fraction: f64,
-    #[cfg(any(not(target_os = "macos"), test))]
+
     remaining_fraction: f64,
 }
 
@@ -61,15 +61,22 @@ pub fn update(
     let tooltip = if groups.is_empty() {
         "OpenQuota".to_owned()
     } else {
-        format!(
-            "OpenQuota\n{}",
-            groups
-                .iter()
-                .flat_map(|group| group.metrics.iter())
-                .map(|metric| metric.detail.as_str())
-                .collect::<Vec<_>>()
-                .join(" · ")
-        )
+        let details = groups
+            .iter()
+            .flat_map(|group| group.metrics.iter())
+            .map(|metric| metric.detail.as_str())
+            .collect::<Vec<_>>()
+            .join(" · ");
+
+        if let Some(gauge) = primary_gauge(&groups) {
+            format!(
+                "OpenQuota\nAverage Limit: {:.0}% left\n{}",
+                gauge.remaining_fraction * 100.0,
+                details
+            )
+        } else {
+            format!("OpenQuota\n{}", details)
+        }
     };
     #[cfg(not(target_os = "linux"))]
     if tray.set_tooltip(Some(tooltip)).is_err() {
@@ -80,7 +87,25 @@ pub fn update(
 
     #[cfg(not(target_os = "macos"))]
     {
-        let icon = primary_gauge(&groups)
+        let primary = primary_gauge(&groups);
+
+        if let Some(menu) = app.try_state::<tauri::menu::Menu<tauri::Wry>>() {
+            if let Some(summary_item) = menu.get("summary") {
+                if let Some(summary_menu_item) = summary_item.as_menuitem() {
+                    let text = if let Some(gauge) = primary {
+                        format!(
+                            "Average Limit: {:.0}% left",
+                            gauge.remaining_fraction * 100.0
+                        )
+                    } else {
+                        "OpenQuota".to_owned()
+                    };
+                    let _ = summary_menu_item.set_text(text);
+                }
+            }
+        }
+
+        let icon = primary
             .map(|gauge| tray_icon::render_gauge(gauge.display_fraction, gauge.remaining_fraction))
             .unwrap_or_else(mark_icon);
         if tray.set_icon(Some(icon)).is_err() {
@@ -178,12 +203,24 @@ fn bar_fractions(groups: &[TrayGroup]) -> Vec<f64> {
         .collect()
 }
 
-#[cfg(any(not(target_os = "macos"), test))]
 fn primary_gauge(groups: &[TrayGroup]) -> Option<TrayGauge> {
-    groups
+    let primary_gauges: Vec<TrayGauge> = groups
         .iter()
-        .flat_map(|group| group.metrics.iter())
-        .find_map(|metric| metric.gauge)
+        .filter_map(|group| group.metrics.iter().find_map(|metric| metric.gauge))
+        .collect();
+
+    if primary_gauges.is_empty() {
+        return None;
+    }
+
+    let sum_display: f64 = primary_gauges.iter().map(|g| g.display_fraction).sum();
+    let sum_remaining: f64 = primary_gauges.iter().map(|g| g.remaining_fraction).sum();
+    let count = primary_gauges.len() as f64;
+
+    Some(TrayGauge {
+        display_fraction: sum_display / count,
+        remaining_fraction: sum_remaining / count,
+    })
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -275,7 +312,7 @@ fn tray_metric(
                                     UsageDisplay::Used => used_fraction,
                                     UsageDisplay::Left => 1.0 - used_fraction,
                                 },
-                                #[cfg(any(not(target_os = "macos"), test))]
+
                                 remaining_fraction: 1.0 - used_fraction,
                             }),
                         };
@@ -296,7 +333,7 @@ fn tray_metric(
                     detail: format!("{} {percent:.0}% {word}", quota.label),
                     gauge: Some(TrayGauge {
                         display_fraction,
-                        #[cfg(any(not(target_os = "macos"), test))]
+
                         remaining_fraction: 1.0 - used_fraction,
                     }),
                 }
@@ -626,11 +663,13 @@ mod tests {
             last_full_refresh_at: None,
         };
         let catalog = ProviderRegistry::from_definitions(vec![codex::definition()]).unwrap();
-        let groups = resolved_groups(
-            &state,
-            &default_settings(&catalog, &HashSet::from(["codex".to_owned()])),
-            &catalog,
-        );
+        let mut test_settings = default_settings(&catalog, &HashSet::from(["codex".to_owned()]));
+        test_settings.providers[0].metrics.iter_mut().for_each(|m| {
+            if m.id == "codex.session" {
+                m.pinned = true;
+            }
+        });
+        let groups = resolved_groups(&state, &test_settings, &catalog);
         assert_eq!(groups.len(), 1);
         assert_eq!(groups[0].provider_id, "codex");
         assert_eq!(groups[0].metrics.len(), 2);
@@ -651,12 +690,12 @@ mod tests {
             })
         );
 
-        let mut dashboard_hidden = default_settings(&catalog, &HashSet::from(["codex".to_owned()]));
+        let mut dashboard_hidden = test_settings.clone();
         dashboard_hidden.providers[0].metrics[0].enabled = false;
         let hidden_groups = resolved_groups(&state, &dashboard_hidden, &catalog);
         assert_eq!(hidden_groups[0].metrics[0].value, "75%");
 
-        let mut used_settings = default_settings(&catalog, &HashSet::from(["codex".to_owned()]));
+        let mut used_settings = test_settings.clone();
         used_settings.usage_display = crate::models::UsageDisplay::Used;
         let used_groups = resolved_groups(&state, &used_settings, &catalog);
         assert_eq!(

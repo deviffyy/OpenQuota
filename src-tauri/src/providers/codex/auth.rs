@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::{
     fs,
     io::Write,
@@ -27,6 +28,7 @@ pub struct CodexAuthState {
 #[derive(Debug, Clone)]
 enum AuthSource {
     File(PathBuf),
+    Hermes(PathBuf, String),
     #[cfg(target_os = "macos")]
     Keychain,
 }
@@ -96,7 +98,28 @@ impl CodexAuthState {
             .find_map(|state| state.account_identity())
     }
 
-    pub(super) fn account_identity(&self) -> Option<String> {
+    pub fn load_candidates_scoped(
+        source: &super::accounts::CodexAuthSource,
+    ) -> Result<Vec<Self>, CodexError> {
+        match source {
+            super::accounts::CodexAuthSource::Standard => Self::load_candidates(),
+            super::accounts::CodexAuthSource::Home(path) => {
+                let auth_path = path.join("auth.json");
+                let state = load_from_path(&auth_path)?;
+                Ok(vec![state])
+            }
+            super::accounts::CodexAuthSource::Hermes(path, hermes_id) => {
+                let state = load_hermes_from_path(path, hermes_id)?;
+                Ok(vec![state])
+            }
+        }
+    }
+
+    pub fn has_local_credentials_scoped(source: &super::accounts::CodexAuthSource) -> bool {
+        Self::load_candidates_scoped(source).is_ok()
+    }
+
+    pub fn account_identity(&self) -> Option<String> {
         self.account_id
             .as_deref()
             .and_then(nonempty_lowercase)
@@ -113,11 +136,21 @@ impl CodexAuthState {
                             .and_then(nonempty_lowercase)
                     })
             })
+            .or_else(|| {
+                jwt_payload(&self.access_token).and_then(|payload| {
+                    payload
+                        .pointer("/https:~1~1api.openai.com~1auth/chatgpt_account_id")
+                        .or_else(|| payload.get("chatgpt_account_id"))
+                        .and_then(Value::as_str)
+                        .and_then(nonempty_lowercase)
+                })
+            })
     }
 
     pub fn reload(&self) -> Result<Self, CodexError> {
         match &self.source {
             AuthSource::File(path) => load_from_path(path),
+            AuthSource::Hermes(path, hermes_id) => load_hermes_from_path(path, hermes_id),
             #[cfg(target_os = "macos")]
             AuthSource::Keychain => load_from_keychain(),
         }
@@ -155,28 +188,59 @@ impl CodexAuthState {
         id_token: Option<String>,
         now: DateTime<Utc>,
     ) -> Result<(), CodexError> {
-        set_string(&mut self.document, "/tokens/access_token", &access_token)?;
-        if let Some(value) = refresh_token.as_deref() {
-            set_string(&mut self.document, "/tokens/refresh_token", value)?;
-            self.refresh_token = Some(value.to_owned());
-        }
-        if let Some(value) = id_token.as_deref() {
-            set_string(&mut self.document, "/tokens/id_token", value)?;
-        }
         let refreshed_at = now.to_rfc3339();
-        set_string(&mut self.document, "/last_refresh", &refreshed_at)?;
-        self.access_token = access_token;
-        self.last_refresh = Some(refreshed_at);
 
         match &self.source {
-            AuthSource::File(path) => save_file_document(path, &self.document),
+            AuthSource::File(path) => {
+                set_string(&mut self.document, "/tokens/access_token", &access_token)?;
+                if let Some(value) = refresh_token.as_deref() {
+                    set_string(&mut self.document, "/tokens/refresh_token", value)?;
+                    self.refresh_token = Some(value.to_owned());
+                }
+                if let Some(value) = id_token.as_deref() {
+                    set_string(&mut self.document, "/tokens/id_token", value)?;
+                }
+                set_string(&mut self.document, "/last_refresh", &refreshed_at)?;
+                self.access_token = access_token;
+                self.last_refresh = Some(refreshed_at);
+                save_file_document(path, &self.document)
+            }
+            AuthSource::Hermes(path, hermes_id) => {
+                update_hermes_credential(
+                    &mut self.document,
+                    hermes_id,
+                    &access_token,
+                    refresh_token.as_deref(),
+                    id_token.as_deref(),
+                    &refreshed_at,
+                )?;
+                self.access_token = access_token;
+                if let Some(value) = refresh_token {
+                    self.refresh_token = Some(value);
+                }
+                self.last_refresh = Some(refreshed_at);
+                save_file_document(path, &self.document)
+            }
             #[cfg(target_os = "macos")]
-            AuthSource::Keychain => save_keychain_document(&self.document),
+            AuthSource::Keychain => {
+                set_string(&mut self.document, "/tokens/access_token", &access_token)?;
+                if let Some(value) = refresh_token.as_deref() {
+                    set_string(&mut self.document, "/tokens/refresh_token", value)?;
+                    self.refresh_token = Some(value.to_owned());
+                }
+                if let Some(value) = id_token.as_deref() {
+                    set_string(&mut self.document, "/tokens/id_token", value)?;
+                }
+                set_string(&mut self.document, "/last_refresh", &refreshed_at)?;
+                self.access_token = access_token;
+                self.last_refresh = Some(refreshed_at);
+                save_keychain_document(&self.document)
+            }
         }
     }
 }
 
-fn load_from_path(path: &Path) -> Result<CodexAuthState, CodexError> {
+pub(super) fn load_from_path(path: &Path) -> Result<CodexAuthState, CodexError> {
     let text = fs::read_to_string(path).map_err(|_| CodexError::InvalidAuth)?;
     let document = parse_auth_document(&text).ok_or(CodexError::InvalidAuth)?;
     let access_token = string_at(&document, "/tokens/access_token")
@@ -350,6 +414,142 @@ fn set_string(document: &mut Value, pointer: &str, value: &str) -> Result<(), Co
     Ok(())
 }
 
+pub(super) fn discover_identities_from_path(
+    path: &Path,
+) -> Vec<(String, super::accounts::CodexAuthSource)> {
+    let mut identities = Vec::new();
+    let Ok(text) = fs::read_to_string(path) else {
+        return identities;
+    };
+    let Ok(document) = serde_json::from_str::<Value>(&text) else {
+        return identities;
+    };
+
+    if document.get("version").is_some() && document.get("credential_pool").is_some() {
+        if let Some(pool) = document
+            .pointer("/credential_pool/openai-codex")
+            .and_then(Value::as_array)
+        {
+            for cred in pool {
+                if let Some(hermes_id) = cred.get("id").and_then(Value::as_str) {
+                    if let Some(access_token) = cred
+                        .get("access_token")
+                        .and_then(Value::as_str)
+                        .filter(|s| !s.is_empty())
+                    {
+                        let state = CodexAuthState {
+                            source: AuthSource::Hermes(path.to_path_buf(), hermes_id.to_owned()),
+                            document: document.clone(),
+                            access_token: access_token.to_owned(),
+                            refresh_token: cred
+                                .get("refresh_token")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned),
+                            account_id: None,
+                            last_refresh: cred
+                                .get("last_refresh")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned),
+                        };
+                        if let Some(identity) = state.account_identity() {
+                            identities.push((
+                                identity,
+                                super::accounts::CodexAuthSource::Hermes(
+                                    path.to_path_buf(),
+                                    hermes_id.to_owned(),
+                                ),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        if let Ok(state) = load_from_path(path) {
+            if let Some(identity) = state.account_identity() {
+                identities.push((
+                    identity,
+                    super::accounts::CodexAuthSource::Home(path.to_path_buf()),
+                ));
+            }
+        }
+    }
+    identities
+}
+
+pub(super) fn load_hermes_from_path(
+    path: &Path,
+    hermes_id: &str,
+) -> Result<CodexAuthState, CodexError> {
+    let text = fs::read_to_string(path).map_err(|_| CodexError::InvalidAuth)?;
+    let document: Value = serde_json::from_str(&text).map_err(|_| CodexError::InvalidAuth)?;
+
+    let pool = document
+        .pointer("/credential_pool/openai-codex")
+        .and_then(Value::as_array)
+        .ok_or(CodexError::InvalidAuth)?;
+    let cred = pool
+        .iter()
+        .find(|c| c.get("id").and_then(Value::as_str) == Some(hermes_id))
+        .ok_or(CodexError::NotLoggedIn)?;
+
+    let access_token = cred
+        .get("access_token")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or(CodexError::NotLoggedIn)?
+        .to_owned();
+
+    Ok(CodexAuthState {
+        source: AuthSource::Hermes(path.to_path_buf(), hermes_id.to_owned()),
+        refresh_token: cred
+            .get("refresh_token")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        account_id: None,
+        last_refresh: cred
+            .get("last_refresh")
+            .and_then(Value::as_str)
+            .map(str::to_owned),
+        document,
+        access_token,
+    })
+}
+
+fn update_hermes_credential(
+    document: &mut Value,
+    hermes_id: &str,
+    access_token: &str,
+    refresh_token: Option<&str>,
+    _id_token: Option<&str>,
+    refreshed_at: &str,
+) -> Result<(), CodexError> {
+    let pool = document
+        .pointer_mut("/credential_pool/openai-codex")
+        .and_then(Value::as_array_mut)
+        .ok_or(CodexError::AuthWrite)?;
+    let cred = pool
+        .iter_mut()
+        .find(|c| c.get("id").and_then(Value::as_str) == Some(hermes_id))
+        .ok_or(CodexError::AuthWrite)?;
+
+    if let Some(obj) = cred.as_object_mut() {
+        obj.insert(
+            "access_token".to_string(),
+            Value::String(access_token.to_string()),
+        );
+        if let Some(rt) = refresh_token {
+            obj.insert("refresh_token".to_string(), Value::String(rt.to_string()));
+        }
+        obj.insert(
+            "last_refresh".to_string(),
+            Value::String(refreshed_at.to_string()),
+        );
+        Ok(())
+    } else {
+        Err(CodexError::AuthWrite)
+    }
+}
 #[cfg(test)]
 mod tests {
     use std::{fs, path::Path};

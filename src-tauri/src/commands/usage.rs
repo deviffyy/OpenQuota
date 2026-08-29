@@ -24,7 +24,7 @@ pub async fn claim_codex_reset_credit(
     if !settings
         .enabled_provider_ids()
         .iter()
-        .any(|id| id == "codex")
+        .any(|id| crate::providers::provider_family(id) == "codex")
     {
         return Err("Codex is not enabled.".to_owned());
     }
@@ -36,7 +36,14 @@ pub async fn claim_codex_reset_credit(
 
     if outcome != ResetClaimOutcome::Failed {
         let observed_account_revision = AtomicU64::new(settings.account_revision());
-        service.refresh("codex", true).await;
+        let codex_ids: Vec<_> = settings
+            .enabled_provider_ids()
+            .into_iter()
+            .filter(|id| crate::providers::provider_family(id) == "codex")
+            .collect();
+        for codex_id in &codex_ids {
+            service.refresh(codex_id, true).await;
+        }
         let state = service.state();
         emit_settings_if_account_changed(&app, &settings, &observed_account_revision);
         let _ = app.emit("usage-state", &state);
