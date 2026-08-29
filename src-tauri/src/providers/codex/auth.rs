@@ -414,7 +414,6 @@ fn set_string(document: &mut Value, pointer: &str, value: &str) -> Result<(), Co
     Ok(())
 }
 
-
 pub(super) fn discover_identities_from_path(
     path: &Path,
 ) -> Vec<(String, super::accounts::CodexAuthSource)> {

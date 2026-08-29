@@ -313,7 +313,7 @@ fn home_directory() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    
+
     use tempfile::tempdir;
 
     use crate::storage::Storage;
