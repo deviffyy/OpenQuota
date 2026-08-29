@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 pub mod accounts;
 pub mod auth;
 pub mod client;

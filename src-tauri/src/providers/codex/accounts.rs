@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::{
     collections::{BTreeMap, HashSet},
     path::{Path, PathBuf},
@@ -29,7 +30,7 @@ pub(super) struct CodexAccount {
 
 /// Describes where a Codex account's credentials are stored.
 #[derive(Debug, Clone)]
-pub(super) enum CodexAuthSource {
+pub(crate) enum CodexAuthSource {
     /// Default credential locations (standard paths + macOS Keychain).
     /// Used when `CODEX_HOME` is not set or has a single value.
     Standard,
@@ -312,7 +313,7 @@ fn home_directory() -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    
     use tempfile::tempdir;
 
     use crate::storage::Storage;

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 pub mod antigravity;
 pub mod api_key;
 pub mod claude;
