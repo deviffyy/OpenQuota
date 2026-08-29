@@ -47,7 +47,7 @@ fn definition_for(id: &str, display_name: &str, fallback_enabled: bool) -> Provi
                 false,
                 true,
                 MetricSection::AlwaysVisible,
-                true,
+                false,
                 "S",
             ),
             MetricDefinition::quota(
@@ -131,7 +131,6 @@ fn definition_for(id: &str, display_name: &str, fallback_enabled: bool) -> Provi
             if let Some(suffix) = metric.id.strip_prefix("codex.") {
                 metric.id = format!("{id}.{suffix}");
             }
-            metric.default_pinned = false;
         }
     }
     definition
