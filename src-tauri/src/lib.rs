@@ -1,4 +1,5 @@
 mod child_process;
+mod cli;
 mod commands;
 mod desktop_integration;
 mod hashing;
@@ -43,6 +44,7 @@ use tauri_plugin_autostart::ManagerExt as AutostartExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 use crate::{
+    cli::RuntimeServices,
     desktop_integration::DesktopIntegration,
     pacing::NotificationEvaluator,
     pricing::PricingStore,
@@ -59,6 +61,34 @@ use crate::{
         MAIN_WINDOW,
     },
 };
+
+pub fn run_cli_if_requested() -> Option<i32> {
+    cli::run_if_requested()
+}
+
+pub(crate) fn build_provider_registry(
+    data_directory: &std::path::Path,
+    storage: Arc<Storage>,
+    pricing: Arc<PricingStore>,
+) -> Result<Arc<ProviderRegistry>, Box<dyn std::error::Error>> {
+    let mut providers = claude::runtimes(storage.clone(), pricing.clone())?;
+    providers.extend(vec![
+        Arc::new(CodexProvider::new(storage.clone(), pricing.clone())?) as Arc<dyn UsageProvider>,
+        Arc::new(CursorProvider::new(pricing.clone())?) as Arc<dyn UsageProvider>,
+        Arc::new(AntigravityProvider::new(
+            data_directory.join("antigravity").join("auth.json"),
+        )?) as Arc<dyn UsageProvider>,
+        Arc::new(CopilotProvider::new()?) as Arc<dyn UsageProvider>,
+        Arc::new(DevinProvider::new()?) as Arc<dyn UsageProvider>,
+        Arc::new(GrokProvider::new(storage.clone(), pricing.clone())?) as Arc<dyn UsageProvider>,
+        Arc::new(OpenCodeProvider::new(pricing.clone())) as Arc<dyn UsageProvider>,
+        Arc::new(OpenRouterProvider::new()?) as Arc<dyn UsageProvider>,
+        Arc::new(ZaiProvider::new()?) as Arc<dyn UsageProvider>,
+        Arc::new(KimiProvider::new()?) as Arc<dyn UsageProvider>,
+        Arc::new(MiniMaxProvider::new()?) as Arc<dyn UsageProvider>,
+    ]);
+    Ok(Arc::new(ProviderRegistry::new(providers)?))
+}
 
 fn install_tray(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "macos")]
@@ -358,42 +388,17 @@ pub fn run() {
             );
             app.manage(desktop_integration.clone());
 
-            let app_data_dir = app.path().app_data_dir()?;
-            let database_path = app_data_dir.join("openquota.db");
-            let storage = Arc::new(Storage::open(&database_path)?);
-            provider_environment::initialize(storage.load_provider_environment()?);
+            let RuntimeServices {
+                storage,
+                registry,
+                service,
+                settings,
+                credential_detection_plan,
+            } = cli::initialize_services(app.path().app_data_dir()?)?;
             provider_environment::refresh_for_next_launch(storage.clone());
             app.manage(Arc::new(PanelResizeSession::new(storage.clone())));
             app_debug!("cache", "application database opened");
-            let pricing = Arc::new(PricingStore::new(app_data_dir.join("pricing"))?);
-            let mut providers = claude::runtimes(storage.clone(), pricing.clone())?;
-            providers.extend(vec![
-                Arc::new(CodexProvider::new(storage.clone(), pricing.clone())?)
-                    as Arc<dyn UsageProvider>,
-                Arc::new(CursorProvider::new(pricing.clone())?) as Arc<dyn UsageProvider>,
-                Arc::new(AntigravityProvider::new(
-                    app_data_dir.join("antigravity").join("auth.json"),
-                )?) as Arc<dyn UsageProvider>,
-                Arc::new(CopilotProvider::new()?) as Arc<dyn UsageProvider>,
-                Arc::new(DevinProvider::new()?) as Arc<dyn UsageProvider>,
-                Arc::new(GrokProvider::new(storage.clone(), pricing.clone())?)
-                    as Arc<dyn UsageProvider>,
-                Arc::new(OpenCodeProvider::new(pricing.clone())) as Arc<dyn UsageProvider>,
-                Arc::new(OpenRouterProvider::new()?) as Arc<dyn UsageProvider>,
-                Arc::new(ZaiProvider::new()?) as Arc<dyn UsageProvider>,
-                Arc::new(KimiProvider::new()?) as Arc<dyn UsageProvider>,
-                Arc::new(MiniMaxProvider::new()?) as Arc<dyn UsageProvider>,
-            ]);
-            let registry = Arc::new(ProviderRegistry::new(providers)?);
-            let (settings_service, credential_detection_plan) =
-                SettingsService::new_deferred(storage.clone(), registry.clone())?;
-            let settings = Arc::new(settings_service);
             let floating_window = desktop_integration.apply_window_mode(settings.get().window_mode);
-            let service = Arc::new(ProviderService::new_with_settings(
-                registry.clone(),
-                storage.clone(),
-                settings.clone(),
-            ));
             logging::set_level(settings.get().log_level);
             app_info!(
                 "config",
