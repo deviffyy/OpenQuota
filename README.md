@@ -111,6 +111,20 @@ Run the complete quality checks:
 corepack pnpm verify
 ```
 
+OpenQuota also provides a small command-line interface for checking usage without opening the
+dashboard:
+
+```sh
+openquota status                 # refresh and show enabled providers
+openquota status --cached        # show the last cached values
+openquota status --provider codex --json
+openquota providers
+```
+
+The CLI uses the same local database and credentials as the desktop app. Set
+`OPENQUOTA_DATA_DIR` to use a different data directory, for example when testing an isolated
+profile.
+
 Build an installer for the current platform:
 
 ```sh
