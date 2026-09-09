@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { t } from './i18n';
+  import { localizedStatusText } from './metrics';
   import type { StatusMetric as StatusMetricValue } from './types';
 
   interface Props {
@@ -16,10 +18,10 @@
       class="status-badge status-badge--{metric.tone}"
       data-tooltip={metric.subtitle ?? undefined}
     >
-      {metric.text}
+      {localizedStatusText(metric)}
     </span>
   {:else}
-    <span class="status-reading">No data</span>
+    <span class="status-reading">{t('noData')}</span>
   {/if}
 </div>
 

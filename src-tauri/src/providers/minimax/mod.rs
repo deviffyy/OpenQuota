@@ -9,8 +9,8 @@ use reqwest::StatusCode;
 use thiserror::Error;
 
 use crate::models::{
-    ApiKeyStatus, MetricDefinition, MetricSection, ProviderDefinition, ProviderErrorKind,
-    ProviderLink, ProviderSnapshot, UsageHistory,
+    ApiKeyStatus, MetricDefinition, MetricLabelKind, MetricSection, ProviderDefinition,
+    ProviderErrorKind, ProviderLink, ProviderLinkKind, ProviderSnapshot, UsageHistory,
 };
 
 use self::{
@@ -28,9 +28,12 @@ pub(crate) fn definition() -> ProviderDefinition {
         short_name: "M".into(),
         fallback_enabled: false,
         local_usage_source_note: None,
+        local_usage_source_kind: None,
         links: vec![
-            ProviderLink::new("Dashboard", "https://platform.minimax.io/console/plan"),
-            ProviderLink::new("API Keys", "https://platform.minimax.io/console/access"),
+            ProviderLink::new("Dashboard", "https://platform.minimax.io/console/plan")
+                .with_kind(ProviderLinkKind::Dashboard),
+            ProviderLink::new("API Keys", "https://platform.minimax.io/console/access")
+                .with_kind(ProviderLinkKind::ApiKeys),
         ],
         metrics: vec![
             MetricDefinition::quota(
@@ -42,7 +45,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 true,
                 "S",
-            ),
+            )
+            .with_label_kind(MetricLabelKind::Session),
             MetricDefinition::quota(
                 "minimax.weekly",
                 "Weekly",
@@ -52,7 +56,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 true,
                 "W",
-            ),
+            )
+            .with_label_kind(MetricLabelKind::Weekly),
         ],
     }
 }

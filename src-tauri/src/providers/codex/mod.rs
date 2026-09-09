@@ -13,8 +13,8 @@ use thiserror::Error;
 use crate::{
     hashing::sha256_hex,
     models::{
-        MetricDefinition, MetricSection, ProviderDefinition, ProviderLink, ProviderSnapshot,
-        UsagePeriodSelection,
+        MetricDefinition, MetricLabelKind, MetricSection, ProviderDefinition, ProviderLink,
+        ProviderLinkKind, ProviderSnapshot, UsagePeriodSelection, UsageSourceKind,
     },
     pricing::PricingStore,
     storage::Storage,
@@ -32,9 +32,12 @@ pub(crate) fn definition() -> ProviderDefinition {
         short_name: "Cx".into(),
         fallback_enabled: true,
         local_usage_source_note: Some("From your Codex logs (estimated)".into()),
+        local_usage_source_kind: Some(UsageSourceKind::EstimatedLogs),
         links: vec![
-            ProviderLink::new("Status", "https://status.openai.com/"),
-            ProviderLink::new("Dashboard", "https://chatgpt.com/codex/settings/usage"),
+            ProviderLink::new("Status", "https://status.openai.com/")
+                .with_kind(ProviderLinkKind::Status),
+            ProviderLink::new("Dashboard", "https://chatgpt.com/codex/settings/usage")
+                .with_kind(ProviderLinkKind::Dashboard),
         ],
         metrics: vec![
             MetricDefinition::quota(
@@ -46,7 +49,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 true,
                 "S",
-            ),
+            )
+            .with_label_kind(MetricLabelKind::Session),
             MetricDefinition::quota(
                 "codex.weekly",
                 "Weekly",
@@ -56,7 +60,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 true,
                 "W",
-            ),
+            )
+            .with_label_kind(MetricLabelKind::Weekly),
             MetricDefinition::quota(
                 "codex.spark",
                 "Spark",
@@ -76,8 +81,9 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::OnDemand,
                 false,
                 "SW",
-            ),
-            MetricDefinition::trend("codex.trend"),
+            )
+            .with_label_kind(MetricLabelKind::SparkWeekly),
+            MetricDefinition::trend("codex.trend").with_label_kind(MetricLabelKind::UsageTrend),
             MetricDefinition::value(
                 "codex.credits",
                 "Extra Usage",
@@ -87,7 +93,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "E",
                 None,
-            ),
+            )
+            .with_label_kind(MetricLabelKind::ExtraUsage),
             MetricDefinition::value(
                 "codex.rateLimitResets",
                 "Rate Limit Resets",
@@ -97,28 +104,32 @@ pub(crate) fn definition() -> ProviderDefinition {
                 false,
                 "R",
                 Some("resets"),
-            ),
+            )
+            .with_label_kind(MetricLabelKind::RateLimitResets),
             MetricDefinition::usage(
                 "codex.today",
                 "Today",
                 UsagePeriodSelection::Today,
                 MetricSection::OnDemand,
                 "T",
-            ),
+            )
+            .with_label_kind(MetricLabelKind::Today),
             MetricDefinition::usage(
                 "codex.yesterday",
                 "Yesterday",
                 UsagePeriodSelection::Yesterday,
                 MetricSection::OnDemand,
                 "Y",
-            ),
+            )
+            .with_label_kind(MetricLabelKind::Yesterday),
             MetricDefinition::usage(
                 "codex.last30",
                 "Last 30 Days",
                 UsagePeriodSelection::Last30Days,
                 MetricSection::OnDemand,
                 "M",
-            ),
+            )
+            .with_label_kind(MetricLabelKind::Last30Days),
         ],
     }
 }

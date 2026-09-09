@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use reqwest::StatusCode;
 use serde_json::Value;
 
-use crate::models::{QuotaFormat, QuotaWindow, StatusMetric, StatusTone};
+use crate::models::{QuotaFormat, QuotaWindow, StatusMetric, StatusMetricUnit, StatusTone};
 
 use super::{client::GrokResponse, GrokError};
 
@@ -26,20 +26,19 @@ struct CreditsConfig {
 pub fn map_credits(response: &GrokResponse) -> Result<GrokMetrics, GrokError> {
     require_success(response.status)?;
     let config = decode_credits(&response.body)?;
+    let has_cap = config.on_demand_cap > 0.0;
     let status_metrics = vec![StatusMetric {
         id: "payAsYouGo".into(),
         label: "Pay as you go".into(),
-        text: if config.on_demand_cap > 0.0 {
-            format!("{} cap", format_units(config.on_demand_cap))
-        } else {
-            "Disabled".into()
-        },
-        tone: if config.on_demand_cap > 0.0 {
+        text: String::new(),
+        tone: if has_cap {
             StatusTone::Positive
         } else {
             StatusTone::Neutral
         },
         subtitle: None,
+        value: has_cap.then_some(config.on_demand_cap),
+        unit: has_cap.then_some(StatusMetricUnit::Cap),
     }];
     let quotas = (config.period_type == WEEKLY_PERIOD_TYPE)
         .then(|| QuotaWindow {
@@ -148,14 +147,6 @@ fn finite_number(value: &Value) -> Option<f64> {
         .filter(|value: &f64| value.is_finite())
 }
 
-fn format_units(value: f64) -> String {
-    if value.fract() == 0.0 {
-        format!("{value:.0}")
-    } else {
-        value.to_string()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use reqwest::StatusCode;
@@ -205,7 +196,9 @@ mod tests {
             weekly.resets_at.unwrap().to_rfc3339(),
             "2026-07-07T21:36:52.140114+00:00"
         );
-        assert_eq!(mapped.status_metrics[0].text, "Disabled");
+        assert_eq!(mapped.status_metrics[0].text, "");
+        assert_eq!(mapped.status_metrics[0].value, None);
+        assert_eq!(mapped.status_metrics[0].unit, None);
         assert_eq!(mapped.status_metrics[0].tone, StatusTone::Neutral);
     }
 
@@ -218,7 +211,12 @@ mod tests {
         )))
         .unwrap();
 
-        assert_eq!(mapped.status_metrics[0].text, "2500 cap");
+        assert_eq!(mapped.status_metrics[0].text, "");
+        assert_eq!(mapped.status_metrics[0].value, Some(2500.0));
+        assert_eq!(
+            mapped.status_metrics[0].unit,
+            Some(crate::models::StatusMetricUnit::Cap)
+        );
         assert_eq!(mapped.status_metrics[0].tone, StatusTone::Positive);
     }
 
@@ -232,7 +230,7 @@ mod tests {
         .unwrap();
 
         assert!(mapped.quotas.is_empty());
-        assert_eq!(mapped.status_metrics[0].text, "Disabled");
+        assert_eq!(mapped.status_metrics[0].text, "");
     }
 
     #[test]

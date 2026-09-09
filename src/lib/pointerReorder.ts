@@ -62,7 +62,7 @@ function announce(message: string) {
 }
 
 function announceMove(options: PointerReorderOptions, targetId?: string | null) {
-  const label = options.label ?? 'Item';
+  const label = options.label ?? t('item');
   queueMicrotask(() => {
     const entries = reorderElements(options.group).filter(
       (entry) => !entry.id.startsWith('section:'),
@@ -76,10 +76,10 @@ function announceMove(options: PointerReorderOptions, targetId?: string | null) 
       : null;
     const message =
       position >= 0
-        ? `${label} moved to position ${position + 1} of ${entries.length}.`
+        ? t('metricMovedToPosition', { label, position: position + 1, total: entries.length })
         : section
-          ? `${label} moved to ${section}.`
-          : `${label} moved.`;
+          ? t('metricMovedToSection', { label, section })
+          : t('metricMoved', { label });
     announce(message);
   });
 }
@@ -299,7 +299,7 @@ export function pointerReorder(node: HTMLElement, initialOptions: PointerReorder
       if (dragging) {
         suppressDragClick();
         options.onEnd?.(moved, cancelled);
-        if (cancelled) announce(`${options.label ?? 'Item'} move cancelled.`);
+        if (cancelled) announce(t('moveCancelled', { label: options.label ?? t('item') }));
         else if (moved) announceMove(options, lastTarget);
         if (restoreFocus) {
           queueMicrotask(() => {
@@ -408,3 +408,4 @@ export function pointerReorder(node: HTMLElement, initialOptions: PointerReorder
     },
   };
 }
+import { t } from './i18n';

@@ -39,6 +39,7 @@ struct TrayGauge {
 enum MacMenuBarIcon {
     Mark,
     Text(Vec<crate::menu_bar::TextGroup>),
+    NativeText(String),
     Bars(Vec<f64>),
 }
 
@@ -106,6 +107,21 @@ fn mac_menu_bar_presentation(
             MacMenuBarPresentation {
                 icon: if text_groups.is_empty() {
                     MacMenuBarIcon::Mark
+                } else if text_groups.iter().any(|group| {
+                    group
+                        .values
+                        .iter()
+                        .any(|value| !crate::menu_bar::supports_text(value))
+                }) {
+                    MacMenuBarIcon::NativeText(
+                        text_groups
+                            .iter()
+                            .map(|group| {
+                                format!("{} {}", group.provider_id, group.values.join(" / "))
+                            })
+                            .collect::<Vec<_>>()
+                            .join(" · "),
+                    )
                 } else {
                     MacMenuBarIcon::Text(text_groups)
                 },
@@ -130,6 +146,18 @@ fn apply_mac_menu_bar_presentation(
     presentation: MacMenuBarPresentation,
 ) {
     match presentation.icon {
+        MacMenuBarIcon::NativeText(title) => {
+            // AppKit supplies font fallback for glyphs missing from the bundled numeric font.
+            if tray.set_title(Some(title)).is_err() {
+                crate::app_warn!("tray", "macOS menu bar title update failed");
+            }
+            if tray
+                .set_icon_with_as_template(Some(mark_icon()), true)
+                .is_err()
+            {
+                crate::app_warn!("tray", "macOS menu bar icon update failed");
+            }
+        }
         MacMenuBarIcon::Mark => {
             // An empty value explicitly clears stale native text before the fallback mark is shown.
             if tray.set_title(Some("")).is_err() {
@@ -208,6 +236,7 @@ fn resolved_groups(
     settings: &AppSettings,
     registry: &ProviderRegistry,
 ) -> Vec<TrayGroup> {
+    let locale = crate::native_i18n::Locale::for_preference(&settings.language);
     settings
         .providers
         .iter()
@@ -225,7 +254,7 @@ fn resolved_groups(
                 .filter_map(|metric| {
                     let metric_definition = registry.metric(&metric.id)?;
                     let mut resolved =
-                        tray_metric(metric_definition, snapshot, settings.usage_display)?;
+                        tray_metric(metric_definition, snapshot, settings.usage_display, locale)?;
                     resolved.detail = format!(
                         "{} {}",
                         settings.provider_display_name(definition),
@@ -247,8 +276,11 @@ fn tray_metric(
     definition: &MetricDefinition,
     snapshot: &ProviderSnapshot,
     display: UsageDisplay,
+    locale: crate::native_i18n::Locale,
 ) -> Option<TrayMetric> {
     let tray = definition.tray.as_ref()?;
+    let localized_label =
+        crate::native_i18n::metric_label(locale, definition.label_kind, &definition.label);
     let quota = |id: &str| {
         snapshot
             .quotas
@@ -262,14 +294,18 @@ fn tray_metric(
                             UsageDisplay::Used => used,
                             UsageDisplay::Left => (limit - used).max(0.0),
                         };
-                        let word = match display {
-                            UsageDisplay::Used => "used",
-                            UsageDisplay::Left => "left",
-                        };
-                        let unit = quota.unit.as_deref().unwrap_or("requests");
+                        let unit = crate::native_i18n::count_unit(
+                            locale,
+                            quota.unit.as_deref().unwrap_or("requests"),
+                        );
                         return TrayMetric {
                             value: format!("{value:.0}"),
-                            detail: format!("{} {value:.0} {unit} {word}", quota.label),
+                            detail: crate::native_i18n::quota_detail(
+                                locale,
+                                &localized_label,
+                                &format!("{value:.0} {unit}"),
+                                display == UsageDisplay::Used,
+                            ),
                             gauge: used_fraction.map(|used_fraction| TrayGauge {
                                 display_fraction: match display {
                                     UsageDisplay::Used => used_fraction,
@@ -287,13 +323,14 @@ fn tray_metric(
                     UsageDisplay::Left => 1.0 - used_fraction,
                 };
                 let percent = display_fraction * 100.0;
-                let word = match display {
-                    UsageDisplay::Used => "used",
-                    UsageDisplay::Left => "left",
-                };
                 TrayMetric {
                     value: format!("{percent:.0}%"),
-                    detail: format!("{} {percent:.0}% {word}", quota.label),
+                    detail: crate::native_i18n::quota_detail(
+                        locale,
+                        &localized_label,
+                        &format!("{percent:.0}%"),
+                        display == UsageDisplay::Used,
+                    ),
                     gauge: Some(TrayGauge {
                         display_fraction,
                         #[cfg(any(not(target_os = "macos"), test))]
@@ -304,15 +341,27 @@ fn tray_metric(
     };
     match &definition.source {
         MetricSource::Quota { source_id, .. } => quota(source_id),
-        MetricSource::QuotaOrValue { source_id, .. } => {
-            quota(source_id).or_else(|| value_metric(snapshot, source_id, tray.suffix.as_deref()))
+        MetricSource::QuotaOrValue { source_id, .. } => quota(source_id).or_else(|| {
+            value_metric(
+                snapshot,
+                source_id,
+                tray.suffix.as_deref(),
+                &localized_label,
+                locale,
+            )
+        }),
+        MetricSource::Value { source_id } => value_metric(
+            snapshot,
+            source_id,
+            tray.suffix.as_deref(),
+            &localized_label,
+            locale,
+        ),
+        MetricSource::Status { source_id } => {
+            status_metric(snapshot, source_id, &localized_label, locale)
         }
-        MetricSource::Value { source_id } => {
-            value_metric(snapshot, source_id, tray.suffix.as_deref())
-        }
-        MetricSource::Status { source_id } => status_metric(snapshot, source_id),
         MetricSource::Usage { period } => {
-            usage_metric(&definition.label, usage_period(snapshot, *period))
+            usage_metric(&localized_label, usage_period(snapshot, *period))
         }
         MetricSource::Trend => None,
     }
@@ -326,14 +375,27 @@ fn usage_period(snapshot: &ProviderSnapshot, period: UsagePeriodSelection) -> Op
     }
 }
 
-fn status_metric(snapshot: &ProviderSnapshot, source_id: &str) -> Option<TrayMetric> {
+fn status_metric(
+    snapshot: &ProviderSnapshot,
+    source_id: &str,
+    localized_label: &str,
+    locale: crate::native_i18n::Locale,
+) -> Option<TrayMetric> {
     let metric = snapshot
         .status_metrics
         .iter()
         .find(|metric| metric.id == source_id)?;
+    let value = crate::native_i18n::status_metric_text(
+        locale,
+        &metric.id,
+        metric.tone,
+        metric.value,
+        metric.unit,
+        &metric.text,
+    );
     Some(TrayMetric {
-        value: metric.text.clone(),
-        detail: format!("{} {}", metric.label, metric.text),
+        value: value.clone(),
+        detail: format!("{localized_label} {value}"),
         gauge: None,
     })
 }
@@ -342,6 +404,8 @@ fn value_metric(
     snapshot: &ProviderSnapshot,
     source_id: &str,
     tray_suffix: Option<&str>,
+    localized_label: &str,
+    locale: crate::native_i18n::Locale,
 ) -> Option<TrayMetric> {
     let metric = snapshot
         .value_metrics
@@ -350,13 +414,13 @@ fn value_metric(
     let value = metric
         .values
         .iter()
-        .map(format_tray_value)
+        .map(|value| format_tray_value(value, locale))
         .collect::<Vec<_>>()
         .join(" · ");
     let detail = metric
         .values
         .iter()
-        .map(format_detail_value)
+        .map(|value| format_detail_value(value, locale))
         .collect::<Vec<_>>()
         .join(" · ");
     let value = tray_suffix
@@ -364,12 +428,12 @@ fn value_metric(
         .unwrap_or(value);
     Some(TrayMetric {
         value,
-        detail: format!("{} {detail}", metric.label),
+        detail: format!("{localized_label} {detail}"),
         gauge: None,
     })
 }
 
-fn format_tray_value(value: &MetricValue) -> String {
+fn format_tray_value(value: &MetricValue, locale: crate::native_i18n::Locale) -> String {
     let number = match value.kind {
         MetricValueKind::Dollars => format!("${:.0}", value.number),
         MetricValueKind::Count => format_tokens(value.number.max(0.0) as u64),
@@ -377,11 +441,11 @@ fn format_tray_value(value: &MetricValue) -> String {
     value
         .label
         .as_deref()
-        .map(|label| format!("{number} {label}"))
+        .map(|label| format!("{number} {}", crate::native_i18n::count_unit(locale, label)))
         .unwrap_or(number)
 }
 
-fn format_detail_value(value: &MetricValue) -> String {
+fn format_detail_value(value: &MetricValue, locale: crate::native_i18n::Locale) -> String {
     let number = match value.kind {
         MetricValueKind::Dollars => format!("${:.2}", value.number),
         MetricValueKind::Count => format!("{:.0}", value.number),
@@ -389,7 +453,7 @@ fn format_detail_value(value: &MetricValue) -> String {
     value
         .label
         .as_deref()
-        .map(|label| format!("{number} {label}"))
+        .map(|label| format!("{number} {}", crate::native_i18n::count_unit(locale, label)))
         .unwrap_or(number)
 }
 
@@ -513,6 +577,26 @@ mod tests {
             MacMenuBarPresentation {
                 icon: MacMenuBarIcon::Bars(vec![0.75]),
             }
+        );
+    }
+
+    #[test]
+    fn mac_localized_status_uses_native_font_fallback() {
+        let groups = vec![TrayGroup {
+            provider_id: "grok".into(),
+            metrics: vec![TrayMetric {
+                value: "已停用".into(),
+                detail: String::new(),
+                gauge: None,
+            }],
+        }];
+        assert_eq!(
+            mac_menu_bar_presentation(&groups, crate::models::MenuBarStyle::Text).icon,
+            MacMenuBarIcon::NativeText("grok 已停用".into())
+        );
+        assert_eq!(
+            mac_menu_bar_presentation(&groups, crate::models::MenuBarStyle::Bars).icon,
+            MacMenuBarIcon::Mark
         );
     }
 
@@ -699,15 +783,33 @@ mod tests {
         let catalog = ProviderRegistry::from_definitions(vec![cursor::definition()]).unwrap();
         let definition = catalog.metric("cursor.requests").unwrap();
 
-        let left =
-            super::tray_metric(definition, &snapshot, crate::models::UsageDisplay::Left).unwrap();
-        let used =
-            super::tray_metric(definition, &snapshot, crate::models::UsageDisplay::Used).unwrap();
+        let left = super::tray_metric(
+            definition,
+            &snapshot,
+            crate::models::UsageDisplay::Left,
+            crate::native_i18n::Locale::En,
+        )
+        .unwrap();
+        let used = super::tray_metric(
+            definition,
+            &snapshot,
+            crate::models::UsageDisplay::Used,
+            crate::native_i18n::Locale::En,
+        )
+        .unwrap();
+        let simplified_chinese = super::tray_metric(
+            definition,
+            &snapshot,
+            crate::models::UsageDisplay::Left,
+            crate::native_i18n::Locale::ZhCn,
+        )
+        .unwrap();
 
         assert_eq!(left.value, "75");
         assert_eq!(left.detail, "Requests 75 searches left");
         assert_eq!(used.value, "25");
         assert_eq!(used.detail, "Requests 25 searches used");
+        assert_eq!(simplified_chinese.detail, "请求：剩余 75 次搜索");
         assert_eq!(
             left.gauge,
             Some(TrayGauge {
@@ -811,11 +913,21 @@ mod tests {
             catalog.metric("codex.credits").unwrap(),
             &snapshot,
             crate::models::UsageDisplay::Left,
+            crate::native_i18n::Locale::En,
         )
         .unwrap();
         assert_eq!(metric.value, "$33 · 821 credits");
         assert_eq!(metric.detail, "Extra Usage $32.84 · 821 credits");
         assert_eq!(metric.gauge, None);
+        let localized = super::tray_metric(
+            catalog.metric("codex.credits").unwrap(),
+            &snapshot,
+            crate::models::UsageDisplay::Left,
+            crate::native_i18n::Locale::ZhCn,
+        )
+        .unwrap();
+        assert_eq!(localized.value, "$33 · 821 额度");
+        assert_eq!(localized.detail, "额外用量 $32.84 · 821 额度");
     }
 
     #[test]
@@ -828,9 +940,11 @@ mod tests {
             status_metrics: vec![StatusMetric {
                 id: "payAsYouGo".into(),
                 label: "Extra Usage".into(),
-                text: "2500 cap".into(),
+                text: String::new(),
                 tone: StatusTone::Positive,
                 subtitle: None,
+                value: Some(2500.0),
+                unit: Some(crate::models::StatusMetricUnit::Cap),
             }],
             notices: Vec::new(),
             usage: UsageHistory::default(),
@@ -847,8 +961,13 @@ mod tests {
             "E",
         );
 
-        let metric =
-            super::tray_metric(&definition, &snapshot, crate::models::UsageDisplay::Left).unwrap();
+        let metric = super::tray_metric(
+            &definition,
+            &snapshot,
+            crate::models::UsageDisplay::Left,
+            crate::native_i18n::Locale::En,
+        )
+        .unwrap();
 
         assert_eq!(metric.value, "2500 cap");
         assert_eq!(metric.detail, "Extra Usage 2500 cap");

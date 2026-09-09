@@ -46,6 +46,12 @@ pub fn text_icon(groups: &[TextGroup]) -> Option<Image<'static>> {
     Some(Image::new_owned(strip.rgba, strip.width, TEXT_HEIGHT))
 }
 
+pub fn supports_text(value: &str) -> bool {
+    value
+        .chars()
+        .all(|character| bundled_font().lookup_glyph_index(character) != 0)
+}
+
 pub fn bar_icon(fractions: &[f64]) -> Image<'static> {
     Image::new_owned(render_bar_rgba(fractions), ICON_SIZE, ICON_SIZE)
 }

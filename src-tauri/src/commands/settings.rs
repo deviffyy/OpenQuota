@@ -166,6 +166,9 @@ async fn save_app_settings_inner(
         }
     }
     crate::app_debug!("config", "application settings persisted");
+    if previous.language != updated.language {
+        crate::update_tray_menu(&app, &updated.language);
+    }
     tray_presentation::update(
         &app,
         &service.state(),
@@ -430,11 +433,13 @@ pub fn request_notification_permission(
     settings: State<'_, Arc<SettingsService>>,
 ) -> SettingsViewState {
     crate::app_info!("notifications", "notification permission requested");
+    let language = settings.get().language;
+    let labels = crate::native_i18n::Labels::for_preference(&language);
     let error = app
         .notification()
         .request_permission()
         .err()
-        .map(|_| "Notification permission could not be requested.".to_owned());
+        .map(|_| labels.notification_permission_failed.to_owned());
     if error.is_some() {
         crate::app_error!("notifications", "notification permission request failed");
     }
@@ -442,7 +447,8 @@ pub fn request_notification_permission(
         notification_permission(&app),
         error,
         app.state::<DesktopIntegration>().tray_available(),
-        app.state::<DesktopIntegration>().platform_summary(),
+        app.state::<DesktopIntegration>()
+            .platform_summary(&language),
     )
 }
 
@@ -501,24 +507,23 @@ pub fn open_log_folder(app: AppHandle) -> Result<(), String> {
 }
 
 pub(crate) fn settings_view_state(app: &AppHandle, service: &SettingsService) -> SettingsViewState {
+    let language = service.get().language;
+    let labels = crate::native_i18n::Labels::for_preference(&language);
     let (autostart, mut integration_error) = match autostart_is_enabled(app) {
         Ok(enabled) => (Some(enabled), None),
-        Err(_) => (
-            None,
-            Some("Launch at login status could not be read.".to_owned()),
-        ),
+        Err(_) => (None, Some(labels.launch_status_failed.to_owned())),
     };
     if let Some(shortcut) = service.get().global_shortcut {
         if !app.global_shortcut().is_registered(shortcut.as_str()) {
-            integration_error =
-                Some("The saved global shortcut is currently unavailable.".to_owned());
+            integration_error = Some(labels.shortcut_unavailable.to_owned());
         }
     }
     let mut state = service.view_state(
         notification_permission(app),
         integration_error,
         app.state::<DesktopIntegration>().tray_available(),
-        app.state::<DesktopIntegration>().platform_summary(),
+        app.state::<DesktopIntegration>()
+            .platform_summary(&language),
     );
     if let Some(enabled) = autostart {
         state.settings.launch_at_login = enabled;

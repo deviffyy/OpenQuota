@@ -119,6 +119,10 @@ mounted=true
 source_app="${mount_dir}/OpenQuota.app"
 source_binary="${source_app}/Contents/MacOS/openquota"
 test -x "${source_binary}"
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDevelopmentRegion' "${source_app}/Contents/Info.plist")" = en
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleLocalizations:0' "${source_app}/Contents/Info.plist")" = en
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleLocalizations:1' "${source_app}/Contents/Info.plist")" = zh-Hans
+test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleLocalizations:2' "${source_app}/Contents/Info.plist")" = zh-Hant
 verify_app_signature "${source_app}"
 if test "${release_validation}" = true; then
   verify_release_trust "${source_app}"

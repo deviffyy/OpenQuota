@@ -641,8 +641,12 @@ impl SettingsService {
                 }
             }
         }
+        let resolved_language = crate::native_i18n::Locale::for_preference(&settings.language)
+            .language_tag()
+            .to_owned();
         SettingsViewState {
             settings,
+            resolved_language,
             settings_revision,
             account_revision,
             renamable_provider_ids,
@@ -715,6 +719,7 @@ fn normalize_with_persisted_accounts(
     let catalog = registry.catalog();
     let migrating_to_multi_provider = settings.schema_version < 3;
     settings.schema_version = 7;
+    settings.language = crate::models::normalize_language_preference(&settings.language).to_owned();
     settings.dismissed_update_version = settings
         .dismissed_update_version
         .take()

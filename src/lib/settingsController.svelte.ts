@@ -1,4 +1,5 @@
 import { getAppSettings, saveAppSettings } from './backend';
+import { t } from './i18n';
 import type { AppSettings, SettingsViewState } from './types';
 
 export type SettingsMutation = (
@@ -8,7 +9,7 @@ export type SettingsMutation = (
 
 class CancelledSettingsMutation extends Error {
   constructor() {
-    super('Settings changed before this operation could start.');
+    super(t('settingsMutationCancelled'));
   }
 }
 
@@ -25,10 +26,6 @@ function strictlyFollows(candidate: SettingsViewState, current: SettingsViewStat
     (candidate.settingsRevision > current.settingsRevision ||
       candidate.accountRevision > current.accountRevision)
   );
-}
-
-function errorMessage(error: unknown) {
-  return typeof error === 'string' ? error : 'Settings could not be saved.';
 }
 
 export class SettingsController {
@@ -111,7 +108,7 @@ export class SettingsController {
   }
 
   runMutation(mutation: SettingsMutation) {
-    if (!this.state) return Promise.reject('Settings are unavailable.');
+    if (!this.state) return Promise.reject(t('settingsUnavailable'));
     return this.#enqueueMutation(mutation);
   }
 
@@ -123,7 +120,7 @@ export class SettingsController {
     const task = this.#mutationQueue.then(async () => {
       if (generation !== this.#mutationGeneration) throw new CancelledSettingsMutation();
       const base = this.#serverState ?? this.state;
-      if (!base) throw new Error('Settings are unavailable.');
+      if (!base) throw new Error(t('settingsUnavailable'));
 
       try {
         const saved = await mutation(base.settingsRevision, base.accountRevision);
@@ -133,7 +130,7 @@ export class SettingsController {
       } catch (error) {
         if (error instanceof CancelledSettingsMutation) throw error;
         if (generation === this.#mutationGeneration) {
-          if (reportError) this.onError(errorMessage(error));
+          if (reportError) this.onError(t('settingsSaveFailed'));
           const latestAtFailure = this.#mutationSequence;
           this.#mutationGeneration += 1;
           await this.#reloadAfterFailure(latestAtFailure);
@@ -178,7 +175,7 @@ export class SettingsController {
         this.state = state;
       }
     } catch {
-      this.onError('Settings could not be saved or reloaded.');
+      this.onError(t('settingsSaveReloadFailed'));
     }
   }
 }

@@ -104,12 +104,18 @@ pub fn scan_local_usage(
     } else {
         false
     };
-    let source_note = if includes_pi {
-        "From your Claude usage history and pi (estimated)"
+    let (source_note, source_kind) = if includes_pi {
+        (
+            "From your Claude usage history and pi (estimated)",
+            crate::models::UsageSourceKind::EstimatedHistoryWithPi,
+        )
     } else {
-        "From your Claude usage history (estimated)"
+        (
+            "From your Claude usage history (estimated)",
+            crate::models::UsageSourceKind::EstimatedUsageHistory,
+        )
     };
-    Ok(accumulator.build(now, source_note))
+    Ok(accumulator.build_with_source_kind(now, source_note, Some(source_kind)))
 }
 
 fn discover_files(configured_roots: &[PathBuf], include_standard_roots: bool) -> Vec<PathBuf> {
@@ -438,7 +444,11 @@ fn aggregate(
 ) -> UsageHistory {
     let mut accumulator = DailyUsageAccumulator::default();
     aggregate_into(events, now, pricing, &mut accumulator);
-    accumulator.build(now, "From your Claude usage history (estimated)")
+    accumulator.build_with_source_kind(
+        now,
+        "From your Claude usage history (estimated)",
+        Some(crate::models::UsageSourceKind::EstimatedUsageHistory),
+    )
 }
 
 fn aggregate_into(

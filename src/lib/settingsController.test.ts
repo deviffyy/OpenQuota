@@ -15,6 +15,7 @@ function settingsView(
   accountRevision = 0,
 ): SettingsViewState {
   return {
+    resolvedLanguage: 'en',
     settingsRevision,
     accountRevision,
     renamableProviderIds: [],
@@ -24,6 +25,7 @@ function settingsView(
     platformSummary: null,
     settings: {
       schemaVersion: 7,
+      language: 'en',
       providerNames: {},
       providers: [],
       knownProviderIds: [],
@@ -95,7 +97,7 @@ describe('SettingsController', () => {
     controller.save({ ...settingsView().settings, theme: 'dark' });
 
     await vi.waitFor(() => expect(controller.state?.settings.theme).toBe('system'));
-    expect(onError).toHaveBeenCalledWith('Autostart unavailable.');
+    expect(onError).toHaveBeenCalledWith('Settings could not be saved.');
   });
 
   it('reloads an external account change after pending saves settle', async () => {
@@ -235,6 +237,6 @@ describe('SettingsController', () => {
     expect(mutation).not.toHaveBeenCalled();
     expect(mocks.getAppSettings).toHaveBeenCalledTimes(1);
     expect(controller.state?.settings.theme).toBe('dark');
-    expect(onError).toHaveBeenCalledWith('Settings changed.');
+    expect(onError).toHaveBeenCalledWith('Settings could not be saved.');
   });
 });

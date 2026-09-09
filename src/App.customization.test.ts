@@ -102,7 +102,7 @@ describe('OpenQuota customization persistence and reorder', () => {
     await screen.findByText('Plus');
     await fireEvent.click(screen.getByLabelText('Open options'));
     await fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
-    const toggle = screen.getByRole('checkbox', { name: 'Enable codex' });
+    const toggle = screen.getByRole('checkbox', { name: 'Enable Codex' });
     await fireEvent.click(toggle);
     await waitFor(() =>
       expect(mocks.invoke).toHaveBeenCalledWith(
@@ -147,7 +147,7 @@ describe('OpenQuota customization persistence and reorder', () => {
     await fireEvent.click(launchAtLogin);
 
     await waitFor(() => expect(launchAtLogin).not.toBeChecked());
-    expect(screen.getByRole('alert')).toHaveTextContent('Launch at login is unavailable.');
+    expect(screen.getByRole('alert')).toHaveTextContent('Settings could not be saved.');
     expect(mocks.invoke).toHaveBeenCalledWith('get_app_settings');
   });
 

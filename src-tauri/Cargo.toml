@@ -44,12 +44,13 @@ tauri-plugin-single-instance = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 fontdue = { version = "0.9.3", default-features = false, features = ["std"] }
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSArray", "NSLocale", "NSString"] }
 security-framework = "3.7"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 webview2-com = "0.38"
 windows = "0.61"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_Security_Credentials", "Win32_UI_WindowsAndMessaging"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 secret-service = { version = "5.1", default-features = false, features = ["rt-async-io-crypto-rust"] }

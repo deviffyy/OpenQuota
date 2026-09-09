@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n';
   import type { ProviderCatalogIndex } from './metrics';
   import { withProviderName } from './providerNames';
   import type { AppSettings, ProviderLayout } from './types';
@@ -31,14 +32,14 @@
 </script>
 
 <section class="provider-name-section" aria-labelledby={`provider-name-title-${provider.id}`}>
-  <h2 id={`provider-name-title-${provider.id}`}>Name</h2>
+  <h2 id={`provider-name-title-${provider.id}`}>{t('name')}</h2>
   <div class="provider-name-card">
     <input
       type="text"
       maxlength="48"
       bind:value={draft}
       placeholder={defaultName}
-      aria-label={`Name for ${defaultName}`}
+      aria-label={t('nameFor', { provider: defaultName })}
       autocomplete="off"
       onfocus={() => (focused = true)}
       onblur={() => {

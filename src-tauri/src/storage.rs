@@ -531,6 +531,7 @@ mod tests {
                             variants: None,
                         }],
                         source_note: "From your Codex logs (estimated)".into(),
+                        source_kind: Some(crate::models::UsageSourceKind::EstimatedLogs),
                     }),
                     unknown_models: Vec::new(),
                 }),

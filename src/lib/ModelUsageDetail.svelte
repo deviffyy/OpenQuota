@@ -1,16 +1,18 @@
 <script lang="ts">
-  import { formatMetricNumber, formatMetricValue } from './metricFormat';
+  import { formatMetricNumber } from './metricFormat';
+  import { t } from './i18n';
   import type { ModelUsageBreakdown } from './types';
 
   interface Props {
     title: string;
     breakdown: ModelUsageBreakdown;
+    sourceNote: string;
     top: number;
     onEnter: () => void;
     onLeave: () => void;
   }
 
-  let { title, breakdown, top, onEnter, onLeave }: Props = $props();
+  let { title, breakdown, sourceNote, top, onEnter, onLeave }: Props = $props();
 
   const shares = $derived.by(() => {
     const allPriced = breakdown.models.every((model) => model.costUsd !== null);
@@ -45,7 +47,7 @@
   class="model-usage-detail"
   style={`top:${top}px`}
   role="tooltip"
-  aria-label={`${title} model usage`}
+  aria-label={t('modelUsageFor', { label: title })}
   onmouseenter={onEnter}
   onmouseleave={onLeave}
 >
@@ -63,7 +65,9 @@
         </div>
         <div class="model-usage-secondary">
           <span>{percents[index]}%</span><span
-            >{formatMetricValue(model.totalTokens, 'count', 'row', 'tokens')}</span
+            >{t('tokensValue', {
+              count: formatMetricNumber(model.totalTokens, 'count', 'row'),
+            })}</span
           >
         </div>
         <div class="model-usage-meter" aria-hidden="true">
@@ -72,7 +76,7 @@
       </div>
     {/each}
   </div>
-  <p>{breakdown.sourceNote}</p>
+  <p>{sourceNote}</p>
 </div>
 
 <style>

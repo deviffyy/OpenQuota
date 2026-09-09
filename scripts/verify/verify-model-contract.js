@@ -85,4 +85,10 @@ for (const contract of contracts) {
   }
 }
 
+for (const field of ['sourceKey', 'labelKey', 'localUsageSourceKey', 'piUsageSourceKey']) {
+  if (contracts.some((contract) => typeScriptFields(contract).has(field))) {
+    throw new Error(`Translation key field ${field} must not cross the Rust/TypeScript contract.`);
+  }
+}
+
 console.log(`${contracts.length} Rust/TypeScript model field contracts match.`);

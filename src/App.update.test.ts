@@ -256,7 +256,7 @@ describe('OpenQuota update lifecycle', () => {
       'GitHub refused the update download.',
     );
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'Try again or download it from the release page.',
+      'Try again or download the installer from the release page.',
     );
     expect(screen.getByRole('button', { name: 'Try Again' })).toBeInTheDocument();
     await fireEvent.click(screen.getByRole('button', { name: 'View Release' }));

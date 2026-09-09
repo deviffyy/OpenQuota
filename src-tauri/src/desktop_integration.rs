@@ -25,7 +25,15 @@ pub enum LinuxDesktop {
 pub struct DesktopIntegration {
     tray_available: Arc<AtomicBool>,
     floating_window: Arc<AtomicBool>,
-    platform_label: Option<String>,
+    #[cfg(any(target_os = "linux", test))]
+    platform_summary: Option<PlatformSummary>,
+}
+
+#[cfg(any(target_os = "linux", test))]
+#[derive(Debug, Clone, Copy)]
+struct PlatformSummary {
+    desktop: LinuxDesktop,
+    session: LinuxSessionType,
 }
 
 impl DesktopIntegration {
@@ -42,7 +50,8 @@ impl DesktopIntegration {
             Self {
                 tray_available: Arc::new(AtomicBool::new(true)),
                 floating_window: Arc::new(AtomicBool::new(false)),
-                platform_label: None,
+                #[cfg(test)]
+                platform_summary: None,
             }
         }
     }
@@ -75,15 +84,44 @@ impl DesktopIntegration {
         self.floating_window.store(floating, Ordering::SeqCst);
     }
 
-    pub fn platform_summary(&self) -> Option<String> {
-        self.platform_label.as_ref().map(|label| {
-            let mode = if self.tray_available() {
-                "StatusNotifier tray"
-            } else {
-                "standalone window"
+    pub fn platform_summary(&self, language: &str) -> Option<String> {
+        #[cfg(not(any(target_os = "linux", test)))]
+        {
+            let _ = language;
+            None
+        }
+        #[cfg(any(target_os = "linux", test))]
+        {
+            let summary = self.platform_summary?;
+            let locale = crate::native_i18n::Locale::for_preference(language);
+            let desktop = match summary.desktop {
+                LinuxDesktop::Gnome => "GNOME",
+                LinuxDesktop::Kde => "KDE Plasma",
+                LinuxDesktop::Other => match locale {
+                    crate::native_i18n::Locale::En => "Linux desktop",
+                    crate::native_i18n::Locale::ZhCn => "Linux 桌面",
+                    crate::native_i18n::Locale::ZhTw => "Linux 桌面",
+                },
             };
-            format!("{label} · {mode}")
-        })
+            let session = match summary.session {
+                LinuxSessionType::X11 => "X11",
+                LinuxSessionType::Wayland => "Wayland",
+                LinuxSessionType::Unknown => match locale {
+                    crate::native_i18n::Locale::En => "unknown session",
+                    crate::native_i18n::Locale::ZhCn => "未知会话",
+                    crate::native_i18n::Locale::ZhTw => "未知工作階段",
+                },
+            };
+            let mode = match (locale, self.tray_available()) {
+                (crate::native_i18n::Locale::En, true) => "StatusNotifier tray",
+                (crate::native_i18n::Locale::En, false) => "standalone window",
+                (crate::native_i18n::Locale::ZhCn, true) => "StatusNotifier 托盘",
+                (crate::native_i18n::Locale::ZhCn, false) => "独立窗口",
+                (crate::native_i18n::Locale::ZhTw, true) => "StatusNotifier 狀態列",
+                (crate::native_i18n::Locale::ZhTw, false) => "獨立視窗",
+            };
+            Some(format!("{desktop} · {session} · {mode}"))
+        }
     }
 }
 
@@ -93,20 +131,10 @@ fn linux_integration(
     desktop: LinuxDesktop,
     tray_available: bool,
 ) -> DesktopIntegration {
-    let desktop = match desktop {
-        LinuxDesktop::Gnome => "GNOME",
-        LinuxDesktop::Kde => "KDE Plasma",
-        LinuxDesktop::Other => "Linux desktop",
-    };
-    let session = match session {
-        LinuxSessionType::X11 => "X11",
-        LinuxSessionType::Wayland => "Wayland",
-        LinuxSessionType::Unknown => "unknown session",
-    };
     DesktopIntegration {
         tray_available: Arc::new(AtomicBool::new(tray_available)),
         floating_window: Arc::new(AtomicBool::new(!tray_available)),
-        platform_label: Some(format!("{desktop} · {session}")),
+        platform_summary: Some(PlatformSummary { desktop, session }),
     }
 }
 
@@ -228,8 +256,12 @@ mod tests {
         let integration =
             super::linux_integration(LinuxSessionType::Wayland, LinuxDesktop::Gnome, false);
         assert_eq!(
-            integration.platform_summary().as_deref(),
+            integration.platform_summary("en").as_deref(),
             Some("GNOME · Wayland · standalone window")
+        );
+        assert_eq!(
+            integration.platform_summary("zh-CN").as_deref(),
+            Some("GNOME · Wayland · 独立窗口")
         );
     }
 
@@ -259,7 +291,7 @@ mod tests {
         assert!(integration.is_floating());
         assert!(integration.exits_on_close());
         assert_eq!(
-            integration.platform_summary().as_deref(),
+            integration.platform_summary("en").as_deref(),
             Some("KDE Plasma · X11 · standalone window")
         );
         assert!(!integration.disable_tray());

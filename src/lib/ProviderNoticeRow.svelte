@@ -1,5 +1,6 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
+  import { localizedNoticeMessage, localizedNoticeTitle } from './metrics';
   import type { ProviderNotice } from './types';
 
   interface Props {
@@ -15,7 +16,8 @@
 >
   <span class="provider-notice-icon"><Icon name="warning" size={12} strokeWidth={2} /></span>
   <span class="provider-notice-copy"
-    ><strong>{notice.title}</strong><small>{notice.message}</small></span
+    ><strong>{localizedNoticeTitle(notice)}</strong><small>{localizedNoticeMessage(notice)}</small
+    ></span
   >
 </div>
 

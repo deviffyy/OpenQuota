@@ -9,8 +9,8 @@ use reqwest::StatusCode;
 use thiserror::Error;
 
 use crate::models::{
-    ApiKeyStatus, MetricDefinition, MetricSection, ProviderDefinition, ProviderErrorKind,
-    ProviderLink, ProviderSnapshot, UsageHistory,
+    ApiKeyStatus, MetricDefinition, MetricLabelKind, MetricSection, ProviderDefinition,
+    ProviderErrorKind, ProviderLink, ProviderLinkKind, ProviderSnapshot, UsageHistory,
 };
 
 use self::{
@@ -28,9 +28,12 @@ pub(crate) fn definition() -> ProviderDefinition {
         short_name: "K".into(),
         fallback_enabled: false,
         local_usage_source_note: None,
+        local_usage_source_kind: None,
         links: vec![
-            ProviderLink::new("Dashboard", "https://www.kimi.com/code/console"),
-            ProviderLink::new("API Keys", "https://www.kimi.com/code/console"),
+            ProviderLink::new("Dashboard", "https://www.kimi.com/code/console")
+                .with_kind(ProviderLinkKind::Dashboard),
+            ProviderLink::new("API Keys", "https://www.kimi.com/code/console")
+                .with_kind(ProviderLinkKind::ApiKeys),
         ],
         metrics: vec![
             MetricDefinition::quota(
@@ -42,7 +45,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 true,
                 "S",
-            ),
+            )
+            .with_label_kind(MetricLabelKind::Session),
             MetricDefinition::quota(
                 "kimi.weekly",
                 "Weekly",
@@ -52,7 +56,8 @@ pub(crate) fn definition() -> ProviderDefinition {
                 MetricSection::AlwaysVisible,
                 true,
                 "W",
-            ),
+            )
+            .with_label_kind(MetricLabelKind::Weekly),
         ],
     }
 }
