@@ -161,7 +161,12 @@
           aria-pressed={recording}
           aria-describedby="shortcut-recording-help"
           data-tooltip="Open OpenQuota from anywhere"
-          onclick={() => (recording = !recording)}
+          onclick={(e) => {
+            // WKWebView 点击 <button> 不会给它焦点,必须手动 focus,
+            // 否则后续 keydown 到不了按钮,快捷键录不上。
+            recording = !recording;
+            if (recording) e.currentTarget.focus();
+          }}
           onkeydown={record}
           onblur={() => (recording = false)}
           >{recording ? 'Type Shortcut…' : (settings.globalShortcut ?? 'Record Shortcut')}</button

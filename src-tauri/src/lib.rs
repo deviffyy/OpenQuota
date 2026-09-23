@@ -34,7 +34,7 @@ use settings::{CredentialDetectionPlan, SettingsService};
 #[cfg(not(target_os = "linux"))]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
 use tauri::{
-    menu::{Menu, MenuItem, PredefinedMenuItem},
+    menu::{ContextMenu, Menu, MenuEvent, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
     App, AppHandle, Emitter, Manager,
 };
@@ -60,6 +60,26 @@ use crate::{
     },
 };
 
+fn handle_tray_menu_event(app: &AppHandle, event: &MenuEvent) {
+    match event.id.as_ref() {
+        "open" => {
+            app.state::<PopupDismissGuard>().cancel_pending();
+            if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+                show_main_window(&window);
+            }
+        }
+        "customize" => open_screen(app, "customize"),
+        "settings" => open_screen(app, "settings"),
+        "quit" => {
+            if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
+                window::finish_native_panel_resize(&window);
+            }
+            app.exit(0);
+        }
+        _ => {}
+    }
+}
+
 fn install_tray(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "macos")]
     let menu = {
@@ -83,29 +103,42 @@ fn install_tray(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         .default_window_icon()
         .ok_or_else(|| std::io::Error::other("OpenQuota application icon is unavailable"))?
         .clone();
-    let tray = TrayIconBuilder::with_id("openquota-tray")
-        .icon(icon)
-        .menu(&menu);
+    let tray = TrayIconBuilder::with_id("openquota-tray").icon(icon);
+    // macOS 27 上给托盘挂菜单会吞掉全部点击事件、左键直接弹菜单
+    // (tauri-apps/tray-icon#355, tray-icon 0.25 才修但 tauri 仍锁 ^0.24)。
+    // 因此 macOS 不把菜单挂到托盘:右键时手动 popup,菜单事件走 app 级路由。
+    #[cfg(not(target_os = "macos"))]
+    let tray = tray.menu(&menu);
     #[cfg(not(target_os = "linux"))]
     let tray = tray.tooltip("OpenQuota").show_menu_on_left_click(false);
-    let tray = tray.on_menu_event(|app, event| match event.id.as_ref() {
-        "open" => {
-            app.state::<PopupDismissGuard>().cancel_pending();
-            if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
-                show_main_window(&window);
+    #[cfg(not(target_os = "macos"))]
+    let tray = tray.on_menu_event(|app, event| handle_tray_menu_event(app, &event));
+    #[cfg(target_os = "macos")]
+    app.on_menu_event(|app, event| handle_tray_menu_event(app, &event));
+    #[cfg(target_os = "macos")]
+    let tray = tray.on_tray_icon_event(move |tray, event| {
+        tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
+
+        if let TrayIconEvent::Click {
+            button,
+            button_state,
+            ..
+        } = event
+        {
+            match (button, button_state) {
+                (MouseButton::Left, MouseButtonState::Up) => {
+                    toggle_main_window(tray.app_handle());
+                }
+                (MouseButton::Right, MouseButtonState::Up) => {
+                    if let Some(window) = tray.app_handle().get_webview_window(MAIN_WINDOW) {
+                        let _ = menu.popup(window.as_ref().window());
+                    }
+                }
+                _ => {}
             }
         }
-        "customize" => open_screen(app, "customize"),
-        "settings" => open_screen(app, "settings"),
-        "quit" => {
-            if let Some(window) = app.get_webview_window(MAIN_WINDOW) {
-                window::finish_native_panel_resize(&window);
-            }
-            app.exit(0);
-        }
-        _ => {}
     });
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(all(not(target_os = "macos"), not(target_os = "linux")))]
     let tray = tray.on_tray_icon_event(|tray, event| {
         tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
 
