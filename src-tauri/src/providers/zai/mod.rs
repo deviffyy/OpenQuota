@@ -109,14 +109,19 @@ impl From<ZaiError> for ProviderError {
 
 pub struct ZaiProvider {
     auth: ZaiAuthStore,
-    client: Arc<ZaiClient>,
+    clients: Vec<Arc<ZaiClient>>,
 }
 
 impl ZaiProvider {
     pub fn new() -> Result<Self, ProviderError> {
         Ok(Self {
             auth: ZaiAuthStore::new(),
-            client: Arc::new(ZaiClient::new().map_err(ProviderError::from)?),
+            // Keep the existing global service as the primary endpoint. A key rejected by it
+            // is retried against Zhipu's China service, whose keys are a separate namespace.
+            clients: vec![
+                Arc::new(ZaiClient::global().map_err(ProviderError::from)?),
+                Arc::new(ZaiClient::china().map_err(ProviderError::from)?),
+            ],
         })
     }
 
@@ -124,17 +129,35 @@ impl ZaiProvider {
     fn with_dependencies(auth: ZaiAuthStore, client: ZaiClient) -> Self {
         Self {
             auth,
-            client: Arc::new(client),
+            clients: vec![Arc::new(client)],
+        }
+    }
+
+    #[cfg(test)]
+    fn with_clients(auth: ZaiAuthStore, clients: Vec<ZaiClient>) -> Self {
+        Self {
+            auth,
+            clients: clients.into_iter().map(Arc::new).collect(),
         }
     }
 
     fn refresh_snapshot(&self, api_key: &str) -> Result<ProviderSnapshot, ProviderError> {
-        let quota = required_response(self.client.fetch_quota(api_key))?;
+        let mut selected = None;
+        for (index, client) in self.clients.iter().enumerate() {
+            match required_response(client.fetch_quota(api_key)) {
+                Ok(quota) => {
+                    selected = Some((client, quota));
+                    break;
+                }
+                Err(ZaiError::InvalidKey) if index + 1 < self.clients.len() => continue,
+                Err(error) => return Err(error.into()),
+            }
+        }
+        let (client, quota) = selected.ok_or_else(|| ProviderError::from(ZaiError::InvalidKey))?;
         if is_no_coding_plan(&quota.body) {
             return Err(ZaiError::NoCodingPlan.into());
         }
-        let subscription = self
-            .client
+        let subscription = client
             .fetch_subscription(api_key)
             .ok()
             .filter(|response| response.status.is_success());
@@ -326,6 +349,34 @@ mod tests {
         .unwrap();
 
         assert_eq!(snapshot.plan, None);
+        assert_eq!(snapshot.quotas.len(), 3);
+    }
+
+    #[test]
+    fn rejected_global_key_falls_back_to_china_and_keeps_endpoints_together() {
+        let global_quota = test_http::serve_once(401, &[], "{}");
+        let unused_global_subscription = test_http::serve_once(500, &[], "{}");
+        let china_quota = test_http::serve_once(200, &[], include_str!("fixtures/quota.json"));
+        let china_subscription =
+            test_http::serve_once(200, &[], include_str!("fixtures/subscription.json"));
+        let provider = ZaiProvider::with_clients(
+            auth(Some("china-key")),
+            vec![
+                ZaiClient::for_test(
+                    &unused_global_subscription,
+                    &global_quota,
+                    Duration::from_secs(1),
+                ),
+                ZaiClient::china_for_test(
+                    &china_subscription,
+                    &china_quota,
+                    Duration::from_secs(1),
+                ),
+            ],
+        );
+
+        let snapshot = provider.refresh().unwrap();
+        assert_eq!(snapshot.plan.as_deref(), Some("GLM Coding Pro"));
         assert_eq!(snapshot.quotas.len(), 3);
     }
 

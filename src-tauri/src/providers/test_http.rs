@@ -1,6 +1,7 @@
 use std::{
     io::{Read, Write},
     net::TcpListener,
+    sync::mpsc::{self, Receiver},
     thread,
     time::Duration,
 };
@@ -10,6 +11,31 @@ pub const TIMEOUT_TEST_RESPONSE_DELAY: Duration = Duration::from_secs(1);
 
 pub fn serve_once(status: u16, headers: &[(&str, &str)], body: &str) -> String {
     serve_once_after(Duration::ZERO, status, headers, body)
+}
+
+pub fn serve_once_recording(status: u16, body: &str) -> (String, Receiver<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("mock HTTP listener should bind");
+    let address = listener
+        .local_addr()
+        .expect("mock listener should have an address");
+    let body = body.to_owned();
+    let (sender, receiver) = mpsc::channel();
+
+    thread::spawn(move || {
+        let Ok((mut stream, _)) = listener.accept() else {
+            return;
+        };
+        let mut request = [0_u8; 4096];
+        let count = stream.read(&mut request).unwrap_or_default();
+        let _ = sender.send(String::from_utf8_lossy(&request[..count]).into_owned());
+        let response = format!(
+            "HTTP/1.1 {status} Test Response\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let _ = stream.write_all(response.as_bytes());
+    });
+
+    (format!("http://{address}"), receiver)
 }
 
 pub fn serve_once_after(

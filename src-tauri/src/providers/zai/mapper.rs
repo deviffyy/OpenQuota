@@ -62,11 +62,9 @@ pub fn map_quota(body: &Value) -> Result<Vec<QuotaWindow>, ZaiError> {
 
     let mut session = None;
     let mut weekly = None;
-    for entry in limits
-        .iter()
-        .copied()
-        .filter(|entry| matches_limit(entry, "TOKENS_LIMIT"))
-    {
+    for entry in limits.iter().copied().filter(|entry| {
+        matches_limit(entry, "TOKENS_LIMIT") || matches_limit(entry, "CREDIT_LIMIT")
+    }) {
         let Some(window) = classify_token_window(entry)? else {
             continue;
         };
@@ -273,6 +271,21 @@ mod tests {
         assert_eq!(mapped[1].id, "weekly");
         assert_eq!(mapped[1].period_seconds, 3 * 24 * 60 * 60);
         assert_eq!(mapped[1].used_percent, 100.0);
+    }
+
+    #[test]
+    fn credit_limits_used_by_china_plans_map_to_session_and_weekly_windows() {
+        let mapped = map_quota(&json!({"data":{"limits":[
+            {"type":"CREDIT_LIMIT","unit":3,"number":5,"percentage":12},
+            {"name":"CREDIT_LIMIT","unit":6,"number":1,"percentage":34}
+        ]}}))
+        .unwrap();
+
+        assert_eq!(mapped.len(), 2);
+        assert_eq!(mapped[0].id, "session");
+        assert_eq!(mapped[0].period_seconds, 5 * 60 * 60);
+        assert_eq!(mapped[1].id, "weekly");
+        assert_eq!(mapped[1].period_seconds, 7 * 24 * 60 * 60);
     }
 
     #[test]
