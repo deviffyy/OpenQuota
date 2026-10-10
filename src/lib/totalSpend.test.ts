@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { projectSpend } from './totalSpend';
+import { projectSpend, projectSpendPeriods } from './totalSpend';
 import type { UsageHistory } from './types';
 
 const empty: UsageHistory = {
@@ -109,6 +109,40 @@ describe('Total Spend projection', () => {
     expect(projectSpend(providers, 'today', 'tokens')).toMatchObject({
       costEstimated: false,
       estimateComplete: false,
+    });
+  });
+
+  it('projects a custom range with the same provider graph semantics', () => {
+    expect(
+      projectSpendPeriods(
+        [
+          {
+            id: 'claude',
+            period: {
+              tokens: 500,
+              estimatedCostUsd: 5,
+              costEstimated: true,
+              estimateComplete: true,
+            },
+          },
+          {
+            id: 'codex',
+            period: {
+              tokens: 700,
+              estimatedCostUsd: 7,
+              costEstimated: true,
+              estimateComplete: true,
+            },
+          },
+        ],
+        'cost',
+      ),
+    ).toMatchObject({
+      centerValue: 12,
+      slices: [
+        { id: 'codex', value: 7 },
+        { id: 'claude', value: 5 },
+      ],
     });
   });
 });

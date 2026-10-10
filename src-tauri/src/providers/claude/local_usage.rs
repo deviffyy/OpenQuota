@@ -112,7 +112,10 @@ pub fn scan_local_usage(
     Ok(accumulator.build(now, source_note))
 }
 
-fn discover_files(configured_roots: &[PathBuf], include_standard_roots: bool) -> Vec<PathBuf> {
+pub(crate) fn discover_files(
+    configured_roots: &[PathBuf],
+    include_standard_roots: bool,
+) -> Vec<PathBuf> {
     let home = home_directory();
     let mut roots = if include_standard_roots {
         let config = env_text("CLAUDE_CONFIG_DIR");
@@ -385,7 +388,7 @@ fn usage_event(
     })
 }
 
-fn deduplicate(events: Vec<ClaudeTokenEvent>) -> Vec<ClaudeTokenEvent> {
+pub(crate) fn deduplicate(events: Vec<ClaudeTokenEvent>) -> Vec<ClaudeTokenEvent> {
     let mut output = Vec::new();
     let mut exact = HashMap::<(String, Option<String>), usize>::new();
     let mut by_message = HashMap::<String, Vec<usize>>::new();

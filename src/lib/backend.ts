@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import type { AnalyticsReport } from './analytics';
 import type {
   ApiKeyMutationOutcome,
   AppSettings,
@@ -27,6 +28,18 @@ export function getBootstrapState() {
 
 export function refreshUsage() {
   return invoke<UsageViewState>('refresh_usage');
+}
+
+export function getRangeAnalytics(start: string, end: string, provider: string) {
+  return invoke<AnalyticsReport>('get_range_analytics', { start, end, provider });
+}
+
+export function getBankedResetMarker(provider: string) {
+  return invoke<string | null>('get_banked_reset_marker', { provider });
+}
+
+export function onAnalyticsResetWarning(handler: PayloadHandler<string>) {
+  return onEvent('analytics-reset-warning', handler);
 }
 
 export function refreshProviderUsage(providerId: string) {

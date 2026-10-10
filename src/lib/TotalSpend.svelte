@@ -6,7 +6,13 @@
   import type { ProviderCatalogIndex } from './metrics';
   import { TOTAL_SPEND_GEOMETRY } from './shareCard';
   import { ringSectorPath, spendRingArcs } from './spendRing';
-  import { emptySpendMessage, projectSpend, type SpendProjection } from './totalSpend';
+  import {
+    emptySpendMessage,
+    projectSpend,
+    projectSpendPeriods,
+    type CustomSpendSelection,
+    type SpendProjection,
+  } from './totalSpend';
   import { providerFamily } from './providerIconPaths';
   import type { AppSettings, UsageHistory } from './types';
 
@@ -16,16 +22,38 @@
     catalog: ProviderCatalogIndex;
     onChange: (settings: AppSettings) => void;
     onShare: (projection: SpendProjection) => boolean | Promise<boolean>;
+    customActive: boolean;
+    customSelection: CustomSpendSelection | null;
+    onPreset: () => void;
+    onCustom: () => void;
   }
-  let { providers, settings, catalog, onChange, onShare }: Props = $props();
+  let {
+    providers,
+    settings,
+    catalog,
+    onChange,
+    onShare,
+    customActive,
+    customSelection,
+    onPreset,
+    onCustom,
+  }: Props = $props();
   const providerDisplayName = (id: string) => catalog.displayName(id, settings.providerNames);
   const projection = $derived(
-    projectSpend(providers, settings.totalSpendPeriod, settings.totalSpendMetric),
+    customActive && customSelection
+      ? projectSpendPeriods(customSelection.providers, settings.totalSpendMetric)
+      : projectSpend(providers, settings.totalSpendPeriod, settings.totalSpendMetric),
   );
   const providerNames = $derived(providers.map((provider) => providerDisplayName(provider.id)));
   const ringSegments = $derived(spendRingArcs(projection.slices));
   const periodIndex = $derived(
-    settings.totalSpendPeriod === 'today' ? 0 : settings.totalSpendPeriod === 'yesterday' ? 1 : 2,
+    customActive
+      ? 3
+      : settings.totalSpendPeriod === 'today'
+        ? 0
+        : settings.totalSpendPeriod === 'yesterday'
+          ? 1
+          : 2,
   );
   let shareCopied = $state(false);
   let shareTimer: ReturnType<typeof setTimeout> | undefined;
@@ -110,13 +138,19 @@
       ></span>
       {#each [['today', 'Today'], ['yesterday', 'Yesterday'], ['last30Days', '30 Days']] as option (option[0])}
         <button
-          class:active={settings.totalSpendPeriod === option[0]}
+          class:active={!customActive && settings.totalSpendPeriod === option[0]}
           type="button"
-          onclick={() => patch({ totalSpendPeriod: option[0] as AppSettings['totalSpendPeriod'] })}
-          >{option[1]}</button
+          onclick={() => {
+            onPreset();
+            patch({ totalSpendPeriod: option[0] as AppSettings['totalSpendPeriod'] });
+          }}>{option[1]}</button
         >
       {/each}
+      <button class:active={customActive} type="button" onclick={onCustom}>Custom</button>
     </div>
+    {#if customActive && customSelection}
+      <small class="custom-period">{customSelection.label}</small>
+    {/if}
     {#if projection.centerValue === null}
       <div class="total-card__empty">
         <span>{emptySpendMessage(settings.totalSpendMetric)}</span>
@@ -206,11 +240,21 @@
       top: 3px;
       bottom: 3px;
       left: 3px;
-      width: calc((100% - 6px) / 3);
+      width: calc((100% - 6px) / 4);
       border-radius: 999px;
       background: var(--tray);
       box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
       transition: transform var(--motion-spring);
+    }
+
+    .custom-period {
+      display: block;
+      margin: 6px 4px 0;
+      overflow: hidden;
+      color: var(--secondary);
+      font-size: 8px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .total-card__body {
@@ -383,6 +427,7 @@
     }
 
     .period-switcher {
+      box-sizing: border-box;
       width: 100%;
       height: var(--total-switcher-height);
       padding: 3px;
@@ -390,11 +435,15 @@
     }
 
     .period-switcher button {
+      min-width: 0;
       min-height: 0;
       flex: 1;
-      padding: 0 12px;
+      padding: 0 6px;
+      overflow: hidden;
       font-size: var(--total-period-size);
       font-weight: 500;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
 
     .period-switcher button.active {
@@ -458,7 +507,7 @@
 
     :root[data-density='compact'] .period-switcher button {
       min-height: 21px;
-      padding: 3px 10px;
+      padding: 3px 6px;
     }
 
     :root[data-density='compact'] .total-card__body {

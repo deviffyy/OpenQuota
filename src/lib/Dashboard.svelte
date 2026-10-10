@@ -10,9 +10,19 @@
   import Icon from './Icon.svelte';
   import MetricRenderer from './MetricRenderer.svelte';
   import TotalSpend from './TotalSpend.svelte';
-  import type { SpendProjection } from './totalSpend';
+  import UsageAnalytics from './UsageAnalytics.svelte';
+  import UsageMetric from './UsageMetric.svelte';
+  import { getBankedResetMarker, getRangeAnalytics } from './backend';
+  import {
+    analyticsFromDailyHistory,
+    analyticsReportToUsagePeriod,
+    mergeAnalyticsReports,
+    weeklyStart,
+  } from './analytics';
+  import type { CustomSpendSelection, SpendProjection } from './totalSpend';
   import type { ProviderCatalogIndex } from './metrics';
   import { canRenameProvider } from './providerNames';
+  import { providerFamily } from './providerIconPaths';
   import type {
     AppSettings,
     MetricLayout,
@@ -21,6 +31,7 @@
     UpdateProgress,
     UpdateFailure,
     UsageHistory,
+    UsagePeriod,
     UsageViewState,
     UpdateStatus,
   } from './types';
@@ -142,6 +153,75 @@
         usage: viewState.providers[provider.id]?.snapshot?.usage ?? emptyUsage,
       })),
   );
+  let analyticsOpen = $state(false);
+  let customSpendActive = $state(false);
+  let customSpendSelection = $state<CustomSpendSelection | null>(null);
+  let resetUsage = $state<Record<string, { from: string; period: UsagePeriod | null }>>({});
+  let resetUsageRequest = 0;
+  const analyticsProviders = $derived.by(() => {
+    const seen: string[] = [];
+    return enabledProviders.flatMap((provider) => {
+      const id = providerFamily(provider.id);
+      if (seen.includes(id)) return [];
+      seen.push(id);
+      return [{ id, name: providerDisplayName(id) }];
+    });
+  });
+
+  $effect(() => {
+    const state = viewState;
+    const options = analyticsProviders;
+    const to = new Date().toISOString();
+    const request = ++resetUsageRequest;
+    const targets = options.flatMap((option) => {
+      const from = weeklyStart(state, Date.parse(to), option.id);
+      return from ? [{ ...option, from }] : [];
+    });
+    resetUsage = Object.fromEntries(
+      targets.map((target) => [target.id, { from: target.from, period: null }]),
+    );
+    void Promise.all(
+      targets.map(async (target) => {
+        let from = target.from;
+        const banked = await getBankedResetMarker(target.id).catch(() => null);
+        if (
+          banked &&
+          Date.parse(banked) > Date.parse(from) &&
+          Date.parse(banked) <= Date.parse(to)
+        ) {
+          from = banked;
+        }
+        try {
+          return {
+            id: target.id,
+            from,
+            period: analyticsReportToUsagePeriod(await getRangeAnalytics(from, to, target.id)),
+          };
+        } catch {
+          const reports = Object.entries(state.providers).flatMap(([id, provider]) => {
+            if (providerFamily(id) !== target.id || !provider.snapshot) return [];
+            const report = analyticsFromDailyHistory(provider.snapshot.usage, from, to);
+            return report ? [report] : [];
+          });
+          return {
+            id: target.id,
+            from,
+            period: reports.length
+              ? analyticsReportToUsagePeriod(mergeAnalyticsReports(reports))
+              : null,
+          };
+        }
+      }),
+    ).then((loaded) => {
+      if (request !== resetUsageRequest) return;
+      resetUsage = Object.fromEntries(
+        loaded.map((result) => [result.id, { from: result.from, period: result.period }]),
+      );
+    });
+    return () => {
+      if (request === resetUsageRequest) resetUsageRequest += 1;
+    };
+  });
 
   function updateProvider(next: ProviderLayout, customization = true) {
     const changed = {
@@ -414,10 +494,32 @@
     {catalog}
     onChange={onSettingsChange}
     onShare={onShareTotal}
+    customActive={customSpendActive}
+    customSelection={customSpendSelection}
+    onPreset={() => {
+      customSpendActive = false;
+      analyticsOpen = false;
+    }}
+    onCustom={() => (analyticsOpen = true)}
   />
 {/if}
 
+<UsageAnalytics
+  {viewState}
+  providers={analyticsProviders}
+  bind:open={analyticsOpen}
+  onApply={(selection) => {
+    customSpendSelection = selection;
+    customSpendActive = true;
+    analyticsOpen = false;
+  }}
+/>
+
 {#each dashboardProviders as { provider, state, snapshot, alwaysMetrics, demandMetrics, links } (provider.id)}
+  {@const rangeProviderId = providerFamily(provider.id)}
+  {@const providerResetUsage = resetUsage[rangeProviderId]}
+  {@const providerCustomPeriod =
+    customSpendSelection?.providers.find((item) => item.id === rangeProviderId)?.period ?? null}
   <div
     class="provider-reorder-shell"
     class:provider-reorder-shell--content-morph={demandMorphing}
@@ -564,7 +666,7 @@
             />
           </div>
         {/each}
-        {#if demandMetrics.length > 0 || links.length > 0}
+        {#if demandMetrics.length > 0 || links.length > 0 || providerResetUsage || providerCustomPeriod}
           <button
             class="demand-divider"
             data-reorder-group={`dashboard-metrics:${provider.id}`}
@@ -623,6 +725,19 @@
                   />
                 </div>
               {/each}
+              {#if providerResetUsage}
+                <div
+                  class="extended-usage-row"
+                  data-tooltip={`Since ${new Date(providerResetUsage.from).toLocaleString()}`}
+                >
+                  <UsageMetric label="Since last reset" period={providerResetUsage.period} />
+                </div>
+              {/if}
+              {#if providerCustomPeriod && customSpendSelection}
+                <div class="extended-usage-row" data-tooltip={customSpendSelection.label}>
+                  <UsageMetric label="Custom" period={providerCustomPeriod} />
+                </div>
+              {/if}
               {#if links.length > 0}
                 <ProviderLinks
                   {links}

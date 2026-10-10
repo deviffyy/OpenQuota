@@ -40,6 +40,9 @@ vi.mock('@tauri-apps/api/window', () => ({
 type InvokeArgs = {
   settings?: SettingsViewState['settings'];
   providerId?: string;
+  provider?: string;
+  start?: string;
+  end?: string;
   linkIndex?: number;
   height?: number;
 };
@@ -100,6 +103,22 @@ describe('OpenQuota dashboard', () => {
       if (command === 'lock_panel_resize_axis') return Promise.resolve();
       if (command === 'get_log_path') return Promise.resolve('C:\\OpenQuota\\logs\\OpenQuota.log');
       if (command === 'open_log_folder') return Promise.resolve();
+      if (command === 'get_banked_reset_marker') return Promise.resolve(null);
+      if (command === 'get_range_analytics')
+        return Promise.resolve({
+          tokens: args?.provider === 'claude' ? 500 : 700,
+          estimatedCostUsd: args?.provider === 'claude' ? 5 : 7,
+          unpricedEvents: 0,
+          completedTasks: 1,
+          pricedTasks: 1,
+          averageCostUsd: args?.provider === 'claude' ? 5 : 7,
+          timedTasks: 1,
+          averageSeconds: 60,
+          filesRead: 1,
+          unreadableFiles: 0,
+          malformedLines: 0,
+          earliestEvent: args?.start ?? null,
+        });
       if (command === 'dismiss_main_window') return Promise.resolve();
       if (command === 'check_for_updates')
         return Promise.resolve({
@@ -503,6 +522,26 @@ describe('OpenQuota dashboard', () => {
         }),
       ),
     );
+  });
+
+  it('opens the custom range from the top period switcher with all providers selected', async () => {
+    render(App);
+    await screen.findByText('Plus');
+    await fireEvent.click(screen.getByRole('button', { name: 'Custom' }));
+    const dialog = screen.getByRole('dialog', { name: 'Custom range' });
+    expect(within(dialog).getByLabelText('Provider')).toHaveValue('all');
+    expect(within(dialog).getByText('All providers are selected by default.')).toBeVisible();
+    expect(within(dialog).getByText('Local times')).toBeVisible();
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Calculate' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Custom' })).toHaveClass('active');
+    expect(screen.getByRole('button', { name: 'Today' })).not.toHaveClass('active');
+    const spend = screen.getByRole('region', { name: 'Total Spend' });
+    expect(spend.querySelector('.spend-legend')).toHaveTextContent('Codex');
+
+    const codex = screen.getByRole('group', { name: 'Codex provider' });
+    await fireEvent.click(within(codex).getByRole('button', { name: 'Show more' }));
+    expect(within(codex).getByText('Custom')).toBeVisible();
   });
 
   it('explains unavailable cost and reveals measured tokens for the same period', async () => {

@@ -10,7 +10,7 @@ mod detection;
 pub mod devin;
 pub mod grok;
 pub mod kimi;
-mod log_usage;
+pub(crate) mod log_usage;
 pub mod minimax;
 pub mod opencode;
 pub mod openrouter;

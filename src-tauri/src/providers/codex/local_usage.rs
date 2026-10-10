@@ -107,7 +107,7 @@ fn scan_codex_events(
     Ok(events)
 }
 
-fn codex_homes(configured_home: Option<&OsStr>, home: &Path) -> Vec<PathBuf> {
+pub(crate) fn codex_homes(configured_home: Option<&OsStr>, home: &Path) -> Vec<PathBuf> {
     if let Some(configured_home) = configured_home.filter(|value| !value.is_empty()) {
         let configured_home = configured_home.to_string_lossy();
         if !configured_home.trim().is_empty() {
@@ -135,14 +135,14 @@ fn expand_home(value: &str, home: &Path) -> PathBuf {
     PathBuf::from(value)
 }
 
-fn home_directory() -> PathBuf {
+pub(crate) fn home_directory() -> PathBuf {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
         .unwrap_or_default()
 }
 
-fn discover_session_files(homes: &[PathBuf]) -> Vec<PathBuf> {
+pub(crate) fn discover_session_files(homes: &[PathBuf]) -> Vec<PathBuf> {
     let mut output = Vec::new();
     let mut seen_directories = HashSet::new();
     for home in homes {
@@ -350,7 +350,7 @@ impl ChildReplayGate {
     }
 }
 
-fn is_child_session_meta(payload: &Value) -> bool {
+pub(crate) fn is_child_session_meta(payload: &Value) -> bool {
     has_non_null_value(payload.get("forked_from_id"))
         || has_non_null_value(payload.get("parent_thread_id"))
         || payload.get("thread_source").and_then(Value::as_str) == Some("subagent")
@@ -520,7 +520,7 @@ fn aggregate_into(
     }
 }
 
-fn estimate_cost(event: &TokenEvent, pricing: &ModelPricing) -> Option<f64> {
+pub(crate) fn estimate_cost(event: &TokenEvent, pricing: &ModelPricing) -> Option<f64> {
     let display_model = event.model.trim();
     let model = if display_model == "codex-auto-review" {
         auto_review_fallback(&event.timestamp)
