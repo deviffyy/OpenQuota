@@ -544,6 +544,93 @@ describe('OpenQuota dashboard', () => {
     expect(within(codex).getByText('Custom')).toBeVisible();
   });
 
+  it('loads since-last-reset usage from the live provider boundary before reporting data', async () => {
+    const now = Date.now();
+    const nextReset = new Date(now + 4 * 24 * 60 * 60 * 1000).toISOString();
+    const rangeState: UsageViewState = {
+      providers: {
+        codex: {
+          ...codexState,
+          snapshot: {
+            ...codexState.snapshot!,
+            quotas: codexState.snapshot!.quotas.map((quota) =>
+              quota.id === 'weekly' ? { ...quota, resetsAt: nextReset } : quota,
+            ),
+          },
+        },
+      },
+    };
+    const rangeSettings: SettingsViewState = {
+      ...settingsState,
+      settings: {
+        ...settingsState.settings,
+        providers: settingsState.settings.providers.map((provider) => ({
+          ...provider,
+          expanded: true,
+        })),
+      },
+    };
+    let resolveRange!: (value: {
+      tokens: number;
+      estimatedCostUsd: number;
+      unpricedEvents: number;
+      completedTasks: number;
+      pricedTasks: number;
+      averageCostUsd: number;
+      timedTasks: number;
+      averageSeconds: number;
+      filesRead: number;
+      unreadableFiles: number;
+      malformedLines: number;
+      earliestEvent: string;
+    }) => void;
+    const pendingRange = new Promise<Parameters<typeof resolveRange>[0]>((resolve) => {
+      resolveRange = resolve;
+    });
+    const defaultInvoke = mocks.invoke.getMockImplementation()!;
+    mockInvoke((command: string, args?: InvokeArgs) => {
+      if (command === 'get_usage_state') return Promise.resolve(rangeState);
+      if (command === 'get_app_settings') return Promise.resolve(rangeSettings);
+      if (command === 'get_range_analytics') return pendingRange;
+      return defaultInvoke(command, args);
+    });
+
+    render(App);
+    const codex = await screen.findByRole('group', { name: 'Codex provider' });
+    expect(within(codex).getByText('Since last reset')).toBeVisible();
+    expect(within(codex).getByRole('button', { name: 'Loading…' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    expect(within(codex).queryByRole('button', { name: 'No data' })).not.toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith('get_range_analytics', {
+        start: new Date(Date.parse(nextReset) - 604_800_000).toISOString(),
+        end: expect.any(String),
+        provider: 'codex',
+      }),
+    );
+    resolveRange({
+      tokens: 4_200_000,
+      estimatedCostUsd: 12.5,
+      unpricedEvents: 0,
+      completedTasks: 2,
+      pricedTasks: 2,
+      averageCostUsd: 6.25,
+      timedTasks: 2,
+      averageSeconds: 90,
+      filesRead: 3,
+      unreadableFiles: 0,
+      malformedLines: 0,
+      earliestEvent: new Date(Date.parse(nextReset) - 604_800_000).toISOString(),
+    });
+
+    expect(
+      await within(codex).findByRole('button', { name: '$12.50 · 4.2M tokens' }),
+    ).toHaveAttribute('aria-busy', 'false');
+  });
+
   it('explains unavailable cost and reveals measured tokens for the same period', async () => {
     mockInvoke((command: string, args?: { settings?: SettingsViewState['settings'] }) => {
       if (command === 'get_usage_state')

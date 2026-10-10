@@ -8,14 +8,16 @@
   interface Props {
     label: string;
     period: UsagePeriod | null;
+    loading?: boolean;
   }
-  let { label, period }: Props = $props();
+  let { label, period, loading = false }: Props = $props();
   let open = $state(false);
   let detailTop = $state(8);
   let showTimer: ReturnType<typeof setTimeout> | undefined;
   let hideTimer: ReturnType<typeof setTimeout> | undefined;
 
   function reading(value: UsagePeriod | null) {
+    if (loading) return 'Loading…';
     if (!value) return 'No data';
     const tokens = formatMetricValue(value.tokens, 'count', 'row', 'tokens');
     if (value.estimatedCostUsd === null) return tokens;
@@ -87,7 +89,8 @@
     type="button"
     class:usage-reading-interactive={period?.modelBreakdown?.models.length}
     data-tooltip={valueTooltip(period)}
-    disabled={!period?.modelBreakdown?.models.length}
+    disabled={loading || !period?.modelBreakdown?.models.length}
+    aria-busy={loading}
     onmouseenter={scheduleShow}
     onmouseleave={scheduleHide}
     onfocus={scheduleShow}

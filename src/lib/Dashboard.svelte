@@ -156,7 +156,9 @@
   let analyticsOpen = $state(false);
   let customSpendActive = $state(false);
   let customSpendSelection = $state<CustomSpendSelection | null>(null);
-  let resetUsage = $state<Record<string, { from: string; period: UsagePeriod | null }>>({});
+  let resetUsage = $state<
+    Record<string, { from: string; period: UsagePeriod | null; loading: boolean }>
+  >({});
   let resetUsageRequest = 0;
   const analyticsProviders = $derived.by(() => {
     const seen: string[] = [];
@@ -178,7 +180,7 @@
       return from ? [{ ...option, from }] : [];
     });
     resetUsage = Object.fromEntries(
-      targets.map((target) => [target.id, { from: target.from, period: null }]),
+      targets.map((target) => [target.id, { from: target.from, period: null, loading: true }]),
     );
     void Promise.all(
       targets.map(async (target) => {
@@ -215,7 +217,10 @@
     ).then((loaded) => {
       if (request !== resetUsageRequest) return;
       resetUsage = Object.fromEntries(
-        loaded.map((result) => [result.id, { from: result.from, period: result.period }]),
+        loaded.map((result) => [
+          result.id,
+          { from: result.from, period: result.period, loading: false },
+        ]),
       );
     });
     return () => {
@@ -730,7 +735,11 @@
                   class="extended-usage-row"
                   data-tooltip={`Since ${new Date(providerResetUsage.from).toLocaleString()}`}
                 >
-                  <UsageMetric label="Since last reset" period={providerResetUsage.period} />
+                  <UsageMetric
+                    label="Since last reset"
+                    period={providerResetUsage.period}
+                    loading={providerResetUsage.loading}
+                  />
                 </div>
               {/if}
               {#if providerCustomPeriod && customSpendSelection}
