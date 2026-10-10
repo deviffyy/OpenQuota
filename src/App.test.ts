@@ -118,6 +118,17 @@ describe('OpenQuota dashboard', () => {
           unreadableFiles: 0,
           malformedLines: 0,
           earliestEvent: args?.start ?? null,
+          modelBreakdown: {
+            sourceNote: 'From local logs',
+            models: [
+              {
+                model: args?.provider === 'claude' ? 'claude-opus' : 'gpt-5',
+                totalTokens: args?.provider === 'claude' ? 500 : 700,
+                costUsd: args?.provider === 'claude' ? 5 : 7,
+              },
+            ],
+          },
+          unknownModels: [],
         });
       if (command === 'dismiss_main_window') return Promise.resolve();
       if (command === 'check_for_updates')
@@ -583,6 +594,11 @@ describe('OpenQuota dashboard', () => {
       unreadableFiles: number;
       malformedLines: number;
       earliestEvent: string;
+      modelBreakdown: {
+        sourceNote: string;
+        models: Array<{ model: string; totalTokens: number; costUsd: number }>;
+      };
+      unknownModels: string[];
     }) => void;
     const pendingRange = new Promise<Parameters<typeof resolveRange>[0]>((resolve) => {
       resolveRange = resolve;
@@ -624,11 +640,18 @@ describe('OpenQuota dashboard', () => {
       unreadableFiles: 0,
       malformedLines: 0,
       earliestEvent: new Date(Date.parse(nextReset) - 604_800_000).toISOString(),
+      modelBreakdown: {
+        sourceNote: 'From your Codex logs (estimated)',
+        models: [{ model: 'gpt-5', totalTokens: 4_200_000, costUsd: 12.5 }],
+      },
+      unknownModels: [],
     });
 
-    expect(
-      await within(codex).findByRole('button', { name: '$12.50 · 4.2M tokens' }),
-    ).toHaveAttribute('aria-busy', 'false');
+    const resetUsage = await within(codex).findByRole('button', {
+      name: '$12.50 · 4.2M tokens',
+    });
+    expect(resetUsage).toHaveAttribute('aria-busy', 'false');
+    expect(resetUsage).toHaveClass('usage-reading-interactive');
   });
 
   it('explains unavailable cost and reveals measured tokens for the same period', async () => {

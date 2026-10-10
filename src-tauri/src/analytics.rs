@@ -1,8 +1,10 @@
 //! Read-only local log analytics. Never reads auth files or exports message content.
 use crate::{
+    models::ModelUsageBreakdown,
     pricing::{ModelPricing, PricingStore, TokenBreakdown},
     providers::{
         claude::local_usage as claude, codex::local_usage as codex, log_usage::load_or_parse_log,
+        DailyUsageAccumulator,
     },
     storage::Storage,
 };
@@ -31,6 +33,8 @@ pub struct AnalyticsReport {
     pub unreadable_files: usize,
     pub malformed_lines: usize,
     pub earliest_event: Option<DateTime<Utc>>,
+    pub model_breakdown: Option<ModelUsageBreakdown>,
+    pub unknown_models: Vec<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -176,11 +180,15 @@ fn aggregate(
     let mut task_cost = 0.0;
     let mut seconds = 0.0;
     let mut all_claude_events = Vec::new();
+    let mut usage = DailyUsageAccumulator::default();
+    let mut saw_codex = false;
+    let mut saw_claude = false;
     for log in logs {
         report.files_read += 1;
         report.malformed_lines += log.malformed;
         let events = log.events;
         if !log.claude_events.is_empty() {
+            saw_claude = true;
             let local_events = claude::deduplicate(log.claude_events.clone());
             for task in log.tasks {
                 if task.start < start || task.end >= end || !seen_tasks.insert(task.id.clone()) {
@@ -208,6 +216,7 @@ fn aggregate(
             all_claude_events.extend(log.claude_events);
             continue;
         }
+        saw_codex = true;
         for event in &events {
             report.earliest_event = Some(
                 report
@@ -231,9 +240,18 @@ fn aggregate(
                 continue;
             }
             report.tokens += event.total;
+            let date = event.timestamp.with_timezone(&chrono::Local).date_naive();
             match codex::estimate_cost(event, pricing) {
-                Some(cost) => report.estimated_cost_usd += cost,
-                None => report.unpriced_events += 1,
+                Some(cost) => {
+                    report.estimated_cost_usd += cost;
+                    usage.add(date, event.total, cost, event.model.trim());
+                }
+                None => {
+                    report.unpriced_events += 1;
+                    if event.total > 0 {
+                        usage.add_unknown_model(date, &event.model);
+                    }
+                }
             }
         }
         for task in log.tasks {
@@ -272,14 +290,41 @@ fn aggregate(
             continue;
         }
         report.tokens += claude_tokens(event).total_tokens();
+        let date = event.timestamp.with_timezone(&chrono::Local).date_naive();
+        let model = event
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty());
         match claude_cost(event, pricing) {
-            Some(cost) => report.estimated_cost_usd += cost,
-            None => report.unpriced_events += 1,
+            Some(cost) => {
+                report.estimated_cost_usd += cost;
+                usage.add(
+                    date,
+                    claude_tokens(event).total_tokens(),
+                    cost,
+                    model.unwrap_or("Unattributed"),
+                );
+            }
+            None => {
+                report.unpriced_events += 1;
+                if let Some(model) = model {
+                    usage.add_unknown_model(date, model);
+                }
+            }
         }
     }
     report.average_cost_usd =
         (report.priced_tasks > 0).then(|| task_cost / report.priced_tasks as f64);
     report.average_seconds = (report.timed_tasks > 0).then(|| seconds / report.timed_tasks as f64);
+    let source_note = if saw_claude && !saw_codex {
+        "From your Claude usage history (estimated)"
+    } else if saw_codex && !saw_claude {
+        "From your Codex logs (estimated)"
+    } else {
+        "From your local provider usage histories (estimated)"
+    };
+    (report.model_breakdown, report.unknown_models) = usage.build_range_details(source_note);
     report
 }
 
@@ -456,6 +501,10 @@ mod tests {
         assert_eq!(result.completed_tasks, 2);
         assert_eq!(result.average_cost_usd, Some(2.0));
         assert_eq!(result.average_seconds, Some(60.0));
+        assert_eq!(
+            result.model_breakdown.as_ref().unwrap().models[0].model,
+            "claude-opus-4-6"
+        );
     }
     #[test]
     fn claude_requires_explicit_completion_and_cache_contains_no_prompt() {
@@ -479,6 +528,7 @@ mod tests {
         assert_eq!(result.completed_tasks, 1);
         assert_eq!(result.unpriced_events, 1);
         assert_eq!(result.average_cost_usd, None);
+        assert_eq!(result.unknown_models, vec!["unknown-future-model"]);
     }
     fn fixture() -> String {
         [
@@ -501,6 +551,9 @@ mod tests {
         assert_eq!(result.priced_tasks, 1);
         assert_eq!(result.average_seconds, Some(60.0));
         assert_eq!(result.average_cost_usd, Some(result.estimated_cost_usd));
+        let model = &result.model_breakdown.as_ref().unwrap().models[0];
+        assert_eq!(model.model, "gpt-5");
+        assert_eq!(model.total_tokens, 120);
     }
     #[test]
     fn duplicate_logs_are_not_double_counted() {

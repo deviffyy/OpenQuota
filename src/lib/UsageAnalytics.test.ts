@@ -29,6 +29,11 @@ const report: AnalyticsReport = {
   unreadableFiles: 0,
   malformedLines: 0,
   earliestEvent: '2026-10-01T12:00:00Z',
+  modelBreakdown: {
+    sourceNote: 'From your Codex logs (estimated)',
+    models: [{ model: 'gpt-5', totalTokens: 120, costUsd: 0.002 }],
+  },
+  unknownModels: [],
 };
 beforeEach(() => {
   vi.clearAllMocks();

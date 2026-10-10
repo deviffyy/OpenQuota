@@ -6,6 +6,7 @@ pub mod copilot;
 pub mod credential_store;
 pub mod cursor;
 mod daily_usage;
+pub(crate) use daily_usage::DailyUsageAccumulator;
 mod detection;
 pub mod devin;
 pub mod grok;

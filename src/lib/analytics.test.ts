@@ -116,6 +116,20 @@ describe('analytics ranges', () => {
       }),
     ).toMatchObject({ estimatedCostUsd: null, estimateComplete: false });
   });
+  it('preserves model detail for hoverable custom and reset ranges', () => {
+    const period = analyticsReportToUsagePeriod({
+      ...emptyAnalyticsReport(),
+      tokens: 120,
+      estimatedCostUsd: 1.25,
+      modelBreakdown: {
+        sourceNote: 'From local logs',
+        models: [{ model: 'gpt-5', totalTokens: 120, costUsd: 1.25 }],
+      },
+    });
+    expect(period.modelBreakdown?.models).toEqual([
+      { model: 'gpt-5', totalTokens: 120, costUsd: 1.25 },
+    ]);
+  });
   it('merges weighted task averages across providers', () => {
     const first = {
       ...emptyAnalyticsReport(),
@@ -130,12 +144,19 @@ describe('analytics ranges', () => {
       timedTasks: 3,
       averageCostUsd: 4,
       averageSeconds: 100,
+      modelBreakdown: {
+        sourceNote: 'Claude logs',
+        models: [{ model: 'claude-opus', totalTokens: 200, costUsd: 4 }],
+      },
     };
     expect(mergeAnalyticsReports([first, second])).toMatchObject({
       pricedTasks: 4,
       averageCostUsd: 3.5,
       timedTasks: 4,
       averageSeconds: 90,
+      modelBreakdown: expect.objectContaining({
+        models: [expect.objectContaining({ model: 'claude-opus', totalTokens: 200 })],
+      }),
     });
   });
   it('formats reset and update ages independently of the display zone', () => {

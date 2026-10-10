@@ -1,4 +1,10 @@
-import type { UsageHistory, UsagePeriod, UsageViewState } from './types';
+import type {
+  ModelUsageBreakdown,
+  ModelUsageEntry,
+  UsageHistory,
+  UsagePeriod,
+  UsageViewState,
+} from './types';
 
 export interface AnalyticsReport {
   tokens: number;
@@ -13,6 +19,8 @@ export interface AnalyticsReport {
   unreadableFiles: number;
   malformedLines: number;
   earliestEvent: string | null;
+  modelBreakdown: ModelUsageBreakdown | null;
+  unknownModels: string[];
 }
 
 export interface PremiumSeatComparison {
@@ -38,6 +46,8 @@ export function emptyAnalyticsReport(): AnalyticsReport {
     unreadableFiles: 0,
     malformedLines: 0,
     earliestEvent: null,
+    modelBreakdown: null,
+    unknownModels: [],
   };
 }
 
@@ -55,6 +65,7 @@ export function mergeAnalyticsReports(reports: AnalyticsReport[]): AnalyticsRepo
     merged.filesRead += report.filesRead;
     merged.unreadableFiles += report.unreadableFiles;
     merged.malformedLines += report.malformedLines;
+    merged.unknownModels.push(...report.unknownModels);
     if (report.averageCostUsd !== null) {
       pricedTaskCost += report.averageCostUsd * report.pricedTasks;
     }
@@ -70,7 +81,43 @@ export function mergeAnalyticsReports(reports: AnalyticsReport[]): AnalyticsRepo
   }
   merged.averageCostUsd = merged.pricedTasks > 0 ? pricedTaskCost / merged.pricedTasks : null;
   merged.averageSeconds = merged.timedTasks > 0 ? timedTaskSeconds / merged.timedTasks : null;
+  merged.unknownModels = [...new Set(merged.unknownModels)].sort();
+  merged.modelBreakdown = mergeModelBreakdowns(
+    reports.map((report) => report.modelBreakdown).filter((value) => value !== null),
+  );
   return merged;
+}
+
+function mergeModelBreakdowns(breakdowns: ModelUsageBreakdown[]): ModelUsageBreakdown | null {
+  if (!breakdowns.length) return null;
+  const models = new Map<string, ModelUsageEntry>();
+  for (const breakdown of breakdowns) {
+    for (const model of breakdown.models) {
+      const key = model.model.toLowerCase();
+      const current = models.get(key);
+      models.set(key, {
+        model: current?.model ?? model.model,
+        totalTokens: (current?.totalTokens ?? 0) + model.totalTokens,
+        costUsd:
+          current?.costUsd === null || model.costUsd === null
+            ? null
+            : (current?.costUsd ?? 0) + model.costUsd,
+        variants: null,
+      });
+    }
+  }
+  return {
+    models: [...models.values()].sort(
+      (left, right) =>
+        (right.costUsd ?? -1) - (left.costUsd ?? -1) ||
+        right.totalTokens - left.totalTokens ||
+        left.model.localeCompare(right.model),
+    ),
+    sourceNote:
+      breakdowns.length === 1
+        ? breakdowns[0].sourceNote
+        : 'From your selected local provider usage histories (estimated)',
+  };
 }
 
 export function analyticsReportToUsagePeriod(report: AnalyticsReport): UsagePeriod {
@@ -82,6 +129,8 @@ export function analyticsReportToUsagePeriod(report: AnalyticsReport): UsagePeri
       report.unpricedEvents > 0 && report.estimatedCostUsd <= 0 ? null : report.estimatedCostUsd,
     costEstimated: true,
     estimateComplete: !incomplete,
+    modelBreakdown: report.modelBreakdown,
+    unknownModels: report.unknownModels,
   };
 }
 
