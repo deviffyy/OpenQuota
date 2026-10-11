@@ -1,6 +1,11 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { getBankedResetMarker, getRangeAnalytics, onAnalyticsResetWarning } from './backend';
+  import {
+    getBankedResetMarker,
+    getRangeAnalytics,
+    onAnalyticsResetWarning,
+    setBankedResetMarker,
+  } from './backend';
   import {
     analyticsFromDailyHistory,
     analyticsReportToUsagePeriod,
@@ -182,7 +187,7 @@
   }
   function providerChanged() {
     if (provider === 'all' || !weeklyStart(viewState, Date.now(), provider)) mode = 'custom';
-    if (mode === 'banked' && provider !== 'codex') mode = 'custom';
+    if (mode === 'banked' && !['codex', 'claude'].includes(provider)) mode = 'custom';
     clearReport();
   }
   function selectTimeZone(event: Event) {
@@ -283,10 +288,11 @@
         marker = await getBankedResetMarker(provider);
         if (manualReset) {
           from = zonedDateTimeToIso(manualReset, timeZone);
-          source = `Reset date entered in ${timeZone}; not verified by the provider.`;
+          await setBankedResetMarker(provider, from);
+          source = `Reset date saved in ${timeZone}; not verified by the provider.`;
         } else if (marker) {
           from = marker;
-          source = 'Successful Codex reset observed by this local installation.';
+          source = `Saved ${provider === 'claude' ? 'Claude' : 'Codex'} reset from this local installation.`;
         } else throw new Error('No reset is recorded here. Enter the last banked reset date.');
         to = new Date().toISOString();
       } else {
@@ -368,7 +374,9 @@
           <select bind:value={mode} disabled={busy} onchange={clearReport}>
             <option value="custom">Custom range</option>
             {#if weeklyBoundary}<option value="weekly">Last weekly reset</option>{/if}
-            {#if provider === 'codex'}<option value="banked">Last banked Codex reset</option>{/if}
+            {#if provider === 'codex' || provider === 'claude'}<option value="banked"
+                >Last banked {provider === 'claude' ? 'Claude' : 'Codex'} reset</option
+              >{/if}
           </select>
         </label>
         <label

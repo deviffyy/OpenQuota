@@ -2,12 +2,18 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/sv
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import UsageAnalytics from './UsageAnalytics.svelte';
 import type { UsageViewState } from './types';
-import { dateTimeInZone, detectedTimeZone, type AnalyticsReport } from './analytics';
+import {
+  dateTimeInZone,
+  detectedTimeZone,
+  zonedDateTimeToIso,
+  type AnalyticsReport,
+} from './analytics';
 
-const mocks = vi.hoisted(() => ({ range: vi.fn(), marker: vi.fn() }));
+const mocks = vi.hoisted(() => ({ range: vi.fn(), marker: vi.fn(), saveMarker: vi.fn() }));
 vi.mock('./backend', () => ({
   getRangeAnalytics: mocks.range,
   getBankedResetMarker: mocks.marker,
+  setBankedResetMarker: mocks.saveMarker,
   onAnalyticsResetWarning: vi.fn().mockResolvedValue(() => {}),
 }));
 const empty = { providers: {}, lastFullRefreshAt: null } as UsageViewState;
@@ -40,6 +46,7 @@ beforeEach(() => {
   localStorage.clear();
   mocks.range.mockResolvedValue(report);
   mocks.marker.mockResolvedValue(null);
+  mocks.saveMarker.mockResolvedValue(undefined);
 });
 describe('UsageAnalytics', () => {
   it('sends explicit custom UTC bounds and provider to the real command wrapper', async () => {
@@ -97,6 +104,25 @@ describe('UsageAnalytics', () => {
     await waitFor(() =>
       expect(mocks.range).toHaveBeenCalledWith('2026-10-01T12:00:00Z', expect.any(String), 'codex'),
     );
+  });
+  it('persists a Claude reset completed outside OpenQuota and uses it for the range', async () => {
+    render(UsageAnalytics, {
+      viewState: empty,
+      providers: [{ id: 'claude', name: 'Claude' }],
+      open: true,
+    });
+    await fireEvent.change(screen.getByLabelText('Provider'), { target: { value: 'claude' } });
+    expect(screen.getByLabelText('Usage since')).toHaveTextContent('Last banked Claude reset');
+    await fireEvent.change(screen.getByLabelText('Usage since'), {
+      target: { value: 'banked' },
+    });
+    await fireEvent.input(screen.getByLabelText(/Earlier reset/), {
+      target: { value: '2026-10-10T12:00' },
+    });
+    await fireEvent.click(screen.getByRole('button', { name: 'Calculate' }));
+    const expected = zonedDateTimeToIso('2026-10-10T12:00', detectedTimeZone());
+    await waitFor(() => expect(mocks.saveMarker).toHaveBeenCalledWith('claude', expected));
+    expect(mocks.range).toHaveBeenCalledWith(expected, expect.any(String), 'claude');
   });
   it('does not offer a weekly range when the provider exposes no valid boundary', async () => {
     renderAnalytics();

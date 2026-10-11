@@ -487,6 +487,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             analytics::get_range_analytics,
             analytics::get_banked_reset_marker,
+            analytics::set_banked_reset_marker,
             commands::bootstrap::get_bootstrap_state,
             commands::provider::open_provider_link,
             commands::provider::get_provider_api_key_state,

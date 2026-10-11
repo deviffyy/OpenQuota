@@ -38,6 +38,10 @@ export function getBankedResetMarker(provider: string) {
   return invoke<string | null>('get_banked_reset_marker', { provider });
 }
 
+export function setBankedResetMarker(provider: string, resetAt: string) {
+  return invoke<void>('set_banked_reset_marker', { provider, resetAt });
+}
+
 export function onAnalyticsResetWarning(handler: PayloadHandler<string>) {
   return onEvent('analytics-reset-warning', handler);
 }

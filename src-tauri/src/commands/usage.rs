@@ -36,7 +36,7 @@ pub async fn claim_codex_reset_credit(
 
     if outcome == ResetClaimOutcome::Success {
         // Do not turn a successful provider reset into a retryable claim on disk failure.
-        if crate::analytics::record_banked_reset(&app).is_err() {
+        if crate::analytics::record_banked_reset(&app, "codex", chrono::Utc::now()).is_err() {
             let _ = app.emit(
                 "analytics-reset-warning",
                 "Reset succeeded, but the local analytics marker was not saved.",

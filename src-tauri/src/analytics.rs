@@ -409,25 +409,51 @@ pub fn get_banked_reset_marker(
     app: AppHandle,
     provider: String,
 ) -> Result<Option<DateTime<Utc>>, String> {
-    if provider != "codex" {
-        return Ok(None);
-    }
-    let path = app
+    validate_reset_provider(&provider)?;
+    let dir = app
         .path()
         .app_data_dir()
-        .map_err(|_| "Local storage is unavailable.")?
-        .join("analytics-reset.json");
-    match fs::read(path) {
+        .map_err(|_| "Local storage is unavailable.")?;
+    let path = reset_marker_path(&dir, &provider);
+    match fs::read(&path) {
         Ok(bytes) => serde_json::from_slice(&bytes)
             .map(Some)
             .map_err(|_| "The saved reset marker is unreadable.".into()),
+        // Codex markers written before provider-specific reset tracking remain valid.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound && provider == "codex" => {
+            match fs::read(dir.join("analytics-reset.json")) {
+                Ok(bytes) => serde_json::from_slice(&bytes)
+                    .map(Some)
+                    .map_err(|_| "The saved reset marker is unreadable.".into()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+                Err(_) => Err("The reset marker could not be read.".into()),
+            }
+        }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(_) => Err("The reset marker could not be read.".into()),
     }
 }
 
-pub fn record_banked_reset(app: &AppHandle) -> Result<(), String> {
+#[tauri::command]
+pub fn set_banked_reset_marker(
+    app: AppHandle,
+    provider: String,
+    reset_at: DateTime<Utc>,
+) -> Result<(), String> {
+    validate_reset_provider(&provider)?;
+    if reset_at > Utc::now() + chrono::Duration::minutes(1) {
+        return Err("The reset time cannot be in the future.".into());
+    }
+    record_banked_reset(&app, &provider, reset_at)
+}
+
+pub fn record_banked_reset(
+    app: &AppHandle,
+    provider: &str,
+    reset_at: DateTime<Utc>,
+) -> Result<(), String> {
     use std::io::Write;
+    validate_reset_provider(provider)?;
     let dir = app
         .path()
         .app_data_dir()
@@ -435,14 +461,26 @@ pub fn record_banked_reset(app: &AppHandle) -> Result<(), String> {
     fs::create_dir_all(&dir).map_err(|_| "Local storage is unavailable.")?;
     let mut file = tempfile::NamedTempFile::new_in(&dir)
         .map_err(|_| "The reset marker could not be written.")?;
-    file.write_all(&serde_json::to_vec(&Utc::now()).map_err(|_| "Invalid timestamp.")?)
+    file.write_all(&serde_json::to_vec(&reset_at).map_err(|_| "Invalid timestamp.")?)
         .map_err(|_| "The reset marker could not be written.")?;
     file.as_file()
         .sync_all()
         .map_err(|_| "The reset marker could not be written.")?;
-    file.persist(dir.join("analytics-reset.json"))
+    file.persist(reset_marker_path(&dir, provider))
         .map_err(|_| "The reset marker could not be written.")?;
     Ok(())
+}
+
+fn validate_reset_provider(provider: &str) -> Result<(), String> {
+    if matches!(provider, "codex" | "claude") {
+        Ok(())
+    } else {
+        Err("Reset tracking is unavailable for this provider.".into())
+    }
+}
+
+fn reset_marker_path(dir: &std::path::Path, provider: &str) -> std::path::PathBuf {
+    dir.join(format!("analytics-reset-{provider}.json"))
 }
 
 #[cfg(test)]
@@ -463,6 +501,16 @@ mod tests {
     }
     fn date(s: &str) -> DateTime<Utc> {
         s.parse().unwrap()
+    }
+    #[test]
+    fn reset_markers_are_scoped_to_supported_providers() {
+        assert!(validate_reset_provider("codex").is_ok());
+        assert!(validate_reset_provider("claude").is_ok());
+        assert!(validate_reset_provider("../claude").is_err());
+        assert_eq!(
+            reset_marker_path(std::path::Path::new("data"), "claude"),
+            std::path::Path::new("data").join("analytics-reset-claude.json")
+        );
     }
     #[test]
     fn numeric_codex_clock_and_fork_history_are_handled() {
