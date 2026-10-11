@@ -8,6 +8,20 @@ describe('UsageMetric model detail', () => {
     vi.useRealTimers();
   });
 
+  it('distinguishes a pending local range scan from a completed empty result', () => {
+    const { rerender } = render(UsageMetric, {
+      label: 'Since last reset',
+      period: null,
+      loading: true,
+    });
+
+    expect(screen.getByRole('button', { name: 'Loading…' })).toHaveAttribute('aria-busy', 'true');
+    expect(screen.queryByText('No data')).not.toBeInTheDocument();
+
+    rerender({ label: 'Since last reset', period: null, loading: false });
+    expect(screen.getByRole('button', { name: 'No data' })).toHaveAttribute('aria-busy', 'false');
+  });
+
   it('reveals the ranked real model names after the reference hover dwell', async () => {
     vi.useFakeTimers();
     render(UsageMetric, {

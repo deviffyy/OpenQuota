@@ -5,6 +5,19 @@ export interface SpendProvider {
   usage: UsageHistory;
 }
 
+export interface SpendPeriodProvider {
+  id: string;
+  period: UsagePeriod;
+}
+
+export interface CustomSpendSelection {
+  from: string;
+  to: string;
+  timeZone: string;
+  label: string;
+  providers: SpendPeriodProvider[];
+}
+
 export interface SpendSlice {
   id: string;
   value: number;
@@ -41,12 +54,23 @@ export function projectSpend(
   periodSelection: AppSettings['totalSpendPeriod'],
   metric: AppSettings['totalSpendMetric'],
 ): SpendProjection {
+  return projectSpendPeriods(
+    providers.flatMap((provider) => {
+      const period = selectedPeriod(provider.usage, periodSelection);
+      return period ? [{ id: provider.id, period }] : [];
+    }),
+    metric,
+  );
+}
+
+export function projectSpendPeriods(
+  providers: SpendPeriodProvider[],
+  metric: AppSettings['totalSpendMetric'],
+): SpendProjection {
   const slices = providers
     .flatMap((provider) => {
-      const period = selectedPeriod(provider.usage, periodSelection);
-      if (!period) return [];
-      const value = valueFor(period, metric);
-      return value === null ? [] : [{ id: provider.id, value, period }];
+      const value = valueFor(provider.period, metric);
+      return value === null ? [] : [{ id: provider.id, value, period: provider.period }];
     })
     .sort((left, right) => right.value - left.value || left.id.localeCompare(right.id));
 

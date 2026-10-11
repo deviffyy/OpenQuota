@@ -207,6 +207,29 @@ impl DailyUsageAccumulator {
         }
     }
 
+    /// Builds only the model detail from every event previously admitted by the caller. Range
+    /// analytics keeps its independently measured total, including events without known pricing.
+    pub fn build_range_details(
+        self,
+        source_note: &str,
+    ) -> (Option<ModelUsageBreakdown>, Vec<String>) {
+        let mut total = DayAccumulator::default();
+        for day in self.days.values() {
+            for (key, model) in &day.models {
+                total.models.entry(key.clone()).or_default().merge(model);
+            }
+        }
+        let mut unknown_models = self
+            .unknown_models_by_day
+            .values()
+            .flat_map(|models| models.iter().cloned())
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        unknown_models.sort();
+        (model_breakdown(&total, source_note), unknown_models)
+    }
+
     fn period_for_days(&self, dates: &[NaiveDate], source_note: &str) -> Option<UsagePeriod> {
         let mut total = DayAccumulator::default();
         let mut unknown_models = HashSet::new();

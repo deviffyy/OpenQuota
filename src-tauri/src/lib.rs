@@ -1,3 +1,4 @@
+mod analytics;
 mod child_process;
 mod commands;
 mod desktop_integration;
@@ -361,11 +362,13 @@ pub fn run() {
             let app_data_dir = app.path().app_data_dir()?;
             let database_path = app_data_dir.join("openquota.db");
             let storage = Arc::new(Storage::open(&database_path)?);
+            app.manage(storage.clone());
             provider_environment::initialize(storage.load_provider_environment()?);
             provider_environment::refresh_for_next_launch(storage.clone());
             app.manage(Arc::new(PanelResizeSession::new(storage.clone())));
             app_debug!("cache", "application database opened");
             let pricing = Arc::new(PricingStore::new(app_data_dir.join("pricing"))?);
+            app.manage(pricing.clone());
             let mut providers = claude::runtimes(storage.clone(), pricing.clone())?;
             providers.extend(vec![
                 Arc::new(CodexProvider::new(storage.clone(), pricing.clone())?)
@@ -482,6 +485,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            analytics::get_range_analytics,
+            analytics::get_banked_reset_marker,
+            analytics::set_banked_reset_marker,
             commands::bootstrap::get_bootstrap_state,
             commands::provider::open_provider_link,
             commands::provider::get_provider_api_key_state,

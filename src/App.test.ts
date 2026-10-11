@@ -40,6 +40,9 @@ vi.mock('@tauri-apps/api/window', () => ({
 type InvokeArgs = {
   settings?: SettingsViewState['settings'];
   providerId?: string;
+  provider?: string;
+  start?: string;
+  end?: string;
   linkIndex?: number;
   height?: number;
 };
@@ -100,6 +103,33 @@ describe('OpenQuota dashboard', () => {
       if (command === 'lock_panel_resize_axis') return Promise.resolve();
       if (command === 'get_log_path') return Promise.resolve('C:\\OpenQuota\\logs\\OpenQuota.log');
       if (command === 'open_log_folder') return Promise.resolve();
+      if (command === 'get_banked_reset_marker') return Promise.resolve(null);
+      if (command === 'get_range_analytics')
+        return Promise.resolve({
+          tokens: args?.provider === 'claude' ? 500 : 700,
+          estimatedCostUsd: args?.provider === 'claude' ? 5 : 7,
+          unpricedEvents: 0,
+          completedTasks: 1,
+          pricedTasks: 1,
+          averageCostUsd: args?.provider === 'claude' ? 5 : 7,
+          timedTasks: 1,
+          averageSeconds: 60,
+          filesRead: 1,
+          unreadableFiles: 0,
+          malformedLines: 0,
+          earliestEvent: args?.start ?? null,
+          modelBreakdown: {
+            sourceNote: 'From local logs',
+            models: [
+              {
+                model: args?.provider === 'claude' ? 'claude-opus' : 'gpt-5',
+                totalTokens: args?.provider === 'claude' ? 500 : 700,
+                costUsd: args?.provider === 'claude' ? 5 : 7,
+              },
+            ],
+          },
+          unknownModels: [],
+        });
       if (command === 'dismiss_main_window') return Promise.resolve();
       if (command === 'check_for_updates')
         return Promise.resolve({
@@ -503,6 +533,125 @@ describe('OpenQuota dashboard', () => {
         }),
       ),
     );
+  });
+
+  it('opens the custom range from the top period switcher with all providers selected', async () => {
+    render(App);
+    await screen.findByText('Plus');
+    await fireEvent.click(screen.getByRole('button', { name: 'Custom' }));
+    const dialog = screen.getByRole('dialog', { name: 'Custom range' });
+    expect(within(dialog).getByLabelText('Provider')).toHaveValue('all');
+    expect(within(dialog).getByText('All providers are selected by default.')).toBeVisible();
+    expect(within(dialog).getByText('Local times')).toBeVisible();
+    await fireEvent.click(within(dialog).getByRole('button', { name: 'Calculate' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Custom' })).toHaveClass('active');
+    expect(screen.getByRole('button', { name: 'Today' })).not.toHaveClass('active');
+    const spend = screen.getByRole('region', { name: 'Total Spend' });
+    expect(spend.querySelector('.spend-legend')).toHaveTextContent('Codex');
+
+    const codex = screen.getByRole('group', { name: 'Codex provider' });
+    await fireEvent.click(within(codex).getByRole('button', { name: 'Show more' }));
+    expect(within(codex).getByText('Custom')).toBeVisible();
+  });
+
+  it('loads since-last-reset usage from the live provider boundary before reporting data', async () => {
+    const now = Date.now();
+    const nextReset = new Date(now + 4 * 24 * 60 * 60 * 1000).toISOString();
+    const rangeState: UsageViewState = {
+      providers: {
+        codex: {
+          ...codexState,
+          snapshot: {
+            ...codexState.snapshot!,
+            quotas: codexState.snapshot!.quotas.map((quota) =>
+              quota.id === 'weekly' ? { ...quota, resetsAt: nextReset } : quota,
+            ),
+          },
+        },
+      },
+    };
+    const rangeSettings: SettingsViewState = {
+      ...settingsState,
+      settings: {
+        ...settingsState.settings,
+        providers: settingsState.settings.providers.map((provider) => ({
+          ...provider,
+          expanded: true,
+        })),
+      },
+    };
+    let resolveRange!: (value: {
+      tokens: number;
+      estimatedCostUsd: number;
+      unpricedEvents: number;
+      completedTasks: number;
+      pricedTasks: number;
+      averageCostUsd: number;
+      timedTasks: number;
+      averageSeconds: number;
+      filesRead: number;
+      unreadableFiles: number;
+      malformedLines: number;
+      earliestEvent: string;
+      modelBreakdown: {
+        sourceNote: string;
+        models: Array<{ model: string; totalTokens: number; costUsd: number }>;
+      };
+      unknownModels: string[];
+    }) => void;
+    const pendingRange = new Promise<Parameters<typeof resolveRange>[0]>((resolve) => {
+      resolveRange = resolve;
+    });
+    const defaultInvoke = mocks.invoke.getMockImplementation()!;
+    mockInvoke((command: string, args?: InvokeArgs) => {
+      if (command === 'get_usage_state') return Promise.resolve(rangeState);
+      if (command === 'get_app_settings') return Promise.resolve(rangeSettings);
+      if (command === 'get_range_analytics') return pendingRange;
+      return defaultInvoke(command, args);
+    });
+
+    render(App);
+    const codex = await screen.findByRole('group', { name: 'Codex provider' });
+    expect(within(codex).getByText('Since last reset')).toBeVisible();
+    expect(within(codex).getByRole('button', { name: 'Loading…' })).toHaveAttribute(
+      'aria-busy',
+      'true',
+    );
+    expect(within(codex).queryByRole('button', { name: 'No data' })).not.toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith('get_range_analytics', {
+        start: new Date(Date.parse(nextReset) - 604_800_000).toISOString(),
+        end: expect.any(String),
+        provider: 'codex',
+      }),
+    );
+    resolveRange({
+      tokens: 4_200_000,
+      estimatedCostUsd: 12.5,
+      unpricedEvents: 0,
+      completedTasks: 2,
+      pricedTasks: 2,
+      averageCostUsd: 6.25,
+      timedTasks: 2,
+      averageSeconds: 90,
+      filesRead: 3,
+      unreadableFiles: 0,
+      malformedLines: 0,
+      earliestEvent: new Date(Date.parse(nextReset) - 604_800_000).toISOString(),
+      modelBreakdown: {
+        sourceNote: 'From your Codex logs (estimated)',
+        models: [{ model: 'gpt-5', totalTokens: 4_200_000, costUsd: 12.5 }],
+      },
+      unknownModels: [],
+    });
+
+    const resetUsage = await within(codex).findByRole('button', {
+      name: '$12.50 · 4.2M tokens',
+    });
+    expect(resetUsage).toHaveAttribute('aria-busy', 'false');
+    expect(resetUsage).toHaveClass('usage-reading-interactive');
   });
 
   it('explains unavailable cost and reveals measured tokens for the same period', async () => {

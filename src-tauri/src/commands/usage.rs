@@ -34,6 +34,15 @@ pub async fn claim_codex_reset_credit(
             .await
             .map_err(|_| "The reset claim could not be completed.".to_owned())?;
 
+    if outcome == ResetClaimOutcome::Success {
+        // Do not turn a successful provider reset into a retryable claim on disk failure.
+        if crate::analytics::record_banked_reset(&app, "codex", chrono::Utc::now()).is_err() {
+            let _ = app.emit(
+                "analytics-reset-warning",
+                "Reset succeeded, but the local analytics marker was not saved.",
+            );
+        }
+    }
     if outcome != ResetClaimOutcome::Failed {
         let observed_account_revision = AtomicU64::new(settings.account_revision());
         service.refresh("codex", true).await;
